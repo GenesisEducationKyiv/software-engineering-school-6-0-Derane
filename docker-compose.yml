@@ -15,6 +15,9 @@ services:
   scanner:
     build: .
     command: php bin/scanner.php
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 10s
     env_file:
       - .env
     depends_on:
@@ -27,6 +30,9 @@ services:
   grpc:
     build: .
     command: rr serve -c .rr.grpc.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 10s
     ports:
       - "${GRPC_PORT:-9001}:9001"
     env_file:
