@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: GitHub Release Notifier API
+  description: API for subscribing to email notifications about new GitHub repository releases
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+
+security: []
+
+paths:
+  /api/subscriptions:
+    post:
+      operationId: createSubscription
+      summary: Subscribe to release notifications
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - repository
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                repository:
+                  type: string
+                  example: golang/go
+                  description: "GitHub repository in owner/repo format"
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Invalid input (bad email or repository format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Repository not found on GitHub
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: GitHub API rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      operationId: listSubscriptions
+      summary: List subscriptions
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: email
+          schema:
+            type: string
+          description: Filter subscriptions by email
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+          description: Max number of subscriptions to return
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of subscriptions to skip
+      responses:
+        '200':
+          description: List of subscriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscription'
+
+  /api/subscriptions/{id}:
+    get:
+      operationId: getSubscription
+      summary: Get subscription by ID
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      operationId: deleteSubscription
+      summary: Unsubscribe
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Subscription deleted
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Prometheus-formatted metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  schemas:
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        email:
+          type: string
+          example: user@example.com
+        repository:
+          type: string
+          example: golang/go
+        created_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

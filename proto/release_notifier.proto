@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package release_notifier.v1;
+
+option php_namespace = "Grpc\\ReleaseNotifier\\V1";
+
+service ReleaseNotifierService {
+  rpc Health(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc CreateSubscription(CreateSubscriptionRequest) returns (SubscriptionReply);
+  rpc ListSubscriptions(ListSubscriptionsRequest) returns (ListSubscriptionsReply);
+  rpc GetSubscription(GetSubscriptionRequest) returns (SubscriptionReply);
+  rpc DeleteSubscription(DeleteSubscriptionRequest) returns (DeleteSubscriptionReply);
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+}
+
+message CreateSubscriptionRequest {
+  string email = 1;
+  string repository = 2;
+}
+
+message ListSubscriptionsRequest {
+  string email = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetSubscriptionRequest {
+  int32 id = 1;
+}
+
+message DeleteSubscriptionRequest {
+  int32 id = 1;
+}
+
+message SubscriptionReply {
+  int32 id = 1;
+  string email = 2;
+  string repository = 3;
+  string created_at = 4;
+}
+
+message ListSubscriptionsReply {
+  repeated SubscriptionReply subscriptions = 1;
+}
+
+message DeleteSubscriptionReply {
+  bool deleted = 1;
+}

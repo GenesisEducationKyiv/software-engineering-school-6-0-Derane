@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Release Notifier</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: #f0f6fc;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #c9d1d9;
+            font-size: 14px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 3px rgba(56,139,253,0.3);
+        }
+        input::placeholder { color: #484f58; }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #238636;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        button:hover { background: #2ea043; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .message {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            display: none;
+        }
+        .message.success { background: #0d2818; border: 1px solid #238636; color: #3fb950; display: block; }
+        .message.error { background: #2d1117; border: 1px solid #da3633; color: #f85149; display: block; }
+        .subscriptions {
+            margin-top: 24px;
+            border-top: 1px solid #30363d;
+            padding-top: 16px;
+        }
+        .subscriptions h3 { font-size: 16px; margin-bottom: 12px; }
+        .sub-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .sub-item .repo { color: #58a6ff; }
+        .btn-delete {
+            background: #da3633;
+            color: #fff;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-delete:hover { background: #f85149; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>GitHub Release Notifier</h1>
+        <p class="subtitle">Subscribe to get email notifications about new releases</p>
+
+        <form id="subscribeForm">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="you@example.com" required>
+            </div>
+            <div class="form-group">
+                <label for="repository">Repository</label>
+                <input type="text" id="repository" placeholder="owner/repo (e.g., golang/go)" required>
+            </div>
+            <div class="form-group">
+                <label for="apiKey">API Key (optional)</label>
+                <input type="password" id="apiKey" placeholder="Only if API auth is enabled">
+            </div>
+            <button type="submit" id="submitBtn">Subscribe</button>
+        </form>
+
+        <div id="message" class="message"></div>
+
+        <div class="subscriptions" id="subscriptionsSection" style="display:none;">
+            <h3>Your Subscriptions</h3>
+            <div id="subscriptionsList"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+
+        function getHeaders() {
+            const h = { 'Content-Type': 'application/json' };
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (apiKey) h['X-API-Key'] = apiKey;
+            return h;
+        }
+
+        function showMessage(text, type) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = 'message ' + type;
+        }
+
+        async function loadSubscriptions(email) {
+            if (!email) return;
+            const section = document.getElementById('subscriptionsSection');
+            const list = document.getElementById('subscriptionsList');
+            try {
+                const res = await fetch(`${API_BASE}/subscriptions?email=${encodeURIComponent(email)}`, {
+                    headers: getHeaders()
+                });
+                if (!res.ok) {
+                    section.style.display = 'none';
+                    showMessage('Failed to load subscriptions', 'error');
+                    return;
+                }
+
+                const data = await res.json();
+
+                if (Array.isArray(data) && data.length > 0) {
+                    section.style.display = 'block';
+                    list.innerHTML = data.map(s => `
+                        <div class="sub-item">
+                            <span class="repo">${s.repository}</span>
+                            <button class="btn-delete" onclick="unsubscribe(${s.id})">Unsubscribe</button>
+                        </div>
+                    `).join('');
+                } else {
+                    section.style.display = 'none';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function unsubscribe(id) {
+            try {
+                const res = await fetch(`${API_BASE}/subscriptions/${id}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+                if (!res.ok) {
+                    let error = 'Failed to unsubscribe';
+                    try {
+                        const data = await res.json();
+                        error = data.error || error;
+                    } catch (e) {
+                    }
+                    showMessage(error, 'error');
+                    return;
+                }
+
+                showMessage('Unsubscribed successfully', 'success');
+                loadSubscriptions(document.getElementById('email').value);
+            } catch (e) {
+                showMessage('Failed to unsubscribe', 'error');
+            }
+        }
+
+        document.getElementById('subscribeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+
+            const email = document.getElementById('email').value;
+            const repository = document.getElementById('repository').value;
+
+            try {
+                const res = await fetch(`${API_BASE}/subscriptions`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ email, repository })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    showMessage(`Subscribed to ${repository}!`, 'success');
+                    loadSubscriptions(email);
+                } else {
+                    showMessage(data.error || 'Something went wrong', 'error');
+                }
+            } catch (err) {
+                showMessage('Network error. Please try again.', 'error');
+            }
+
+            btn.disabled = false;
+        });
+
+        document.getElementById('email').addEventListener('blur', (e) => {
+            loadSubscriptions(e.target.value);
+        });
+    </script>
+</body>
+</html>

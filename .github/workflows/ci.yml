@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction
+
+      - name: Run PHP_CodeSniffer
+        run: vendor/bin/phpcs --standard=PSR12 src/
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_pgsql, redis
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction
+
+      - name: Run unit tests
+        run: vendor/bin/phpunit --configuration phpunit.xml --testdox
+
+  acceptance:
+    runs-on: ubuntu-latest
+    needs: [ lint, test ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_pgsql, redis
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction
+
+      - name: Create .env file
+        run: cp .env.example .env
+
+      - name: Start services
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
+
+      - name: Run Behat acceptance tests
+        run: vendor/bin/behat --colors --format=progress
+
+      - name: Show app logs on failure
+        if: failure()
+        run: docker compose logs app scanner
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
