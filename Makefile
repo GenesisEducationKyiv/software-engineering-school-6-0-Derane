@@ -1,4 +1,4 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint stan check proto behat-up behat-down behat ci
+.PHONY: help ensure-env install build up down restart logs migrate test lint stan check proto behat-up behat-run behat-down behat ci
 
 COMPOSE := docker compose
 TEST_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml
@@ -51,11 +51,14 @@ proto: install ## Generate protobuf and gRPC PHP classes inside Docker
 behat-up: ensure-env ## Start acceptance environment in Docker
 	$(TEST_COMPOSE) up -d --build --wait
 
+behat-run: ## Run Behat tests inside Docker (requires running services)
+	$(TEST_COMPOSE) exec -T app composer acceptance
+
 behat-down: ## Stop acceptance environment and remove test volumes
 	$(TEST_COMPOSE) down -v
 
 behat: behat-up ## Run Behat acceptance tests inside Docker
-	$(TEST_COMPOSE) exec -T app composer acceptance
+	$(MAKE) behat-run
 	$(MAKE) behat-down
 
 ci: install ## Run the full Dockerized CI pipeline
