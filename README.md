@@ -2,6 +2,7 @@
 
 API-сервіс для підписки на email-сповіщення про нові релізи GitHub-репозиторіїв.
 
+
 Проєкт має:
 
 - HTTP API на Slim 4
@@ -26,6 +27,22 @@ API-сервіс для підписки на email-сповіщення про 
 - RoadRunner binary `rr`
 
 Усе піднімається та перевіряється через `make`.
+
+![img.png](img.png)
+
+## AWS Deploy
+
+Сервіс задеплоєний на AWS
+
+Стек на одному інстансі через Docker Compose: app + scanner + PostgreSQL + Redis + Mailpit.
+
+| Сервіс | URL |
+|--------|-----|
+| HTML UI / форма підписок | http://44.212.26.4:8080 |
+| HTTP API | http://44.212.26.4:8080/api/subscriptions |
+| Health | http://44.212.26.4:8080/health |
+| Metrics | http://44.212.26.4:8080/metrics |
+| Mailpit (перегляд листів) | http://44.212.26.4:8025 |
 
 ## Швидкий Старт
 
@@ -292,4 +309,4 @@ Top-level `security: []` у схемі залишено навмисно:
 - [x] Prometheus metrics
 - [x] gRPC transport
 - [x] Acceptance suite з OpenAPI-перевіркою
-- [ ] Production deploy
+- [x] Production deploy на AWS
