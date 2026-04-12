@@ -44,7 +44,3 @@ jobs:
       - name: Show app logs on failure
         if: failure()
         run: docker compose logs app scanner
-
-      - name: Stop services
-        if: always()
-        run: make behat-down
