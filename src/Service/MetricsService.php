@@ -6,12 +6,14 @@ namespace App\Service;
 
 use App\Repository\SubscriptionRepositoryInterface;
 
-class MetricsService implements MetricsServiceInterface
+/** @psalm-api */
+final class MetricsService implements MetricsServiceInterface
 {
     public function __construct(private SubscriptionRepositoryInterface $repository)
     {
     }
 
+    #[\Override]
     public function collect(): string
     {
         $metrics = $this->repository->getMetrics();
@@ -41,6 +43,10 @@ class MetricsService implements MetricsServiceInterface
         ]);
     }
 
+    /**
+     * @param array<string, array{help: string, type: string, value: int|float,
+     *                            labels?: array<string, string>}> $metrics
+     */
     private function format(array $metrics): string
     {
         $output = '';

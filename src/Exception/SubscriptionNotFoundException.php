@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
-class SubscriptionNotFoundException extends \DomainException
+final class SubscriptionNotFoundException extends \DomainException
 {
     public function __construct(int $id)
     {

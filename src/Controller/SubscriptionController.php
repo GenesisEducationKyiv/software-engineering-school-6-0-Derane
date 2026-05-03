@@ -10,7 +10,8 @@ use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
-class SubscriptionController
+/** @psalm-api */
+final class SubscriptionController
 {
     public function __construct(private SubscriptionServiceInterface $service)
     {
@@ -34,7 +35,7 @@ class SubscriptionController
         return $this->json($response, $subscription, StatusCodeInterface::STATUS_CREATED);
     }
 
-    public function get(Request $request, Response $response, array $args): Response
+    public function get(Request $_request, Response $response, array $args): Response
     {
         $subscription = $this->service->getSubscription((int) $args['id']);
         return $this->json($response, $subscription);
@@ -50,7 +51,7 @@ class SubscriptionController
         return $this->json($response, $subscriptions);
     }
 
-    public function delete(Request $request, Response $response, array $args): Response
+    public function delete(Request $_request, Response $response, array $args): Response
     {
         $this->service->unsubscribe((int) $args['id']);
         return $response->withStatus(StatusCodeInterface::STATUS_NO_CONTENT);
@@ -58,7 +59,7 @@ class SubscriptionController
 
     private function json(Response $response, mixed $data, int $status = StatusCodeInterface::STATUS_OK): Response
     {
-        $response->getBody()->write(json_encode($data));
+        $response->getBody()->write(json_encode($data, JSON_THROW_ON_ERROR));
         return $response
             ->withStatus($status)
             ->withHeader('Content-Type', 'application/json');

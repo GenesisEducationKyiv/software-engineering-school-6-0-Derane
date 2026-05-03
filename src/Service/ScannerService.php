@@ -8,7 +8,8 @@ use App\Exception\RateLimitException;
 use App\Repository\SubscriptionRepositoryInterface;
 use Psr\Log\LoggerInterface;
 
-class ScannerService
+/** @psalm-api */
+final class ScannerService
 {
     public function __construct(
         private SubscriptionRepositoryInterface $repository,
@@ -45,17 +46,20 @@ class ScannerService
                 return true;
             }
 
-            $repoInfo = $this->repository->getRepositoryInfo($repoName);
-            $lastSeenTag = $repoInfo['last_seen_tag'] ?? null;
+            $tagName = $release['tag_name'];
 
-            if ($lastSeenTag === $release['tag_name']) {
+            $repoInfo = $this->repository->getRepositoryInfo($repoName);
+            /** @var string|null $lastSeenTag */
+            $lastSeenTag = $repoInfo !== null ? ($repoInfo['last_seen_tag'] ?? null) : null;
+
+            if ($lastSeenTag === $tagName) {
                 $this->repository->updateLastChecked($repoName);
                 return true;
             }
 
             $this->logger->info("New release found", [
                 'repository' => $repoName,
-                'tag' => $release['tag_name'],
+                'tag' => $tagName,
                 'previous_tag' => $lastSeenTag,
             ]);
 
@@ -63,14 +67,14 @@ class ScannerService
             $allDelivered = true;
 
             foreach ($subscribers as $subscription) {
-                $subscriptionId = (int) $subscription['id'];
-                $email = (string) $subscription['email'];
+                $subscriptionId = $subscription['id'];
+                $email = $subscription['email'];
 
                 if (
                     $this->repository->hasSuccessfulNotificationForRelease(
                         $subscriptionId,
                         $repoName,
-                        $release['tag_name']
+                        $tagName
                     )
                 ) {
                     continue;
@@ -79,7 +83,7 @@ class ScannerService
                 $sent = $this->notifierService->sendReleaseNotification(
                     $email,
                     $repoName,
-                    $release['tag_name'],
+                    $tagName,
                     $release['name'],
                     $release['html_url'],
                     $release['body']
@@ -87,7 +91,7 @@ class ScannerService
                 $this->repository->recordNotificationResult(
                     $subscriptionId,
                     $repoName,
-                    $release['tag_name'],
+                    $tagName,
                     $sent,
                     $sent ? null : 'Failed to send notification'
                 );
@@ -97,12 +101,12 @@ class ScannerService
             }
 
             if ($allDelivered) {
-                $this->repository->updateLastSeenTag($repoName, $release['tag_name']);
+                $this->repository->updateLastSeenTag($repoName, $tagName);
             } else {
                 $this->repository->updateLastChecked($repoName);
                 $this->logger->warning("Some notifications failed; release marker not advanced", [
                     'repository' => $repoName,
-                    'tag' => $release['tag_name'],
+                    'tag' => $tagName,
                 ]);
             }
         } catch (RateLimitException $e) {

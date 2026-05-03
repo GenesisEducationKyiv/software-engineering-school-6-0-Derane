@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
-class RepositoryNotFoundException extends \DomainException
+final class RepositoryNotFoundException extends \DomainException
 {
     public function __construct(string $repository)
     {

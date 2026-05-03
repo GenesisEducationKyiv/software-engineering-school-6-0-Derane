@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Repository\SubscriptionRepository;
+use App\Repository\SubscriptionRepositoryInterface;
 use App\Service\MetricsService;
 use PHPUnit\Framework\TestCase;
 
@@ -12,7 +12,7 @@ class MetricsServiceTest extends TestCase
 {
     public function testCollectReturnsPrometheusFormat(): void
     {
-        $repository = $this->createMock(SubscriptionRepository::class);
+        $repository = $this->createMock(SubscriptionRepositoryInterface::class);
         $repository->method('getMetrics')->willReturn([
             'subscriptions' => 10,
             'repositories' => 5,

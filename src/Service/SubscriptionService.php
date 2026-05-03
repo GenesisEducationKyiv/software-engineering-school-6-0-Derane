@@ -10,7 +10,8 @@ use App\Exception\ValidationException;
 use App\Repository\SubscriptionRepositoryInterface;
 use Psr\Log\LoggerInterface;
 
-class SubscriptionService implements SubscriptionServiceInterface
+/** @psalm-api */
+final class SubscriptionService implements SubscriptionServiceInterface
 {
     public function __construct(
         private SubscriptionRepositoryInterface $repository,
@@ -19,6 +20,7 @@ class SubscriptionService implements SubscriptionServiceInterface
     ) {
     }
 
+    #[\Override]
     public function subscribe(string $email, string $repoName): array
     {
         $this->validateEmail($email);
@@ -34,6 +36,7 @@ class SubscriptionService implements SubscriptionServiceInterface
         return $subscription;
     }
 
+    #[\Override]
     public function unsubscribe(int $id): void
     {
         $this->findOrFail($id);
@@ -41,11 +44,15 @@ class SubscriptionService implements SubscriptionServiceInterface
         $this->logger->info("Subscription deleted", ['id' => $id]);
     }
 
+    /** @return array{id: int, email: string, repository: string, created_at: string} */
+    #[\Override]
     public function getSubscription(int $id): array
     {
         return $this->findOrFail($id);
     }
 
+    /** @return list<array{id: int, email: string, repository: string, created_at: string}> */
+    #[\Override]
     public function listSubscriptions(?string $email = null, int $limit = 100, int $offset = 0): array
     {
         if ($email !== null) {
@@ -65,6 +72,7 @@ class SubscriptionService implements SubscriptionServiceInterface
         return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
     }
 
+    /** @return array{id: int, email: string, repository: string, created_at: string} */
     private function findOrFail(int $id): array
     {
         $subscription = $this->repository->findById($id);
