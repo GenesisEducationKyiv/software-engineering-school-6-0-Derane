@@ -16,7 +16,8 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
-class ErrorHandlerMiddleware implements MiddlewareInterface
+/** @psalm-api */
+final class ErrorHandlerMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private LoggerInterface $logger,
@@ -24,6 +25,7 @@ class ErrorHandlerMiddleware implements MiddlewareInterface
     ) {
     }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         try {
@@ -49,7 +51,7 @@ class ErrorHandlerMiddleware implements MiddlewareInterface
     private function jsonError(string $message, int $status): ResponseInterface
     {
         $response = $this->responseFactory->createResponse();
-        $response->getBody()->write(json_encode(['error' => $message]));
+        $response->getBody()->write(json_encode(['error' => $message], JSON_THROW_ON_ERROR));
         return $response
             ->withStatus($status)
             ->withHeader('Content-Type', 'application/json');

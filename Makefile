@@ -1,4 +1,4 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint stan check proto behat-up behat-run behat-down behat ci
+.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto behat-up behat-run behat-down behat ci
 
 COMPOSE := docker compose
 TEST_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml
@@ -37,12 +37,12 @@ test: install ## Run PHPUnit inside Docker
 lint: install ## Run PHP_CodeSniffer inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
 
-stan: install ## Run PHPStan inside Docker
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpstan analyse
+psalm: install ## Run Psalm inside Docker
+	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 
 check: install ## Run lint, static analysis and unit tests inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpstan analyse
+	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
 
 proto: install ## Generate protobuf and gRPC PHP classes inside Docker
@@ -63,6 +63,6 @@ behat: behat-up ## Run Behat acceptance tests inside Docker
 
 ci: install ## Run the full Dockerized CI pipeline
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpstan analyse
+	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
 	$(MAKE) behat

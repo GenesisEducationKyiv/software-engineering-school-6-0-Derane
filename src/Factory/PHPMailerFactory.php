@@ -6,8 +6,10 @@ namespace App\Factory;
 
 use PHPMailer\PHPMailer\PHPMailer;
 
-class PHPMailerFactory implements MailerFactoryInterface
+/** @psalm-api */
+final class PHPMailerFactory implements MailerFactoryInterface
 {
+    #[\Override]
     public function create(): PHPMailer
     {
         return new PHPMailer(true);

@@ -7,8 +7,13 @@ namespace App\Service;
 use App\Factory\MailerFactoryInterface;
 use Psr\Log\LoggerInterface;
 
-class NotifierService implements NotifierInterface
+/** @psalm-api */
+final class NotifierService implements NotifierInterface
 {
+    /**
+     * @param array{host: string, port: int, from: string, user: string, password: string,
+     *              encryption: string} $smtpConfig
+     */
     public function __construct(
         private array $smtpConfig,
         private LoggerInterface $logger,
@@ -16,6 +21,7 @@ class NotifierService implements NotifierInterface
     ) {
     }
 
+    #[\Override]
     public function sendReleaseNotification(
         string $email,
         string $repository,
@@ -33,13 +39,13 @@ class NotifierService implements NotifierInterface
             $mail->setFrom($this->smtpConfig['from'], 'GitHub Release Notifier');
             $mail->addAddress($email);
 
-            if (!empty($this->smtpConfig['user'])) {
+            if ($this->smtpConfig['user'] !== '') {
                 $mail->SMTPAuth = true;
                 $mail->Username = $this->smtpConfig['user'];
                 $mail->Password = $this->smtpConfig['password'];
             }
 
-            if (!empty($this->smtpConfig['encryption'])) {
+            if ($this->smtpConfig['encryption'] !== '') {
                 $mail->SMTPSecure = $this->smtpConfig['encryption'];
             } else {
                 $mail->SMTPAutoTLS = false;

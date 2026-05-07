@@ -25,6 +25,7 @@ use Spiral\RoadRunner\GRPC\Exception\GRPCException;
 use Spiral\RoadRunner\GRPC\Exception\ServiceException;
 use Spiral\RoadRunner\GRPC\StatusCode;
 
+/** @psalm-api */
 final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
 {
     // gRPC method names are generated from the proto contract and must keep exact casing.
@@ -36,6 +37,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
     ) {
     }
 
+    #[\Override]
     public function Health(ContextInterface $ctx, HealthCheckRequest $in): HealthCheckResponse
     {
         try {
@@ -49,6 +51,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         }
     }
 
+    #[\Override]
     public function CreateSubscription(ContextInterface $ctx, CreateSubscriptionRequest $in): SubscriptionReply
     {
         try {
@@ -61,6 +64,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         }
     }
 
+    #[\Override]
     public function ListSubscriptions(ContextInterface $ctx, ListSubscriptionsRequest $in): ListSubscriptionsReply
     {
         try {
@@ -79,6 +83,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         }
     }
 
+    #[\Override]
     public function GetSubscription(ContextInterface $ctx, GetSubscriptionRequest $in): SubscriptionReply
     {
         try {
@@ -88,6 +93,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         }
     }
 
+    #[\Override]
     public function DeleteSubscription(ContextInterface $ctx, DeleteSubscriptionRequest $in): DeleteSubscriptionReply
     {
         try {
@@ -100,15 +106,15 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
     }
 
     /**
-     * @param array{id:int,email:string,repository:string,created_at:string} $subscription
+     * @param array{id: int, email: string, repository: string, created_at: string} $subscription
      */
     private function toSubscriptionReply(array $subscription): SubscriptionReply
     {
         return new SubscriptionReply([
-            'id' => (int) $subscription['id'],
-            'email' => (string) $subscription['email'],
-            'repository' => (string) $subscription['repository'],
-            'created_at' => (string) $subscription['created_at'],
+            'id' => $subscription['id'],
+            'email' => $subscription['email'],
+            'repository' => $subscription['repository'],
+            'created_at' => $subscription['created_at'],
         ]);
     }
 

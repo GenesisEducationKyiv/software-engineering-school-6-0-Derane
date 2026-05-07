@@ -10,7 +10,8 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
 
-class HealthController
+/** @psalm-api */
+final class HealthController
 {
     public function __construct(
         private PDO $pdo,
@@ -18,15 +19,15 @@ class HealthController
     ) {
     }
 
-    public function __invoke(Request $request, Response $response): Response
+    public function __invoke(Request $_request, Response $response): Response
     {
         try {
             $this->pdo->query('SELECT 1');
-            $response->getBody()->write(json_encode(['status' => 'ok']));
+            $response->getBody()->write(json_encode(['status' => 'ok'], JSON_THROW_ON_ERROR));
             return $response->withHeader('Content-Type', 'application/json');
         } catch (\Exception $e) {
             $this->logger->error('Health check failed', ['error' => $e->getMessage()]);
-            $response->getBody()->write(json_encode(['status' => 'error']));
+            $response->getBody()->write(json_encode(['status' => 'error'], JSON_THROW_ON_ERROR));
             return $response
                 ->withStatus(StatusCodeInterface::STATUS_SERVICE_UNAVAILABLE)
                 ->withHeader('Content-Type', 'application/json');

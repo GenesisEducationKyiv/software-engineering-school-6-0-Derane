@@ -7,28 +7,31 @@ namespace App\Cache;
 use Predis\ClientInterface as RedisClientInterface;
 use Psr\Log\LoggerInterface;
 
-class RedisGitHubCache implements GitHubCacheInterface
+/** @psalm-api */
+final class RedisGitHubCache implements GitHubCacheInterface
 {
     private bool $readFailureLogged = false;
     private bool $writeFailureLogged = false;
 
     public function __construct(
-        private RedisClientInterface $redis,
-        private LoggerInterface $logger
+        private readonly RedisClientInterface $redis,
+        private readonly LoggerInterface $logger
     ) {
     }
 
+    #[\Override]
     public function get(string $key): ?string
     {
         try {
             $cached = $this->redis->get($key);
-            return $cached === null ? null : (string) $cached;
+            return $cached === null ? null : $cached;
         } catch (\Throwable $e) {
             $this->logFailure('read', $e);
             return null;
         }
     }
 
+    #[\Override]
     public function set(string $key, int $ttl, string $value): void
     {
         try {

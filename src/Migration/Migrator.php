@@ -7,7 +7,8 @@ namespace App\Migration;
 use PDO;
 use Psr\Log\LoggerInterface;
 
-class Migrator
+/** @psalm-api */
+final class Migrator
 {
     public function __construct(
         private PDO $pdo,
@@ -33,6 +34,9 @@ class Migrator
 
                 $this->logger->info("Running migration: {$filename}");
                 $sql = file_get_contents($file);
+                if ($sql === false) {
+                    throw new \RuntimeException("Cannot read migration file: {$file}");
+                }
 
                 try {
                     $this->pdo->beginTransaction();
@@ -65,15 +69,24 @@ class Migrator
         ');
     }
 
+    /** @return list<string> */
     private function getExecutedMigrations(): array
     {
         $stmt = $this->pdo->query('SELECT filename FROM migrations ORDER BY id');
+        if ($stmt === false) {
+            return [];
+        }
+        /** @var list<string> */
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
+    /** @return list<string> */
     private function getMigrationFiles(): array
     {
         $files = glob($this->migrationsPath . '/*.sql');
+        if ($files === false) {
+            return [];
+        }
         sort($files);
         return $files;
     }

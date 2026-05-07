@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
-class RateLimitException extends \RuntimeException
+final class RateLimitException extends \RuntimeException
 {
     public function __construct(string $retryAfter = '')
     {

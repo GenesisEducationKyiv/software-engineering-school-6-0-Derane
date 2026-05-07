@@ -2,9 +2,7 @@ name: PHP CI
 
 on:
   push:
-    branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
 
 jobs:
   code-quality:
@@ -16,8 +14,8 @@ jobs:
       - name: Run PHP_CodeSniffer
         run: make lint
 
-      - name: Run PHPStan
-        run: make stan
+      - name: Run Psalm
+        run: make psalm
 
   unit-tests:
     name: Unit Tests
@@ -40,7 +38,3 @@ jobs:
 
       - name: Run Behat acceptance tests
         run: make behat-run
-
-      - name: Show app logs on failure
-        if: failure()
-        run: docker compose logs app scanner
