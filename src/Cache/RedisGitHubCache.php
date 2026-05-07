@@ -14,8 +14,8 @@ final class RedisGitHubCache implements GitHubCacheInterface
     private bool $writeFailureLogged = false;
 
     public function __construct(
-        private RedisClientInterface $redis,
-        private LoggerInterface $logger
+        private readonly RedisClientInterface $redis,
+        private readonly LoggerInterface $logger
     ) {
     }
 
