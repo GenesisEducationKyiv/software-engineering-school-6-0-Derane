@@ -14,7 +14,6 @@ services:
       - "24678:24678"
     environment:
       HOME: /tmp
-      PLAYWRIGHT_BROWSERS_PATH: /data/.likec4-cache/playwright
       CHOKIDAR_USEPOLLING: "1"
       CHOKIDAR_INTERVAL: "200"
     command: ["start", "--host", "0.0.0.0"]

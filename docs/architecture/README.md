@@ -14,46 +14,25 @@ C4-модель проєкту описана у текстових `.c4` фай
 
 ## Запуск через Docker (рекомендовано)
 
-Не потребує локального Node — все запускається через `ghcr.io/likec4/likec4`.
+Не потребує локального Node — все запускається через `ghcr.io/likec4/likec4:1.56.0`.
 Make-таргети викликаються з кореня проєкту:
 
 ```bash
-make c4-up                   # live preview на http://localhost:5173
-make c4-down                 # зупинити
-make c4-logs                 # логи контейнера
-make c4-validate             # перевірити модель
-make c4-build                # статичний сайт у docs/architecture/dist
-make c4-install-browsers     # one-time: встановити Chromium у іменований volume для PNG-експорту
-make c4-export-png           # PNG: піднімає сервер, експортує, ЗУПИНЯЄ сервер
-make c4-export-png-live      # PNG проти вже запущеного c4-up (без чіпання lifecycle)
-make c4-export-mermaid       # .mmd у docs/architecture/exports/mermaid
-make c4-export-d2            # .d2  у docs/architecture/exports/d2
+make c4-up         # live preview на http://localhost:5173
+make c4-down       # зупинити
+make c4-logs       # логи контейнера
+make c4-validate   # перевірити модель
 ```
 
 Опційно — `LIKEC4_PORT=5174 make c4-up`, якщо 5173 зайнятий.
 
-### Поведінка PNG-експорту
+### Як отримати картинку діаграми
 
-- `c4-export-png` — **self-contained**: піднімає LikeC4-сервер, чекає readiness через
-  `curl http://localhost:$LIKEC4_PORT/`, експортує і **зупиняє** сервер у кінці. Якщо
-  у тебе вже був `make c4-up` запущений — він буде зупинений в кінці. Підходить для CI
-  та одноразового експорту.
-- `c4-export-png-live` — для інтерактивної роботи: вимагає попередньо запущеного
-  `make c4-up`, **не чіпає** сервер. Швидше при повторних експортах.
-- Обидва роблять два проходи: спочатку всі views у graph layout, потім **dynamic flows
-  переекспортуються з `--sequence`** layout (вертикальніший, краще читаються кроки).
-- Перший раз скачається Chromium (~150 MB) у named volume `likec4-playwright`,
-  далі шар кешується.
-
-### Який формат для чого
-
-| Що показуєш | Рекомендований формат | Чому |
-|---|---|---|
-| Live drill-down, demo, презентація | `make c4-up` (web) | Інтерактивне, можна зумити, перемикати views |
-| Статичний сайт для GitHub Pages | `make c4-build` (`./dist`) | Production-ready bundle |
-| Картинки у README репозиторію | `make c4-export-mermaid` | GitHub рендерить `.mmd` нативно |
-| Картинки у звіт/PDF | `make c4-export-png` | Готові растрові зображення |
-| Review довгого flow-у | Mermaid (sequence) > PNG | Mermaid sequence у flow-views читається найкраще; PNG-flow буде широкий |
+LikeC4 web-UI має кнопку **Export** на toolbar поточного view — можеш зберегти
+PNG/SVG прямо з браузера. Для batch-експорту з командного рядка треба було б
+повернути `c4-export-*` таргети + Playwright Chromium у компоуз; зараз це
+свідомо не входить у мінімальний набір, бо для типових задач (показати діаграму,
+зробити screenshot для звіту) вистачає UI.
 
 ## Запуск через npm (альтернатива)
 
@@ -62,15 +41,13 @@ make c4-export-d2            # .d2  у docs/architecture/exports/d2
 ```bash
 cd docs/architecture
 npm install              # один раз
-
-npm start                  # live preview на http://localhost:5173
-npm run validate           # перевірити модель
-npm run build              # статичний сайт у ./dist
-npm run install:browsers   # one-time: Playwright Chromium для PNG
-npm run export:png         # PNG у ./exports (запускає install:browsers перед експортом)
-npm run export:mermaid     # .mmd у ./exports/mermaid
-npm run export:d2          # .d2  у ./exports/d2
+npm start                # live preview на http://localhost:5173
+npm run validate         # перевірити модель
 ```
+
+`package.json` тримає також скрипти `build`, `export:png`, `export:mermaid`, `export:d2`
+для випадків, коли треба статичний сайт або файлові артефакти; вони працюють локально
+без Docker і не покриваються Make-таргетами в цій гілці.
 
 ## Views
 
