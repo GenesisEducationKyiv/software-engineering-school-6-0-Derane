@@ -1,0 +1,164 @@
+model {
+    extend notifier.httpApi {
+        apiKeyMw = component "ApiKeyMiddleware" {
+            description "Validates X-API-Key header for /api/* routes."
+            technology "PHP, PSR-15 middleware"
+        }
+
+        errorMw = component "ErrorHandlerMiddleware" {
+            description "Maps domain exceptions to HTTP responses."
+            technology "PHP, PSR-15 middleware"
+        }
+
+        subscriptionCtrl = component "SubscriptionController" {
+            description "REST handlers for /api/subscriptions CRUD."
+            technology "PHP, Slim 4"
+        }
+
+        healthCtrl = component "HealthController" {
+            description "Liveness/readiness endpoint."
+            technology "PHP, Slim 4"
+        }
+
+        metricsCtrl = component "MetricsController" {
+            description "Exposes Prometheus metrics."
+            technology "PHP, Slim 4"
+        }
+
+        homePage = component "HTML Subscription Form" {
+            description "Static public/index.html served by Slim at GET /. Submits to /api/subscriptions."
+            technology "Static HTML, served by Slim 4"
+        }
+
+        subscriptionSvc = component "SubscriptionService" {
+            description "
+                Core business logic: validates email and
+                owner/repo, checks GitHub, persists subscription.
+            "
+            technology "PHP"
+        }
+
+        githubSvc = component "GitHubService" {
+            description "GitHub REST adapter with Redis-backed cache."
+            technology "PHP, Guzzle"
+        }
+
+        metricsSvc = component "MetricsService" {
+            description "
+                Computes Prometheus gauges from the database
+                on each /metrics scrape: total subscriptions,
+                tracked repositories, and repositories that have
+                a known last_seen_tag.
+            "
+            technology "PHP"
+        }
+
+        subscriptionRepo = component "SubscriptionRepository" {
+            description "Data access for subscriptions table."
+            technology "PHP, PDO"
+        }
+
+        errorMw -> apiKeyMw "Wraps inner pipeline; catches and maps domain exceptions"
+        apiKeyMw -> subscriptionCtrl "Forwards authenticated request"
+        subscriptionCtrl -> subscriptionSvc "Delegates business logic"
+        metricsCtrl -> metricsSvc "Renders Prometheus exposition"
+        metricsSvc -> subscriptionRepo "Reads aggregate counts on every scrape"
+        subscriptionSvc -> githubSvc "Verifies owner/repo exists"
+        subscriptionSvc -> subscriptionRepo "Persists / loads subscriptions"
+    }
+
+    extend notifier.grpcApi {
+        grpcSvc = component "ReleaseNotifierService" {
+            description "
+                gRPC service implementation:
+                Health, CreateSubscription, ListSubscriptions,
+                GetSubscription, DeleteSubscription. Maps domain
+                exceptions to gRPC status codes.
+            "
+            technology "PHP, RoadRunner gRPC"
+        }
+
+        grpcSubscriptionSvc = component "SubscriptionService" {
+            description "
+                Same SubscriptionService class as in HTTP API,
+                but a separate runtime instance — bin/grpc.php
+                builds its own DI container at process start.
+            "
+            technology "PHP"
+        }
+
+        grpcGithubSvc = component "GitHubService" {
+            description "Separate scanner/grpc-side instance of the GitHub adapter."
+            technology "PHP, Guzzle"
+        }
+
+        grpcSubscriptionRepo = component "SubscriptionRepository" {
+            description "Separate gRPC-side instance of the subscriptions repository."
+            technology "PHP, PDO"
+        }
+
+        grpcSvc -> grpcSubscriptionSvc "Delegates business logic"
+        grpcSubscriptionSvc -> grpcGithubSvc "Verifies owner/repo exists"
+        grpcSubscriptionSvc -> grpcSubscriptionRepo "Persists / loads subscriptions"
+    }
+
+    user -> notifier.grpcApi.grpcSvc "RPC calls" "gRPC"
+
+    extend notifier.scanner {
+        scannerSvc = component "ScannerService" {
+            description "
+                Loop driver. Picks repositories to scan in batches,
+                resolves the latest release tag from GitHub,
+                compares against repositories.last_seen_tag,
+                dispatches per-subscriber emails (skipping
+                already-delivered tags via release_notifications),
+                advances last_seen_tag only after all subscribers got the email.
+            "
+            technology "PHP CLI"
+        }
+
+        scannerGithub = component "GitHubService" {
+            description "Same GitHubService class, scanner-side instance."
+            technology "PHP, Guzzle"
+        }
+
+        notifierSvc = component "NotifierService" {
+            description "Builds and sends release email via SMTP."
+            technology "PHP, Symfony Mailer"
+        }
+
+        scannerRepo = component "SubscriptionRepository" {
+            description "
+                Data access on the scanner side: reads subscriptions
+                and repositories rows, updates repositories.last_seen_tag
+                and last_checked_at, writes per-tag delivery rows
+                into release_notifications.
+            "
+            technology "PHP, PDO"
+        }
+
+        scannerSvc -> scannerRepo "Picks batches"
+        scannerSvc -> scannerGithub "Resolves latest release per repo"
+        scannerSvc -> notifierSvc "Dispatches email when release is new"
+    }
+
+    user -> notifier.httpApi.errorMw "All HTTP requests (outermost middleware)" "HTTPS"
+    user -> notifier.httpApi.healthCtrl "GET /health"
+    user -> notifier.httpApi.metricsCtrl "GET /metrics"
+    user -> notifier.httpApi.homePage "GET / (subscription form)"
+
+    notifier.httpApi.healthCtrl -> notifier.db "SELECT 1 (liveness probe)" "SQL/TCP"
+    notifier.httpApi.githubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.httpApi.githubSvc -> github "Calls REST API" "HTTPS"
+    notifier.httpApi.subscriptionRepo -> notifier.db "SQL" "TCP"
+
+    notifier.grpcApi.grpcSvc -> notifier.db "SELECT 1 on Health() (liveness)" "SQL/TCP"
+    notifier.grpcApi.grpcGithubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.grpcApi.grpcGithubSvc -> github "Calls REST API" "HTTPS"
+    notifier.grpcApi.grpcSubscriptionRepo -> notifier.db "SQL" "TCP"
+
+    notifier.scanner.scannerGithub -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.scanner.scannerGithub -> github "Calls REST API" "HTTPS"
+    notifier.scanner.scannerRepo -> notifier.db "SQL" "TCP"
+    notifier.scanner.notifierSvc -> smtp "Sends email" "SMTP"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "github-release-notifier-architecture",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "start": "likec4 start",
+    "build": "likec4 build -o ./dist",
+    "validate": "likec4 validate",
+    "install:browsers": "playwright install chromium",
+    "export:png": "playwright install chromium && likec4 export png -o ./exports -t 60 && likec4 export png -o ./exports -t 60 --sequence -f *Flow",
+    "export:mermaid": "likec4 gen mermaid --outdir ./exports/mermaid",
+    "export:d2": "likec4 gen d2 --outdir ./exports/d2"
+  },
+  "devDependencies": {
+    "likec4": "1.56.0"
+  }
+}

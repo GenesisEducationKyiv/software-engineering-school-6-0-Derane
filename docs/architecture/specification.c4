@@ -1,0 +1,53 @@
+specification {
+    element actor {
+        style {
+            shape person
+            color green
+        }
+    }
+
+    element externalSystem {
+        style {
+            shape rectangle
+            color secondary
+        }
+    }
+
+    element system {
+        style {
+            shape rectangle
+            color primary
+        }
+    }
+
+    element container {
+        style {
+            shape rectangle
+            color blue
+        }
+    }
+
+    element database {
+        style {
+            shape cylinder
+            color amber
+        }
+    }
+
+    element cache {
+        style {
+            shape cylinder
+            color red
+        }
+    }
+
+    element component {
+        style {
+            shape rectangle
+            color sky
+        }
+    }
+
+    relationship async
+    relationship sync
+}
