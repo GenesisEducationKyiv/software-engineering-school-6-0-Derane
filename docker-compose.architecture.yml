@@ -1,0 +1,20 @@
+services:
+  likec4:
+    image: ghcr.io/likec4/likec4:1.56.0
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    init: true
+    tty: true
+    working_dir: /data
+    volumes:
+      - ./docs/architecture:/data
+    tmpfs:
+      - /usr/local/lib/node_modules/likec4/node_modules/.vite:mode=1777
+    ports:
+      - "${LIKEC4_PORT:-5173}:5173"
+      - "24678:24678"
+    environment:
+      HOME: /tmp
+      PLAYWRIGHT_BROWSERS_PATH: /data/.likec4-cache/playwright
+      CHOKIDAR_USEPOLLING: "1"
+      CHOKIDAR_INTERVAL: "200"
+    command: ["start", "--host", "0.0.0.0"]
