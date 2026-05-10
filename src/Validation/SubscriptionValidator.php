@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Validation;
 
+/** @psalm-api */
 final class SubscriptionValidator
 {
     public function __construct(
