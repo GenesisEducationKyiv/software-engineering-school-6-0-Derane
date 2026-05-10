@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 use App\Cache\GitHubCacheInterface;
 use App\Cache\RedisGitHubCache;
+use App\Config\Factory\PaginationFactory;
+use App\Config\Factory\PaginationFactoryInterface;
+use App\Config\Factory\SmtpConfigFactory;
+use App\Config\Factory\SmtpConfigFactoryInterface;
 use App\Config\SmtpConfig;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
@@ -113,6 +117,10 @@ return static function (array $settings): Container {
         SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
         RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
 
+        // Config factories
+        SmtpConfigFactoryInterface::class => static fn() => new SmtpConfigFactory(),
+        PaginationFactoryInterface::class => static fn() => new PaginationFactory(),
+
         // Validation
         EmailValidator::class => static fn() => new EmailValidator(),
         RepositoryNameValidator::class => static fn() => new RepositoryNameValidator(),
@@ -140,7 +148,7 @@ return static function (array $settings): Container {
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
 
         // Notifier
-        SmtpConfig::class => static fn() => SmtpConfig::fromArray($settings['smtp']),
+        SmtpConfig::class => static fn($c) => $c->get(SmtpConfigFactoryInterface::class)->fromArray($settings['smtp']),
         ReleaseEmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
         MailerInterface::class => static fn($c) => new SmtpMailer(
             $c->get(SmtpConfig::class),
@@ -211,12 +219,14 @@ return static function (array $settings): Container {
 
         // Boundaries
         SubscriptionController::class => static fn($c) => new SubscriptionController(
-            $c->get(SubscriptionServiceInterface::class)
+            $c->get(SubscriptionServiceInterface::class),
+            $c->get(PaginationFactoryInterface::class)
         ),
         ReleaseNotifierService::class => static fn($c) => new ReleaseNotifierService(
             $c->get(SubscriptionServiceInterface::class),
             $c->get(HealthCheckInterface::class),
             $c->get(ExceptionStatusMap::class),
+            $c->get(PaginationFactoryInterface::class),
             $c->get(LoggerInterface::class)
         ),
         MetricsController::class => static fn($c) => new MetricsController(

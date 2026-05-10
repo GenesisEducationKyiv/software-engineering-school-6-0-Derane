@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Grpc;
 
-use App\Config\Pagination;
+use App\Config\Factory\PaginationFactoryInterface;
 use App\Domain\Subscription;
 use App\Exception\ExceptionStatusMap;
 use App\Health\HealthCheckInterface;
@@ -34,6 +34,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         private SubscriptionServiceInterface $subscriptions,
         private HealthCheckInterface $healthCheck,
         private ExceptionStatusMap $statusMap,
+        private PaginationFactoryInterface $paginationFactory,
         private LoggerInterface $logger
     ) {
     }
@@ -72,7 +73,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
             $email = trim($in->getEmail());
             $page = $this->subscriptions->listSubscriptions(
                 $email !== '' ? $email : null,
-                Pagination::fromRequest($in->getLimit(), $in->getOffset())
+                $this->paginationFactory->fromRequest($in->getLimit(), $in->getOffset())
             );
 
             return new ListSubscriptionsReply([

@@ -73,9 +73,9 @@ final class SubscriptionFactory implements SubscriptionFactoryInterface
 }
 ```
 
-Inject the interface into repositories / API clients. Tests substitute a fake or use the real one — the choice belongs to the test.
+Inject the interface into repositories / API clients / controllers. Tests substitute a fake or use the real one — the choice belongs to the test.
 
-**Exception:** pure normalizers from already-validated inputs (e.g., `Pagination::fromRequest(int $limit, int $offset)` that just clamps) can stay static. The rule is for parsers of external data.
+**No exceptions.** Even pure normalizers (pagination clamping, config-array mapping) go through a factory interface. Convention is uniform: DTOs are pure data, factories are pure construction. Static `from*` methods on DTOs are forbidden — they hurt mockability and break the convention. Tests that just need a fixture call `new Pagination(25, 50)` directly; tests that exercise normalization use the factory.
 
 ### Validator (extract from services)
 

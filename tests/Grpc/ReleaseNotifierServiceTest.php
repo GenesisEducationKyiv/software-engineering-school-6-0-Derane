@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Grpc;
 
+use App\Config\Factory\PaginationFactory;
 use App\Config\Pagination;
 use App\Domain\Subscription;
 use App\Domain\SubscriptionPage;
@@ -41,6 +42,7 @@ class ReleaseNotifierServiceTest extends TestCase
             $this->subscriptions,
             $this->healthCheck,
             new ExceptionStatusMap(),
+            new PaginationFactory(),
             new NullLogger()
         );
     }
@@ -90,7 +92,7 @@ class ReleaseNotifierServiceTest extends TestCase
             )
             ->willReturn(new SubscriptionPage(
                 [new Subscription(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z')],
-                Pagination::fromRequest(20, 5),
+                new Pagination(20, 5),
                 1
             ));
 

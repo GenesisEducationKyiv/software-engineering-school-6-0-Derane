@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Controller;
 
+use App\Config\Factory\PaginationFactory;
 use App\Config\Pagination;
 use App\Controller\SubscriptionController;
 use App\Domain\SubscriptionPage;
@@ -20,7 +21,7 @@ class SubscriptionControllerTest extends TestCase
         $service = $this->createMock(SubscriptionServiceInterface::class);
         $service->expects($this->never())->method('subscribe');
 
-        $controller = new SubscriptionController($service);
+        $controller = new SubscriptionController($service, new PaginationFactory());
         $request = (new RequestFactory())
             ->createRequest('POST', '/api/subscriptions')
             ->withParsedBody((object) ['email' => 'test@example.com']);
@@ -40,9 +41,9 @@ class SubscriptionControllerTest extends TestCase
                 'test@example.com',
                 $this->callback(static fn(Pagination $p): bool => $p->limit === 25 && $p->offset === 50)
             )
-            ->willReturn(new SubscriptionPage([], Pagination::fromRequest(25, 50), 0));
+            ->willReturn(new SubscriptionPage([], new Pagination(25, 50), 0));
 
-        $controller = new SubscriptionController($service);
+        $controller = new SubscriptionController($service, new PaginationFactory());
         $request = (new RequestFactory())->createRequest(
             'GET',
             '/api/subscriptions?email=test@example.com&limit=25&offset=50'

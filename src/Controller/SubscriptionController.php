@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Config\Pagination;
+use App\Config\Factory\PaginationFactoryInterface;
 use App\Exception\ValidationException;
 use App\Service\SubscriptionServiceInterface;
 use Fig\Http\Message\StatusCodeInterface;
@@ -14,8 +14,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /** @psalm-api */
 final class SubscriptionController
 {
-    public function __construct(private SubscriptionServiceInterface $service)
-    {
+    public function __construct(
+        private SubscriptionServiceInterface $service,
+        private PaginationFactoryInterface $paginationFactory
+    ) {
     }
 
     public function create(Request $request, Response $response): Response
@@ -47,8 +49,8 @@ final class SubscriptionController
     {
         $query = $request->getQueryParams();
         $email = isset($query['email']) ? trim((string) $query['email']) : null;
-        $pagination = Pagination::fromRequest(
-            (int) ($query['limit'] ?? Pagination::DEFAULT_LIMIT),
+        $pagination = $this->paginationFactory->fromRequest(
+            (int) ($query['limit'] ?? 0),
             (int) ($query['offset'] ?? 0)
         );
 

@@ -143,7 +143,7 @@ class SubscriptionServiceTest extends TestCase
 
     public function testListSubscriptionsByEmail(): void
     {
-        $pagination = Pagination::fromRequest(100, 0);
+        $pagination = new Pagination(100, 0);
         $expected = new SubscriptionPage(
             [new Subscription(1, 'test@example.com', 'golang/go', '2024-01-01T00:00:00Z')],
             $pagination,
@@ -162,7 +162,7 @@ class SubscriptionServiceTest extends TestCase
 
     public function testListAllSubscriptions(): void
     {
-        $pagination = Pagination::fromRequest(100, 0);
+        $pagination = new Pagination(100, 0);
         $expected = new SubscriptionPage(
             [
                 new Subscription(1, 'a@b.com', 'golang/go', '2024-01-01T00:00:00Z'),
@@ -183,7 +183,7 @@ class SubscriptionServiceTest extends TestCase
 
     public function testListAllSubscriptionsHasNextPageWhenMoreRowsExist(): void
     {
-        $pagination = Pagination::fromRequest(2, 0);
+        $pagination = new Pagination(2, 0);
         $page = new SubscriptionPage(
             [
                 new Subscription(1, 'a@b.com', 'golang/go', '2024-01-01T00:00:00Z'),

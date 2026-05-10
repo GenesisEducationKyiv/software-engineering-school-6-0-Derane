@@ -16,19 +16,6 @@ final class SmtpConfig
     ) {
     }
 
-    /** @param array{host: string, port: int, from: string, user: string, password: string, encryption: string} $config */
-    public static function fromArray(array $config): self
-    {
-        return new self(
-            $config['host'],
-            $config['port'],
-            $config['from'],
-            $config['user'],
-            $config['password'],
-            $config['encryption']
-        );
-    }
-
     public function hasAuth(): bool
     {
         return $this->user !== '';

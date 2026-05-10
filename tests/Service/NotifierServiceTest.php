@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Config\SmtpConfig;
+use App\Config\Factory\SmtpConfigFactory;
 use App\Domain\Release;
 use App\Factory\PHPMailerFactory;
 use App\Notifier\ReleaseEmailRenderer;
@@ -17,7 +17,7 @@ class NotifierServiceTest extends TestCase
 {
     private function createService(array $overrides = []): NotifierService
     {
-        $config = SmtpConfig::fromArray(array_merge([
+        $config = (new SmtpConfigFactory())->fromArray(array_merge([
             'host' => 'localhost',
             'port' => 1025,
             'user' => '',

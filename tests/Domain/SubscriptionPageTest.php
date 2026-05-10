@@ -15,7 +15,7 @@ final class SubscriptionPageTest extends TestCase
     {
         $page = new SubscriptionPage(
             [new Subscription(1, 'a@b.com', 'x/y', '2024-01-01T00:00:00Z')],
-            Pagination::fromRequest(1, 0),
+            new Pagination(1, 0),
             5
         );
 
@@ -26,7 +26,7 @@ final class SubscriptionPageTest extends TestCase
     {
         $page = new SubscriptionPage(
             [new Subscription(1, 'a@b.com', 'x/y', '2024-01-01T00:00:00Z')],
-            Pagination::fromRequest(1, 4),
+            new Pagination(1, 4),
             5
         );
 
@@ -35,7 +35,7 @@ final class SubscriptionPageTest extends TestCase
 
     public function testNoNextPageWhenEmpty(): void
     {
-        $page = new SubscriptionPage([], Pagination::fromRequest(10, 0), 0);
+        $page = new SubscriptionPage([], new Pagination(10, 0), 0);
 
         $this->assertFalse($page->hasNextPage());
     }
