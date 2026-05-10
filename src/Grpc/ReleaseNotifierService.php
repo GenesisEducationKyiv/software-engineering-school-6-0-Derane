@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Grpc;
 
-use App\Exception\RateLimitException;
-use App\Exception\RepositoryNotFoundException;
-use App\Exception\SubscriptionNotFoundException;
-use App\Exception\ValidationException;
+use App\Config\Pagination;
+use App\Domain\Subscription;
+use App\Exception\ExceptionStatusMap;
+use App\Health\HealthCheckInterface;
 use App\Service\SubscriptionServiceInterface;
 use Grpc\ReleaseNotifier\V1\CreateSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionReply;
@@ -32,7 +32,8 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
     // phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     public function __construct(
         private SubscriptionServiceInterface $subscriptions,
-        private \PDO $pdo,
+        private HealthCheckInterface $healthCheck,
+        private ExceptionStatusMap $statusMap,
         private LoggerInterface $logger
     ) {
     }
@@ -41,7 +42,7 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
     public function Health(ContextInterface $ctx, HealthCheckRequest $in): HealthCheckResponse
     {
         try {
-            $this->pdo->query('SELECT 1');
+            $this->healthCheck->check();
 
             return new HealthCheckResponse(['status' => 'ok']);
         } catch (\Throwable $e) {
@@ -69,14 +70,13 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
     {
         try {
             $email = trim($in->getEmail());
-            $items = $this->subscriptions->listSubscriptions(
+            $page = $this->subscriptions->listSubscriptions(
                 $email !== '' ? $email : null,
-                $this->normalizeLimit($in->getLimit()),
-                max(0, $in->getOffset())
+                Pagination::fromRequest($in->getLimit(), $in->getOffset())
             );
 
             return new ListSubscriptionsReply([
-                'subscriptions' => array_map($this->toSubscriptionReply(...), $items),
+                'subscriptions' => array_map($this->toSubscriptionReply(...), $page->items),
             ]);
         } catch (\Throwable $e) {
             throw $this->mapException($e);
@@ -105,45 +105,29 @@ final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
         }
     }
 
-    /**
-     * @param array{id: int, email: string, repository: string, created_at: string} $subscription
-     */
-    private function toSubscriptionReply(array $subscription): SubscriptionReply
+    private function toSubscriptionReply(Subscription $subscription): SubscriptionReply
     {
         return new SubscriptionReply([
-            'id' => $subscription['id'],
-            'email' => $subscription['email'],
-            'repository' => $subscription['repository'],
-            'created_at' => $subscription['created_at'],
+            'id' => $subscription->id,
+            'email' => $subscription->email,
+            'repository' => $subscription->repository,
+            'created_at' => $subscription->createdAt,
         ]);
-    }
-
-    private function normalizeLimit(int $limit): int
-    {
-        if ($limit <= 0) {
-            return 100;
-        }
-
-        return min($limit, 100);
     }
 
     private function mapException(\Throwable $e): GRPCException
     {
-        return match (true) {
-            $e instanceof ValidationException => GRPCException::create(
-                $e->getMessage(),
-                StatusCode::INVALID_ARGUMENT,
-                $e
-            ),
-            $e instanceof RepositoryNotFoundException, $e instanceof SubscriptionNotFoundException =>
-                GRPCException::create($e->getMessage(), StatusCode::NOT_FOUND, $e),
-            $e instanceof RateLimitException => GRPCException::create(
-                $e->getMessage(),
-                StatusCode::RESOURCE_EXHAUSTED,
-                $e
-            ),
-            default => ServiceException::create('Internal server error', StatusCode::INTERNAL, $e),
-        };
+        /**
+         * @var 0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16 $code
+         */
+        $code = $this->statusMap->toGrpcStatus($e);
+        $message = $this->statusMap->toClientMessage($e);
+
+        if ($code === StatusCode::INTERNAL) {
+            return ServiceException::create($message, $code, $e);
+        }
+
+        return GRPCException::create($message, $code, $e);
     }
     // phpcs:enable
 }

@@ -2,28 +2,60 @@
 
 declare(strict_types=1);
 
+use App\Cache\GitHubCacheInterface;
+use App\Cache\RedisGitHubCache;
+use App\Config\SmtpConfig;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Controller\SubscriptionController;
-use App\Cache\GitHubCacheInterface;
-use App\Cache\RedisGitHubCache;
+use App\Domain\Factory\ReleaseFactory;
+use App\Domain\Factory\ReleaseFactoryInterface;
+use App\Domain\Factory\RepositoryStatusFactory;
+use App\Domain\Factory\RepositoryStatusFactoryInterface;
+use App\Domain\Factory\SubscriberRefFactory;
+use App\Domain\Factory\SubscriberRefFactoryInterface;
+use App\Domain\Factory\SubscriptionFactory;
+use App\Domain\Factory\SubscriptionFactoryInterface;
+use App\Exception\ExceptionStatusMap;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
+use App\GitHub\GitHubApiClient;
+use App\GitHub\GitHubApiClientInterface;
+use App\GitHub\GitHubReleaseCache;
+use App\GitHub\GitHubRepositoryCache;
 use App\Grpc\ReleaseNotifierService;
-use App\Migration\Migrator;
+use App\Health\DatabaseHealthCheck;
+use App\Health\HealthCheckInterface;
+use App\Metrics\PrometheusFormatter;
 use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
+use App\Migration\Migrator;
+use App\Notifier\MailerInterface;
+use App\Notifier\ReleaseEmailRenderer;
+use App\Notifier\SmtpMailer;
+use App\Repository\MetricsRepository;
+use App\Repository\MetricsRepositoryInterface;
+use App\Repository\NotificationLedger;
+use App\Repository\NotificationLedgerInterface;
+use App\Repository\SubscriberFinderInterface;
 use App\Repository\SubscriptionRepository;
 use App\Repository\SubscriptionRepositoryInterface;
+use App\Repository\TrackedRepositoryRepository;
+use App\Repository\TrackedRepositoryRepositoryInterface;
 use App\Service\GitHubService;
 use App\Service\GitHubServiceInterface;
 use App\Service\MetricsService;
 use App\Service\MetricsServiceInterface;
+use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
 use App\Service\NotifierService;
+use App\Service\ReleaseDetector;
 use App\Service\ScannerService;
 use App\Service\SubscriptionService;
 use App\Service\SubscriptionServiceInterface;
+use App\Validation\EmailValidator;
+use App\Validation\RepositoryNameValidator;
+use App\Validation\SubscriptionValidator;
 use DI\Container;
 use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
@@ -75,52 +107,123 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class)
         ),
 
-        SubscriptionRepositoryInterface::class => static fn($c) => new SubscriptionRepository($c->get(PDO::class)),
-        GitHubServiceInterface::class => static function ($c) use ($settings) {
-            return new GitHubService(
-                $c->get(GuzzleClient::class),
-                $c->get(GitHubCacheInterface::class),
-                $c->get(LoggerInterface::class),
-                $settings['github']['token'],
-                $settings['redis']['cache_ttl']
-            );
-        },
-        NotifierInterface::class => static function ($c) use ($settings) {
-            return new NotifierService(
-                $settings['smtp'],
-                $c->get(LoggerInterface::class),
-                $c->get(MailerFactoryInterface::class)
-            );
-        },
-        MetricsServiceInterface::class => static fn($c) => new MetricsService(
-            $c->get(SubscriptionRepositoryInterface::class)
+        // Domain factories — injected for testability.
+        ReleaseFactoryInterface::class => static fn() => new ReleaseFactory(),
+        SubscriptionFactoryInterface::class => static fn() => new SubscriptionFactory(),
+        SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
+        RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
+
+        // Validation
+        EmailValidator::class => static fn() => new EmailValidator(),
+        RepositoryNameValidator::class => static fn() => new RepositoryNameValidator(),
+        SubscriptionValidator::class => static fn($c) => new SubscriptionValidator(
+            $c->get(EmailValidator::class),
+            $c->get(RepositoryNameValidator::class)
         ),
-        SubscriptionServiceInterface::class => static fn($c) => new SubscriptionService(
-            $c->get(SubscriptionRepositoryInterface::class),
-            $c->get(GitHubServiceInterface::class),
+
+        // Repositories
+        SubscriptionRepositoryInterface::class => static fn($c) => new SubscriptionRepository(
+            $c->get(PDO::class),
+            $c->get(SubscriptionFactoryInterface::class),
+            $c->get(SubscriberRefFactoryInterface::class)
+        ),
+        SubscriberFinderInterface::class => static fn($c) => $c->get(SubscriptionRepositoryInterface::class),
+        TrackedRepositoryRepositoryInterface::class => static fn($c) => new TrackedRepositoryRepository(
+            $c->get(PDO::class),
+            $c->get(RepositoryStatusFactoryInterface::class)
+        ),
+        NotificationLedgerInterface::class => static fn($c) => new NotificationLedger($c->get(PDO::class)),
+        MetricsRepositoryInterface::class => static fn($c) => new MetricsRepository($c->get(PDO::class)),
+
+        // Health + exception mapping
+        HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
+        ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
+
+        // Notifier
+        SmtpConfig::class => static fn() => SmtpConfig::fromArray($settings['smtp']),
+        ReleaseEmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
+        MailerInterface::class => static fn($c) => new SmtpMailer(
+            $c->get(SmtpConfig::class),
+            $c->get(MailerFactoryInterface::class)
+        ),
+        NotifierInterface::class => static fn($c) => new NotifierService(
+            $c->get(MailerInterface::class),
+            $c->get(ReleaseEmailRenderer::class),
             $c->get(LoggerInterface::class)
         ),
-        ScannerService::class => static fn($c) => new ScannerService(
+
+        // GitHub
+        GitHubApiClientInterface::class => static fn($c) => new GitHubApiClient(
+            $c->get(GuzzleClient::class),
+            $settings['github']['token']
+        ),
+        GitHubRepositoryCache::class => static fn($c) => new GitHubRepositoryCache(
+            $c->get(GitHubCacheInterface::class),
+            $settings['redis']['cache_ttl']
+        ),
+        GitHubReleaseCache::class => static fn($c) => new GitHubReleaseCache(
+            $c->get(GitHubCacheInterface::class),
+            $c->get(ReleaseFactoryInterface::class),
+            $settings['redis']['cache_ttl']
+        ),
+        GitHubServiceInterface::class => static function ($c) {
+            return new GitHubService(
+                $c->get(GitHubApiClientInterface::class),
+                $c->get(GitHubRepositoryCache::class),
+                $c->get(GitHubReleaseCache::class),
+                $c->get(ReleaseFactoryInterface::class),
+                $c->get(LoggerInterface::class)
+            );
+        },
+
+        // Metrics
+        PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
+        MetricsServiceInterface::class => static fn($c) => new MetricsService(
+            $c->get(MetricsRepositoryInterface::class),
+            $c->get(PrometheusFormatter::class)
+        ),
+
+        // Application services
+        SubscriptionServiceInterface::class => static fn($c) => new SubscriptionService(
             $c->get(SubscriptionRepositoryInterface::class),
+            $c->get(TrackedRepositoryRepositoryInterface::class),
             $c->get(GitHubServiceInterface::class),
-            $c->get(NotifierInterface::class),
+            $c->get(SubscriptionValidator::class),
+            $c->get(LoggerInterface::class)
+        ),
+        ReleaseDetector::class => static fn($c) => new ReleaseDetector(
+            $c->get(GitHubServiceInterface::class),
+            $c->get(TrackedRepositoryRepositoryInterface::class),
+            $c->get(LoggerInterface::class)
+        ),
+        NotificationDispatcher::class => static fn($c) => new NotificationDispatcher(
+            $c->get(SubscriberFinderInterface::class),
+            $c->get(NotificationLedgerInterface::class),
+            $c->get(NotifierInterface::class)
+        ),
+        ScannerService::class => static fn($c) => new ScannerService(
+            $c->get(TrackedRepositoryRepositoryInterface::class),
+            $c->get(ReleaseDetector::class),
+            $c->get(NotificationDispatcher::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
         ),
 
+        // Boundaries
         SubscriptionController::class => static fn($c) => new SubscriptionController(
             $c->get(SubscriptionServiceInterface::class)
         ),
         ReleaseNotifierService::class => static fn($c) => new ReleaseNotifierService(
             $c->get(SubscriptionServiceInterface::class),
-            $c->get(PDO::class),
+            $c->get(HealthCheckInterface::class),
+            $c->get(ExceptionStatusMap::class),
             $c->get(LoggerInterface::class)
         ),
         MetricsController::class => static fn($c) => new MetricsController(
             $c->get(MetricsServiceInterface::class)
         ),
         HealthController::class => static fn($c) => new HealthController(
-            $c->get(PDO::class),
+            $c->get(HealthCheckInterface::class),
             $c->get(LoggerInterface::class)
         ),
         ApiKeyMiddleware::class => static fn($c) => new ApiKeyMiddleware(
@@ -129,7 +232,8 @@ return static function (array $settings): Container {
         ),
         ErrorHandlerMiddleware::class => static fn($c) => new ErrorHandlerMiddleware(
             $c->get(LoggerInterface::class),
-            $c->get(ResponseFactoryInterface::class)
+            $c->get(ResponseFactoryInterface::class),
+            $c->get(ExceptionStatusMap::class)
         ),
 
         Migrator::class => static fn($c) => new Migrator(

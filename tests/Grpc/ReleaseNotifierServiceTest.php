@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Grpc;
 
+use App\Config\Pagination;
+use App\Domain\Subscription;
+use App\Domain\SubscriptionPage;
+use App\Exception\ExceptionStatusMap;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\ValidationException;
 use App\Grpc\ReleaseNotifierService;
+use App\Health\HealthCheckInterface;
 use App\Service\SubscriptionServiceInterface;
 use Grpc\ReleaseNotifier\V1\CreateSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionRequest;
@@ -22,23 +27,27 @@ use Spiral\RoadRunner\GRPC\StatusCode;
 class ReleaseNotifierServiceTest extends TestCase
 {
     private SubscriptionServiceInterface $subscriptions;
-    private \PDO $pdo;
+    private HealthCheckInterface $healthCheck;
     private ContextInterface $context;
     private ReleaseNotifierService $service;
 
     protected function setUp(): void
     {
         $this->subscriptions = $this->createMock(SubscriptionServiceInterface::class);
-        $this->pdo = $this->createMock(\PDO::class);
+        $this->healthCheck = $this->createMock(HealthCheckInterface::class);
         $this->context = $this->createMock(ContextInterface::class);
 
-        $this->service = new ReleaseNotifierService($this->subscriptions, $this->pdo, new NullLogger());
+        $this->service = new ReleaseNotifierService(
+            $this->subscriptions,
+            $this->healthCheck,
+            new ExceptionStatusMap(),
+            new NullLogger()
+        );
     }
 
     public function testHealthReturnsOk(): void
     {
-        $stmt = $this->createMock(\PDOStatement::class);
-        $this->pdo->expects($this->once())->method('query')->with('SELECT 1')->willReturn($stmt);
+        $this->healthCheck->expects($this->once())->method('check');
 
         $reply = $this->service->Health($this->context, new HealthCheckRequest());
 
@@ -47,7 +56,7 @@ class ReleaseNotifierServiceTest extends TestCase
 
     public function testHealthThrowsUnavailableWhenDatabaseFails(): void
     {
-        $this->pdo->method('query')->willThrowException(new \RuntimeException('db down'));
+        $this->healthCheck->method('check')->willThrowException(new \RuntimeException('db down'));
 
         $this->expectException(GRPCException::class);
         $this->expectExceptionCode(StatusCode::UNAVAILABLE);
@@ -60,12 +69,7 @@ class ReleaseNotifierServiceTest extends TestCase
         $this->subscriptions->expects($this->once())
             ->method('subscribe')
             ->with('grpc@example.com', 'docker/compose')
-            ->willReturn([
-                'id' => 7,
-                'email' => 'grpc@example.com',
-                'repository' => 'docker/compose',
-                'created_at' => '2026-04-12T00:00:00Z',
-            ]);
+            ->willReturn(new Subscription(7, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'));
 
         $reply = $this->service->CreateSubscription($this->context, new CreateSubscriptionRequest([
             'email' => 'grpc@example.com',
@@ -80,15 +84,15 @@ class ReleaseNotifierServiceTest extends TestCase
     {
         $this->subscriptions->expects($this->once())
             ->method('listSubscriptions')
-            ->with('grpc@example.com', 20, 5)
-            ->willReturn([
-                [
-                    'id' => 1,
-                    'email' => 'grpc@example.com',
-                    'repository' => 'docker/compose',
-                    'created_at' => '2026-04-12T00:00:00Z',
-                ],
-            ]);
+            ->with(
+                'grpc@example.com',
+                $this->callback(static fn(Pagination $p): bool => $p->limit === 20 && $p->offset === 5)
+            )
+            ->willReturn(new SubscriptionPage(
+                [new Subscription(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z')],
+                Pagination::fromRequest(20, 5),
+                1
+            ));
 
         $reply = $this->service->ListSubscriptions($this->context, new ListSubscriptionsRequest([
             'email' => 'grpc@example.com',

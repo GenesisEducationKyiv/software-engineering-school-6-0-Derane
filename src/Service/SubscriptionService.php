@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Config\Pagination;
+use App\Domain\Subscription;
+use App\Domain\SubscriptionPage;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\SubscriptionNotFoundException;
-use App\Exception\ValidationException;
 use App\Repository\SubscriptionRepositoryInterface;
+use App\Repository\TrackedRepositoryRepositoryInterface;
+use App\Validation\SubscriptionValidator;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
@@ -15,23 +19,29 @@ final class SubscriptionService implements SubscriptionServiceInterface
 {
     public function __construct(
         private SubscriptionRepositoryInterface $repository,
+        private TrackedRepositoryRepositoryInterface $trackedRepositories,
         private GitHubServiceInterface $gitHubService,
+        private SubscriptionValidator $validator,
         private LoggerInterface $logger
     ) {
     }
 
     #[\Override]
-    public function subscribe(string $email, string $repoName): array
+    public function subscribe(string $email, string $repoName): Subscription
     {
-        $this->validateEmail($email);
-        $this->validateRepositoryFormat($repoName);
+        $this->validator->assertValidSubscription($email, $repoName);
 
         if (!$this->gitHubService->repositoryExists($repoName)) {
             throw new RepositoryNotFoundException($repoName);
         }
 
+        $this->trackedRepositories->ensureExists($repoName);
         $subscription = $this->repository->create($email, $repoName);
-        $this->logger->info("Subscription created", ['email' => $email, 'repository' => $repoName]);
+
+        $this->logger->info('Subscription created', [
+            'email' => $email,
+            'repository' => $repoName,
+        ]);
 
         return $subscription;
     }
@@ -41,58 +51,32 @@ final class SubscriptionService implements SubscriptionServiceInterface
     {
         $this->findOrFail($id);
         $this->repository->delete($id);
-        $this->logger->info("Subscription deleted", ['id' => $id]);
+        $this->logger->info('Subscription deleted', ['id' => $id]);
     }
 
-    /** @return array{id: int, email: string, repository: string, created_at: string} */
     #[\Override]
-    public function getSubscription(int $id): array
+    public function getSubscription(int $id): Subscription
     {
         return $this->findOrFail($id);
     }
 
-    /** @return list<array{id: int, email: string, repository: string, created_at: string}> */
     #[\Override]
-    public function listSubscriptions(?string $email = null, int $limit = 100, int $offset = 0): array
+    public function listSubscriptions(?string $email, Pagination $pagination): SubscriptionPage
     {
         if ($email !== null) {
-            return $this->repository->findByEmail($email, $limit, $offset);
+            return $this->repository->findByEmail($email, $pagination);
         }
 
-        return $this->repository->findAll($limit, $offset);
+        return $this->repository->findAll($pagination);
     }
 
-    public static function isValidRepositoryFormat(string $repository): bool
-    {
-        return (bool) preg_match('/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/', $repository);
-    }
-
-    public static function isValidEmail(string $email): bool
-    {
-        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
-    }
-
-    /** @return array{id: int, email: string, repository: string, created_at: string} */
-    private function findOrFail(int $id): array
+    private function findOrFail(int $id): Subscription
     {
         $subscription = $this->repository->findById($id);
         if ($subscription === null) {
             throw new SubscriptionNotFoundException($id);
         }
+
         return $subscription;
-    }
-
-    private function validateEmail(string $email): void
-    {
-        if (!self::isValidEmail($email)) {
-            throw new ValidationException("Invalid email format");
-        }
-    }
-
-    private function validateRepositoryFormat(string $repository): void
-    {
-        if (!self::isValidRepositoryFormat($repository)) {
-            throw new ValidationException("Invalid repository format. Expected: owner/repo");
-        }
     }
 }

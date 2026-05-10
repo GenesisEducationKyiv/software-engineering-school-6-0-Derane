@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
+use App\Config\SmtpConfig;
+use App\Domain\Release;
 use App\Factory\PHPMailerFactory;
+use App\Notifier\ReleaseEmailRenderer;
+use App\Notifier\SmtpMailer;
 use App\Service\NotifierService;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -13,49 +17,52 @@ class NotifierServiceTest extends TestCase
 {
     private function createService(array $overrides = []): NotifierService
     {
-        $config = array_merge([
+        $config = SmtpConfig::fromArray(array_merge([
             'host' => 'localhost',
             'port' => 1025,
             'user' => '',
             'password' => '',
             'from' => 'test@notifier.local',
             'encryption' => '',
-        ], $overrides);
+        ], $overrides));
 
-        return new NotifierService($config, new NullLogger(), new PHPMailerFactory());
+        return new NotifierService(
+            new SmtpMailer($config, new PHPMailerFactory()),
+            new ReleaseEmailRenderer(),
+            new NullLogger()
+        );
     }
 
-    public function testSendReleaseNotificationReturnsFalseOnSmtpFailure(): void
+    private function release(string $body = 'Release notes'): Release
     {
-        // With invalid SMTP host, sending will fail gracefully
-        $service = $this->createService(['host' => 'invalid.host.that.does.not.exist', 'port' => 9999]);
-
-        $result = $service->sendReleaseNotification(
-            'user@example.com',
-            'golang/go',
+        return new Release(
             'v1.22.0',
             'Go 1.22',
             'https://github.com/golang/go/releases/tag/v1.22.0',
-            'Release notes'
+            '2024-02-06',
+            $body
         );
-
-        $this->assertFalse($result);
     }
 
-    public function testSendReleaseNotificationAcceptsAllParameters(): void
+    public function testNotifyReturnsFalseOnSmtpFailure(): void
+    {
+        $service = $this->createService(['host' => 'invalid.host.that.does.not.exist', 'port' => 9999]);
+
+        $this->assertFalse(
+            $service->notifyReleaseAvailable('user@example.com', 'golang/go', $this->release())
+        );
+    }
+
+    public function testNotifyAcceptsAllParameters(): void
     {
         $service = $this->createService(['host' => 'invalid.host']);
 
-        // Verify it doesn't throw, just returns false on connection failure
-        $result = $service->sendReleaseNotification(
-            'test@example.com',
-            'owner/repo',
-            'v2.0.0',
-            'Major Release',
-            'https://github.com/owner/repo/releases/tag/v2.0.0',
-            "Line 1\nLine 2\n<script>alert('xss')</script>"
+        $this->assertFalse(
+            $service->notifyReleaseAvailable(
+                'test@example.com',
+                'owner/repo',
+                $this->release("Line 1\nLine 2\n<script>alert('xss')</script>")
+            )
         );
-
-        $this->assertFalse($result);
     }
 }

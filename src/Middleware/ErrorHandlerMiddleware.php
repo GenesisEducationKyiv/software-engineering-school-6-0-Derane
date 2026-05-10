@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Exception\RateLimitException;
-use App\Exception\RepositoryNotFoundException;
-use App\Exception\SubscriptionNotFoundException;
-use App\Exception\ValidationException;
+use App\Exception\ExceptionStatusMap;
 use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
@@ -21,7 +18,8 @@ final class ErrorHandlerMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private LoggerInterface $logger,
-        private ResponseFactoryInterface $responseFactory
+        private ResponseFactoryInterface $responseFactory,
+        private ExceptionStatusMap $statusMap
     ) {
     }
 
@@ -30,21 +28,17 @@ final class ErrorHandlerMiddleware implements MiddlewareInterface
     {
         try {
             return $handler->handle($request);
-        } catch (ValidationException $e) {
-            return $this->jsonError($e->getMessage(), StatusCodeInterface::STATUS_BAD_REQUEST);
-        } catch (RepositoryNotFoundException | SubscriptionNotFoundException $e) {
-            return $this->jsonError($e->getMessage(), StatusCodeInterface::STATUS_NOT_FOUND);
-        } catch (RateLimitException $e) {
-            return $this->jsonError(
-                'GitHub API rate limit exceeded. Please try again later.',
-                StatusCodeInterface::STATUS_TOO_MANY_REQUESTS
-            );
         } catch (\Throwable $e) {
-            $this->logger->error('Unhandled exception: ' . $e->getMessage(), [
-                'exception' => $e::class,
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return $this->jsonError('Internal server error', StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR);
+            $status = $this->statusMap->toHttpStatus($e);
+
+            if ($status === StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR) {
+                $this->logger->error('Unhandled exception: ' . $e->getMessage(), [
+                    'exception' => $e::class,
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            }
+
+            return $this->jsonError($this->statusMap->toClientMessage($e), $status);
         }
     }
 

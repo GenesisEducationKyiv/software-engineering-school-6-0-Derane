@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Middleware;
 
+use App\Exception\ExceptionStatusMap;
 use App\Exception\RateLimitException;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\SubscriptionNotFoundException;
@@ -21,7 +22,11 @@ class ErrorHandlerMiddlewareTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->middleware = new ErrorHandlerMiddleware(new NullLogger(), new ResponseFactory());
+        $this->middleware = new ErrorHandlerMiddleware(
+            new NullLogger(),
+            new ResponseFactory(),
+            new ExceptionStatusMap()
+        );
     }
 
     private function createHandler(\Throwable $exception): RequestHandlerInterface

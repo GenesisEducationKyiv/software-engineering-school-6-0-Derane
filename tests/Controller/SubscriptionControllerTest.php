@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Controller;
 
+use App\Config\Pagination;
 use App\Controller\SubscriptionController;
+use App\Domain\SubscriptionPage;
 use App\Exception\ValidationException;
 use App\Service\SubscriptionServiceInterface;
 use PHPUnit\Framework\TestCase;
@@ -34,8 +36,11 @@ class SubscriptionControllerTest extends TestCase
         $service = $this->createMock(SubscriptionServiceInterface::class);
         $service->expects($this->once())
             ->method('listSubscriptions')
-            ->with('test@example.com', 25, 50)
-            ->willReturn([]);
+            ->with(
+                'test@example.com',
+                $this->callback(static fn(Pagination $p): bool => $p->limit === 25 && $p->offset === 50)
+            )
+            ->willReturn(new SubscriptionPage([], Pagination::fromRequest(25, 50), 0));
 
         $controller = new SubscriptionController($service);
         $request = (new RequestFactory())->createRequest(

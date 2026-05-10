@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Config\Pagination;
 use App\Exception\ValidationException;
 use App\Service\SubscriptionServiceInterface;
 use Fig\Http\Message\StatusCodeInterface;
@@ -32,25 +33,37 @@ final class SubscriptionController
         }
 
         $subscription = $this->service->subscribe($email, $repository);
-        return $this->json($response, $subscription, StatusCodeInterface::STATUS_CREATED);
+        return $this->json($response, $subscription->toArray(), StatusCodeInterface::STATUS_CREATED);
     }
 
+    /** @param array<string, string> $args */
     public function get(Request $_request, Response $response, array $args): Response
     {
         $subscription = $this->service->getSubscription((int) $args['id']);
-        return $this->json($response, $subscription);
+        return $this->json($response, $subscription->toArray());
     }
 
     public function list(Request $request, Response $response): Response
     {
         $query = $request->getQueryParams();
         $email = isset($query['email']) ? trim((string) $query['email']) : null;
-        $limit = max(1, min(100, (int) ($query['limit'] ?? 100)));
-        $offset = max(0, (int) ($query['offset'] ?? 0));
-        $subscriptions = $this->service->listSubscriptions($email !== '' ? $email : null, $limit, $offset);
-        return $this->json($response, $subscriptions);
+        $pagination = Pagination::fromRequest(
+            (int) ($query['limit'] ?? Pagination::DEFAULT_LIMIT),
+            (int) ($query['offset'] ?? 0)
+        );
+
+        $page = $this->service->listSubscriptions(
+            $email !== '' ? $email : null,
+            $pagination
+        );
+
+        return $this->json(
+            $response,
+            array_map(static fn($s) => $s->toArray(), $page->items)
+        );
     }
 
+    /** @param array<string, string> $args */
     public function delete(Request $_request, Response $response, array $args): Response
     {
         $this->service->unsubscribe((int) $args['id']);
