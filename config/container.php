@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Cache\GitHubCacheInterface;
 use App\Cache\RedisGitHubCache;
+use App\Cache\SafeGitHubCacheDecorator;
 use App\Config\Factory\PaginationFactory;
 use App\Config\Factory\PaginationFactoryInterface;
 use App\Config\Factory\SmtpConfigFactory;
@@ -106,8 +107,8 @@ return static function (array $settings): Container {
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
         MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
-        GitHubCacheInterface::class => static fn($c) => new RedisGitHubCache(
-            $c->get(RedisClient::class),
+        GitHubCacheInterface::class => static fn($c) => new SafeGitHubCacheDecorator(
+            new RedisGitHubCache($c->get(RedisClient::class)),
             $c->get(LoggerInterface::class)
         ),
 
