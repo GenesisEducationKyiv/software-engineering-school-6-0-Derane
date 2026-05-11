@@ -44,14 +44,28 @@ layer in front of the GitHub API.
 
 ![HTTP API Components](diagrams/httpApiComponents.png)
 
-The request pipeline: every request enters through `ErrorHandlerMiddleware`
-(outermost — catches and maps domain exceptions), then `ApiKeyMiddleware`
-(validates `X-API-Key` for `/api/*` routes), and is dispatched to one of
-the controllers. `SubscriptionController` delegates to `SubscriptionService`,
-which coordinates `GitHubService` (cached via Redis) and `SubscriptionRepository`.
-`MetricsService` reads aggregate counts directly from the repository on each
-`/metrics` scrape. `HealthController` runs a `SELECT 1` against PostgreSQL
-for liveness.
+Layered top-down:
+
+- **Edge** — a single PSR-15 *HTTP Middleware Pipeline* component represents
+  the stack (`ErrorHandlerMiddleware` wraps all routes, `ApiKeyMiddleware`
+  guards `/api/*`). At component level the individual middleware classes are
+  collapsed into one node — the implementation detail lives in the code.
+- **Controllers** — `SubscriptionController`, `HealthController`,
+  `MetricsController`.
+- **Application services** — `SubscriptionService` (core business logic),
+  `GitHubService` (REST adapter, Redis-cached), `MetricsService`.
+- **Persistence** — `SubscriptionRepository` over PDO.
+
+`SubscriptionController` delegates to `SubscriptionService`, which coordinates
+`GitHubService` and `SubscriptionRepository`. `MetricsService` reads aggregate
+counts directly from the repository on each `/metrics` scrape.
+`HealthController` runs a `SELECT 1` against PostgreSQL for liveness.
+
+> The HTML subscription form (`public/index.html`) is served by Slim at `GET /`
+> and stays in the model as a `staticAsset` (browser shape, slate colour), but
+> it is **excluded from this component view** — it is content served by the
+> container, not an internal application component. It is still visible at the
+> container level via the HTTP API description.
 
 ### 4. gRPC API — Components
 

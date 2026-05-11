@@ -48,6 +48,13 @@ specification {
         }
     }
 
+    element staticAsset {
+        style {
+            shape browser
+            color slate
+        }
+    }
+
     relationship async
     relationship sync
 }

@@ -1,15 +1,16 @@
 model {
     extend notifier.httpApi {
-        apiKeyMw = component "ApiKeyMiddleware" {
-            description "Validates X-API-Key header for /api/* routes."
-            technology "PHP, PSR-15 middleware"
+        // Edge — PSR-15 middleware pipeline
+        middleware = component "HTTP Middleware Pipeline" {
+            description "
+                PSR-15 stack wrapping every request:
+                ErrorHandlerMiddleware (maps domain exceptions, all routes)
+                → ApiKeyMiddleware (validates X-API-Key, only /api/*).
+            "
+            technology "PHP, PSR-15"
         }
 
-        errorMw = component "ErrorHandlerMiddleware" {
-            description "Maps domain exceptions to HTTP responses."
-            technology "PHP, PSR-15 middleware"
-        }
-
+        // Controllers
         subscriptionCtrl = component "SubscriptionController" {
             description "REST handlers for /api/subscriptions CRUD."
             technology "PHP, Slim 4"
@@ -25,11 +26,7 @@ model {
             technology "PHP, Slim 4"
         }
 
-        homePage = component "HTML Subscription Form" {
-            description "Static public/index.html served by Slim at GET /. Submits to /api/subscriptions."
-            technology "Static HTML, served by Slim 4"
-        }
-
+        // Application services
         subscriptionSvc = component "SubscriptionService" {
             description "
                 Core business logic: validates email and
@@ -53,13 +50,22 @@ model {
             technology "PHP"
         }
 
+        // Persistence
         subscriptionRepo = component "SubscriptionRepository" {
             description "Data access for subscriptions table."
             technology "PHP, PDO"
         }
 
-        errorMw -> apiKeyMw "Wraps inner pipeline; catches and maps domain exceptions"
-        apiKeyMw -> subscriptionCtrl "Forwards authenticated request"
+        // Static assets (served by Slim, not part of the JSON API)
+        homePage = staticAsset "HTML Subscription Form" {
+            description "Static public/index.html served by Slim at GET /. Submits to /api/subscriptions."
+            technology "Static HTML, served by Slim 4"
+        }
+
+        middleware -> subscriptionCtrl "Forwards authenticated /api/* requests"
+        middleware -> healthCtrl "Forwards GET /health"
+        middleware -> metricsCtrl "Forwards GET /metrics"
+        middleware -> homePage "Serves GET / (static)"
         subscriptionCtrl -> subscriptionSvc "Delegates business logic"
         metricsCtrl -> metricsSvc "Renders Prometheus exposition"
         metricsSvc -> subscriptionRepo "Reads aggregate counts on every scrape"
@@ -142,10 +148,7 @@ model {
         scannerSvc -> notifierSvc "Dispatches email when release is new"
     }
 
-    user -> notifier.httpApi.errorMw "All HTTP requests (outermost middleware)" "HTTPS"
-    user -> notifier.httpApi.healthCtrl "GET /health"
-    user -> notifier.httpApi.metricsCtrl "GET /metrics"
-    user -> notifier.httpApi.homePage "GET / (subscription form)"
+    user -> notifier.httpApi.middleware "All HTTP requests (outermost edge)" "HTTPS"
 
     notifier.httpApi.healthCtrl -> notifier.db "SELECT 1 (liveness probe)" "SQL/TCP"
     notifier.httpApi.githubSvc -> notifier.redis "Reads/writes cached responses" "RESP"

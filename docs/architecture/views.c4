@@ -21,7 +21,10 @@ views {
         title "Component View — HTTP API"
         description "
             Components inside the HTTP API container:
-            controllers, middleware, services and repository.
+            middleware, controllers, services and repository.
+            The HTML subscription form is a served static asset
+            (see the container description), not an internal
+            component, and is omitted from this view.
         "
         include
             *,
@@ -29,6 +32,8 @@ views {
             notifier.db,
             notifier.redis,
             github
+        exclude
+            notifier.httpApi.homePage
     }
 
     view scannerComponents of notifier.scanner {
@@ -68,9 +73,8 @@ views {
             subscription via the HTTP API.
         "
 
-        user -> notifier.httpApi.errorMw "POST /api/subscriptions with X-API-Key"
-        notifier.httpApi.errorMw -> notifier.httpApi.apiKeyMw "Forward (catches exceptions on the way back)"
-        notifier.httpApi.apiKeyMw -> notifier.httpApi.subscriptionCtrl "Forward authenticated request"
+        user -> notifier.httpApi.middleware "POST /api/subscriptions with X-API-Key"
+        notifier.httpApi.middleware -> notifier.httpApi.subscriptionCtrl "Authenticated, forward to controller"
         notifier.httpApi.subscriptionCtrl -> notifier.httpApi.subscriptionSvc "create(email, owner/repo)"
         notifier.httpApi.subscriptionSvc -> notifier.httpApi.githubSvc "exists(owner/repo)?"
         notifier.httpApi.githubSvc -> notifier.redis "GET cached response"
