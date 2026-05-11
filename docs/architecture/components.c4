@@ -3,9 +3,8 @@ model {
         // Edge — PSR-15 middleware pipeline
         middleware = component "HTTP Middleware Pipeline" {
             description "
-                PSR-15 stack wrapping every request:
-                ErrorHandlerMiddleware (maps domain exceptions, all routes)
-                → ApiKeyMiddleware (validates X-API-Key, only /api/*).
+                PSR-15 stack: ErrorHandler → ApiKey → Slim BodyParser.
+                See ARCHITECTURE.md for routing and whitelist details.
             "
             technology "PHP, PSR-15"
         }
@@ -130,7 +129,7 @@ model {
 
         notifierSvc = component "NotifierService" {
             description "Builds and sends release email via SMTP."
-            technology "PHP, Symfony Mailer"
+            technology "PHP, PHPMailer"
         }
 
         scannerRepo = component "SubscriptionRepository" {

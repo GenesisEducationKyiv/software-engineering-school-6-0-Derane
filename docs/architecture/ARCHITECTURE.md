@@ -47,9 +47,12 @@ layer in front of the GitHub API.
 Layered top-down:
 
 - **Edge** — a single PSR-15 *HTTP Middleware Pipeline* component represents
-  the stack (`ErrorHandlerMiddleware` wraps all routes, `ApiKeyMiddleware`
-  guards `/api/*`). At component level the individual middleware classes are
-  collapsed into one node — the implementation detail lives in the code.
+  the stack: `ErrorHandlerMiddleware` (outermost, maps domain exceptions for
+  every route) → `ApiKeyMiddleware` (requires `X-API-Key` for any path
+  except the whitelisted `/health`, `/metrics`, `/`, `/static*`) → Slim
+  `BodyParsingMiddleware` (decodes JSON / form bodies). The individual
+  middleware classes are collapsed into one node at component level — the
+  implementation detail lives in the code.
 - **Controllers** — `SubscriptionController`, `HealthController`,
   `MetricsController`.
 - **Application services** — `SubscriptionService` (core business logic),
@@ -83,7 +86,7 @@ runs `SELECT 1` directly on PostgreSQL.
 
 `ScannerService` drives the polling loop: it picks repositories in batches,
 asks `GitHubService` (Redis-cached) for the latest release, and dispatches
-emails via `NotifierService` (Symfony Mailer → SMTP). Per-tag delivery state
+emails via `NotifierService` (PHPMailer → SMTP). Per-tag delivery state
 is tracked in the `release_notifications` table so a retry never produces
 duplicate emails.
 
