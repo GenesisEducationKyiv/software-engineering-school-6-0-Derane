@@ -1,12 +1,15 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto behat-up behat-run behat-down behat ci
+.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto behat-up behat-run behat-down behat ci c4-up c4-down c4-logs c4-validate
 
-COMPOSE := docker compose
-TEST_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
+COMPOSE := docker compose
+TEST_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml
+C4_COMPOSE := HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose -f docker-compose.architecture.yml
+C4_RUN := $(C4_COMPOSE) run --rm --no-deps -T likec4
+
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 ensure-env: ## Create .env from example if missing
 	@test -f .env || cp .env.example .env
@@ -66,3 +69,16 @@ ci: install ## Run the full Dockerized CI pipeline
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
 	$(MAKE) behat
+
+c4-up: ## Start LikeC4 live preview at http://localhost:5173
+	$(C4_COMPOSE) up -d
+	@echo "LikeC4 preview: http://localhost:$${LIKEC4_PORT:-5173}"
+
+c4-down: ## Stop LikeC4 preview
+	$(C4_COMPOSE) down
+
+c4-logs: ## Tail LikeC4 logs
+	$(C4_COMPOSE) logs -f
+
+c4-validate: ## Validate the LikeC4 model
+	$(C4_RUN) validate
