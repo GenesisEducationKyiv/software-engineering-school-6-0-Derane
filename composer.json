@@ -1,0 +1,55 @@
+{
+    "name": "valerii/github-release-notifier",
+    "description": "API service for subscribing to GitHub release notifications",
+    "type": "project",
+    "require": {
+        "php": "^8.2",
+        "slim/slim": "^4.12",
+        "slim/psr7": "^1.6",
+        "guzzlehttp/guzzle": "^7.8",
+        "phpmailer/phpmailer": "^6.9",
+        "predis/predis": "^2.2",
+        "vlucas/phpdotenv": "^5.6",
+        "php-di/php-di": "^7.0",
+        "php-di/slim-bridge": "^3.4",
+
+        "psr/log": "^3.0",
+        "monolog/monolog": "^3.5",
+        "spiral/roadrunner-grpc": "^3.5",
+        "google/protobuf": "^4.33"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5",
+        "vimeo/psalm": "^6.16",
+        "squizlabs/php_codesniffer": "^3.9",
+        "mockery/mockery": "^1.6",
+        "twentytwo-labs/behat-open-api": "^1.0",
+        "behat/mink": "^1.13",
+        "behat/mink-browserkit-driver": "^2.3",
+        "symfony/http-kernel": "^8.0",
+        "symfony/browser-kit": "^8.0",
+        "symfony/http-client": "^8.0",
+        "symfony/mime": "^8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "Grpc\\": "generated/Grpc/",
+            "GPBMetadata\\": "generated/GPBMetadata/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --configuration phpunit.xml",
+        "lint": "phpcs --standard=PSR12 src/ config/ bin/ tests/",
+        "psalm": "psalm",
+        "acceptance": "behat --colors --format=progress",
+        "migrate": "php bin/migrate.php",
+        "scanner": "php bin/scanner.php",
+        "grpc": "php bin/grpc.php"
+    }
+}

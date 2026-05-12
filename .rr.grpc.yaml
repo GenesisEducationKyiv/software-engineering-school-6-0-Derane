@@ -1,0 +1,9 @@
+version: "3"
+
+server:
+  command: "php bin/grpc.php"
+
+grpc:
+  listen: "tcp://0.0.0.0:9001"
+  proto:
+    - "proto/release_notifier.proto"

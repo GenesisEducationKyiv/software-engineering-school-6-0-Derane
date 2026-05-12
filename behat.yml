@@ -1,0 +1,19 @@
+default:
+  extensions:
+    Behat\MinkExtension:
+      base_url: "http://localhost:8080"
+      sessions:
+        default:
+          browserkit_http: ~
+    TwentytwoLabs\BehatOpenApiExtension\ServiceContainer\BehatOpenApiExtension:
+      schemaFile: "file://./swagger.yaml"
+  suites:
+    default:
+      paths:
+        - "%paths.base%/features"
+      contexts:
+        - Tests\Acceptance\FeatureContext:
+            baseUrl: "http://localhost:8080"
+        - TwentytwoLabs\BehatOpenApiExtension\Context\RestContext: ~
+        - TwentytwoLabs\BehatOpenApiExtension\Context\JsonContext: ~
+        - TwentytwoLabs\BehatOpenApiExtension\Context\OpenApiContext: ~
