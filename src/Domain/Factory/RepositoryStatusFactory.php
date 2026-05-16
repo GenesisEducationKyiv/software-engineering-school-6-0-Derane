@@ -7,7 +7,7 @@ namespace App\Domain\Factory;
 use App\Domain\RepositoryStatus;
 
 /** @psalm-api */
-final class RepositoryStatusFactory implements RepositoryStatusFactoryInterface
+final readonly class RepositoryStatusFactory implements RepositoryStatusFactoryInterface
 {
     #[\Override]
     public function fromRow(array $row): RepositoryStatus

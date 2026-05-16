@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Config;
 
-final class Pagination
+final readonly class Pagination
 {
     public function __construct(
-        public readonly int $limit,
-        public readonly int $offset
+        public int $limit,
+        public int $offset
     ) {
     }
 }

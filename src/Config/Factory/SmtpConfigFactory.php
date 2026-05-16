@@ -7,7 +7,7 @@ namespace App\Config\Factory;
 use App\Config\SmtpConfig;
 
 /** @psalm-api */
-final class SmtpConfigFactory implements SmtpConfigFactoryInterface
+final readonly class SmtpConfigFactory implements SmtpConfigFactoryInterface
 {
     #[\Override]
     public function fromArray(array $config): SmtpConfig

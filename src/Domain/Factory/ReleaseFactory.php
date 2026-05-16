@@ -7,7 +7,7 @@ namespace App\Domain\Factory;
 use App\Domain\Release;
 
 /** @psalm-api */
-final class ReleaseFactory implements ReleaseFactoryInterface
+final readonly class ReleaseFactory implements ReleaseFactoryInterface
 {
     #[\Override]
     public function fromGitHubPayload(array $payload): Release

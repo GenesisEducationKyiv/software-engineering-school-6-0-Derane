@@ -7,7 +7,7 @@ namespace App\Domain\Factory;
 use App\Domain\SubscriberRef;
 
 /** @psalm-api */
-final class SubscriberRefFactory implements SubscriberRefFactoryInterface
+final readonly class SubscriberRefFactory implements SubscriberRefFactoryInterface
 {
     #[\Override]
     public function fromRow(array $row): SubscriberRef

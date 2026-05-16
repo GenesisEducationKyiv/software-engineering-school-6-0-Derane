@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Domain;
 
-final class Release
+final readonly class Release
 {
     public function __construct(
-        public readonly ?string $tagName,
-        public readonly string $name,
-        public readonly string $htmlUrl,
-        public readonly string $publishedAt,
-        public readonly string $body
+        public ?string $tagName,
+        public string $name,
+        public string $htmlUrl,
+        public string $publishedAt,
+        public string $body
     ) {
     }
 

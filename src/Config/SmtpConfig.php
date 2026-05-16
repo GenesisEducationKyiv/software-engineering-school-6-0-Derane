@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace App\Config;
 
-final class SmtpConfig
+final readonly class SmtpConfig
 {
     public function __construct(
-        public readonly string $host,
-        public readonly int $port,
-        public readonly string $from,
-        public readonly string $user,
-        public readonly string $password,
-        public readonly string $encryption
+        public string $host,
+        public int $port,
+        public string $from,
+        public string $user,
+        public string $password,
+        public string $encryption
     ) {
     }
 

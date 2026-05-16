@@ -7,13 +7,13 @@ namespace App\Domain;
 use App\Config\Pagination;
 
 /** @psalm-api */
-final class SubscriptionPage
+final readonly class SubscriptionPage
 {
     /** @param list<Subscription> $items */
     public function __construct(
-        public readonly array $items,
-        public readonly Pagination $pagination,
-        public readonly int $total
+        public array $items,
+        public Pagination $pagination,
+        public int $total
     ) {
     }
 

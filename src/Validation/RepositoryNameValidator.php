@@ -6,7 +6,7 @@ namespace App\Validation;
 
 use App\Exception\ValidationException;
 
-final class RepositoryNameValidator
+final readonly class RepositoryNameValidator
 {
     private const PATTERN = '/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/';
 

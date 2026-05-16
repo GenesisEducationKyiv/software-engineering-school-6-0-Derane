@@ -12,7 +12,7 @@ use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
  * status codes (HTTP and gRPC). Keeps the mapping consistent across the
  * ErrorHandlerMiddleware and the gRPC service.
  */
-final class ExceptionStatusMap
+final readonly class ExceptionStatusMap
 {
     public function toHttpStatus(\Throwable $e): int
     {

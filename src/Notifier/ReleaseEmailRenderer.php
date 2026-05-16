@@ -6,7 +6,7 @@ namespace App\Notifier;
 
 use App\Domain\Release;
 
-final class ReleaseEmailRenderer
+final readonly class ReleaseEmailRenderer
 {
     public function render(string $repository, Release $release): RenderedEmail
     {

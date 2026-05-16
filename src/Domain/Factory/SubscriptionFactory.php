@@ -7,7 +7,7 @@ namespace App\Domain\Factory;
 use App\Domain\Subscription;
 
 /** @psalm-api */
-final class SubscriptionFactory implements SubscriptionFactoryInterface
+final readonly class SubscriptionFactory implements SubscriptionFactoryInterface
 {
     #[\Override]
     public function fromRow(array $row): Subscription

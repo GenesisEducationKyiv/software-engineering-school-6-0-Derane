@@ -7,7 +7,7 @@ namespace App\Config\Factory;
 use App\Config\Pagination;
 
 /** @psalm-api */
-final class PaginationFactory implements PaginationFactoryInterface
+final readonly class PaginationFactory implements PaginationFactoryInterface
 {
     private const DEFAULT_LIMIT = 100;
     private const MAX_LIMIT = 100;

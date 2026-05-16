@@ -6,13 +6,13 @@ namespace App\Domain;
 
 use JsonSerializable;
 
-final class Subscription implements JsonSerializable
+final readonly class Subscription implements JsonSerializable
 {
     public function __construct(
-        public readonly int $id,
-        public readonly string $email,
-        public readonly string $repository,
-        public readonly string $createdAt
+        public int $id,
+        public string $email,
+        public string $repository,
+        public string $createdAt
     ) {
     }
 

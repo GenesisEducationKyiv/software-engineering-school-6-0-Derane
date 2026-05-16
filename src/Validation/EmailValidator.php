@@ -6,7 +6,7 @@ namespace App\Validation;
 
 use App\Exception\ValidationException;
 
-final class EmailValidator
+final readonly class EmailValidator
 {
     public function isValid(string $email): bool
     {

@@ -13,10 +13,10 @@ use Traversable;
  * @implements IteratorAggregate<int, SubscriberRef>
  * @psalm-api
  */
-final class SubscriberCollection implements IteratorAggregate, Countable
+final readonly class SubscriberCollection implements IteratorAggregate, Countable
 {
     /** @param list<SubscriberRef> $subscribers */
-    public function __construct(private readonly array $subscribers)
+    public function __construct(private array $subscribers)
     {
     }
 

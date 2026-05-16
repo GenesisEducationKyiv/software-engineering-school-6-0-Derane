@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Metrics;
 
-final class PrometheusFormatter
+final readonly class PrometheusFormatter
 {
     /** @param list<Metric> $metrics */
     public function format(array $metrics): string
