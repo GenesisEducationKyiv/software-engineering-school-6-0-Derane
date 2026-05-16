@@ -17,6 +17,7 @@ use App\Repository\SubscriptionRepository;
 use App\Repository\SubscriptionRepositoryInterface;
 use App\Service\GitHubService;
 use App\Service\GitHubServiceInterface;
+use Tests\Support\FakeGitHubService;
 use App\Service\MetricsService;
 use App\Service\MetricsServiceInterface;
 use App\Service\NotifierInterface;
@@ -77,6 +78,10 @@ return static function (array $settings): Container {
 
         SubscriptionRepositoryInterface::class => static fn($c) => new SubscriptionRepository($c->get(PDO::class)),
         GitHubServiceInterface::class => static function ($c) use ($settings) {
+            if (($settings['github']['stub'] ?? false) === true) {
+                return new FakeGitHubService();
+            }
+
             return new GitHubService(
                 $c->get(GuzzleClient::class),
                 $c->get(GitHubCacheInterface::class),
