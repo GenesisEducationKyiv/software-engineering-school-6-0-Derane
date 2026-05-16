@@ -10,18 +10,32 @@ On first run Docker will build the app image and pull `postgres` / `redis` /
 `playwright` images (~2-3 min). Subsequent runs use the cache and finish in
 seconds.
 
+## Run every test suite in one command
+
+```bash
+make tests
+```
+
+Sequence: unit → integration → acceptance → e2e. Each step boots only the
+services it needs and tears them down afterwards — even if the suite fails.
+
 ## Per-suite commands
 
 | Command            | Suite                        | What runs in Docker                              |
 | ------------------ | ---------------------------- | ------------------------------------------------ |
 | `make test`        | PHPUnit **Unit** (55 tests)  | `app` image                                      |
-| `make integration` | PHPUnit **Integration** (21) | `app` + Postgres + Redis                         |
-| `make acceptance`  | Behat **Acceptance** (24)    | `app` + Postgres + Redis + scanner + grpc + smtp |
+| `make integration` | PHPUnit **Integration** (32) | `app` + Postgres + Redis                         |
+| `make acceptance`  | Behat **Acceptance** (27)    | `app` + Postgres + Redis + scanner + grpc + smtp |
 | `make e2e`         | Playwright **E2E** (6)       | `app` + Postgres + Redis + Playwright image      |
 
 Each `make X` is end-to-end: it brings the required Docker stack up, runs the
-suite, and brings it down with volumes removed — the next run starts from a
-clean DB.
+suite, and brings it down with volumes removed — even on failure. The next
+run starts from a clean DB.
+
+External GitHub API is **never** contacted: the test stack exports
+`GITHUB_STUB=true`, which makes the container bind `FakeGitHubService` instead
+of the real one. Repository names beginning with `nonexistent` simulate a
+GitHub 404 so 404 paths stay covered.
 
 ## What each suite covers
 

@@ -19,6 +19,7 @@ return [
         'token' => $_ENV['GITHUB_TOKEN'] ?? '',
         'scan_interval' => (int) ($_ENV['GITHUB_SCAN_INTERVAL'] ?? 300),
         'scan_batch_size' => (int) ($_ENV['GITHUB_SCAN_BATCH_SIZE'] ?? 100),
+        'stub' => filter_var($_ENV['GITHUB_STUB'] ?? false, FILTER_VALIDATE_BOOLEAN),
     ],
     'smtp' => [
         'host' => $_ENV['SMTP_HOST'] ?? 'localhost',

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use App\Migration\Migrator;
-use App\Service\GitHubServiceInterface;
 use DI\Container;
 use Faker\Factory as FakerFactory;
 use Faker\Generator;
@@ -56,7 +55,6 @@ abstract class IntegrationTestCase extends TestCase
         $build = require dirname(__DIR__, 2) . '/config/container.php';
 
         $container = $build($settings);
-        $container->set(GitHubServiceInterface::class, self::stubGitHubService());
 
         if (!self::$migrated) {
             $container->get(Migrator::class)->migrate();
@@ -67,26 +65,11 @@ abstract class IntegrationTestCase extends TestCase
         return $container;
     }
 
-    private static function stubGitHubService(): GitHubServiceInterface
-    {
-        return new class implements GitHubServiceInterface {
-            public function repositoryExists(string $repository): bool
-            {
-                return true;
-            }
-
-            public function getLatestRelease(string $repository): ?array
-            {
-                return null;
-            }
-        };
-    }
-
     private static function populateEnv(): void
     {
         $keys = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD',
             'REDIS_HOST', 'REDIS_PORT', 'REDIS_CACHE_TTL', 'GITHUB_TOKEN',
-            'GITHUB_SCAN_INTERVAL', 'GITHUB_SCAN_BATCH_SIZE', 'API_KEY'];
+            'GITHUB_SCAN_INTERVAL', 'GITHUB_SCAN_BATCH_SIZE', 'GITHUB_STUB', 'API_KEY'];
 
         foreach ($keys as $key) {
             if (!isset($_ENV[$key])) {

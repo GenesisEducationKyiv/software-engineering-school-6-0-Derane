@@ -1,7 +1,7 @@
 .PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto \
         acceptance-up acceptance-run acceptance-down acceptance \
         integration-up integration-run integration-down integration \
-        e2e-up e2e-run e2e-down e2e ci c4-up c4-down c4-logs c4-validate
+        e2e-up e2e-run e2e-down e2e tests ci c4-up c4-down c4-logs c4-validate
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -65,8 +65,7 @@ integration-down: ## Stop integration environment and remove volumes
 	$(TEST_COMPOSE) down -v
 
 integration: integration-up ## Run PHPUnit Integration suite end-to-end
-	$(MAKE) integration-run
-	$(MAKE) integration-down
+	@$(MAKE) integration-run; status=$$?; $(MAKE) integration-down; exit $$status
 
 acceptance-up: ensure-env ## Start acceptance environment in Docker
 	$(TEST_COMPOSE) up -d --build --wait
@@ -78,8 +77,7 @@ acceptance-down: ## Stop acceptance environment and remove volumes
 	$(TEST_COMPOSE) down -v
 
 acceptance: acceptance-up ## Run Behat acceptance tests end-to-end
-	$(MAKE) acceptance-run
-	$(MAKE) acceptance-down
+	@$(MAKE) acceptance-run; status=$$?; $(MAKE) acceptance-down; exit $$status
 
 e2e-up: ensure-env ## Start E2E environment (app stack) in Docker
 	$(E2E_COMPOSE) up -d --build --wait app
@@ -91,16 +89,18 @@ e2e-down: ## Stop E2E environment and remove volumes
 	$(E2E_COMPOSE) down -v
 
 e2e: e2e-up ## Run Playwright E2E tests end-to-end
-	$(MAKE) e2e-run
-	$(MAKE) e2e-down
+	@$(MAKE) e2e-run; status=$$?; $(MAKE) e2e-down; exit $$status
 
-ci: install ## Run the full Dockerized CI pipeline locally
-	$(MAKE) lint
-	$(MAKE) psalm
+tests: ## Run every test suite (unit, integration, acceptance, e2e)
 	$(MAKE) test
 	$(MAKE) integration
 	$(MAKE) acceptance
 	$(MAKE) e2e
+
+ci: install ## Run the full Dockerized CI pipeline locally
+	$(MAKE) lint
+	$(MAKE) psalm
+	$(MAKE) tests
 
 c4-up: ## Start LikeC4 live preview at http://localhost:5173
 	$(C4_COMPOSE) up -d
