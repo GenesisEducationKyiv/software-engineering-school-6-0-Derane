@@ -4,46 +4,59 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Cache;
 
-use App\Cache\RedisGitHubCache;
-use Psr\Log\NullLogger;
+use App\Cache\GitHubCacheInterface;
+use Predis\Client as RedisClient;
 use Tests\Integration\IntegrationTestCase;
 
 final class RedisGitHubCacheTest extends IntegrationTestCase
 {
-    private RedisGitHubCache $cache;
+    private GitHubCacheInterface $cache;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->cache = new RedisGitHubCache(self::redis(), new NullLogger());
+        $this->cache = $this->c->get(GitHubCacheInterface::class);
     }
 
     public function testGetReturnsNullForMissingKey(): void
     {
-        $this->assertNull($this->cache->get('missing-key'));
+        $this->assertNull($this->cache->get($this->faker->uuid()));
     }
 
     public function testSetThenGetRoundTrip(): void
     {
-        $this->cache->set('repo:golang/go', 60, '{"id": 1}');
+        $key = $this->cacheKey();
+        $payload = $this->faker->sentence();
 
-        $this->assertSame('{"id": 1}', $this->cache->get('repo:golang/go'));
+        $this->cache->set($key, 60, $payload);
+
+        $this->assertSame($payload, $this->cache->get($key));
     }
 
     public function testSetAppliesTtl(): void
     {
-        $this->cache->set('repo:golang/go', 120, 'payload');
+        $key = $this->cacheKey();
+        $this->cache->set($key, 120, $this->faker->sentence());
 
-        $ttl = self::redis()->ttl('repo:golang/go');
+        $ttl = $this->c->get(RedisClient::class)->ttl($key);
         $this->assertGreaterThan(0, $ttl);
         $this->assertLessThanOrEqual(120, $ttl);
     }
 
     public function testSetOverwritesExistingValue(): void
     {
-        $this->cache->set('repo:golang/go', 60, 'first');
-        $this->cache->set('repo:golang/go', 60, 'second');
+        $key = $this->cacheKey();
+        $first = $this->faker->sentence();
+        $second = $this->faker->sentence();
 
-        $this->assertSame('second', $this->cache->get('repo:golang/go'));
+        $this->cache->set($key, 60, $first);
+        $this->cache->set($key, 60, $second);
+
+        $this->assertSame($second, $this->cache->get($key));
+    }
+
+    private function cacheKey(): string
+    {
+        return 'repo:' . $this->faker->unique()->userName() . '/' . $this->faker->unique()->userName();
     }
 }

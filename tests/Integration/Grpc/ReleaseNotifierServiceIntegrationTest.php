@@ -5,15 +5,11 @@ declare(strict_types=1);
 namespace Tests\Integration\Grpc;
 
 use App\Grpc\ReleaseNotifierService;
-use App\Repository\SubscriptionRepository;
-use App\Service\GitHubServiceInterface;
-use App\Service\SubscriptionService;
 use Grpc\ReleaseNotifier\V1\CreateSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\GetSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\HealthCheckRequest;
 use Grpc\ReleaseNotifier\V1\ListSubscriptionsRequest;
-use Psr\Log\NullLogger;
 use Spiral\RoadRunner\GRPC\ContextInterface;
 use Spiral\RoadRunner\GRPC\Exception\GRPCException;
 use Spiral\RoadRunner\GRPC\StatusCode;
@@ -27,26 +23,7 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        $github = new class implements GitHubServiceInterface {
-            public function repositoryExists(string $repository): bool
-            {
-                return true;
-            }
-
-            public function getLatestRelease(string $repository): ?array
-            {
-                return null;
-            }
-        };
-
-        $subscriptions = new SubscriptionService(
-            new SubscriptionRepository(self::pdo()),
-            $github,
-            new NullLogger()
-        );
-
-        $this->service = new ReleaseNotifierService($subscriptions, self::pdo(), new NullLogger());
+        $this->service = $this->c->get(ReleaseNotifierService::class);
         $this->ctx = $this->createMock(ContextInterface::class);
     }
 
@@ -59,36 +36,45 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
 
     public function testCreateSubscriptionPersistsAndReturnsReply(): void
     {
+        $email = $this->faker->safeEmail();
+        $repository = $this->repoName();
+
         $reply = $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'grpc@example.com',
-            'repository' => 'docker/compose',
+            'email' => $email,
+            'repository' => $repository,
         ]));
 
         $this->assertGreaterThan(0, $reply->getId());
-        $this->assertSame('grpc@example.com', $reply->getEmail());
-        $this->assertSame('docker/compose', $reply->getRepository());
+        $this->assertSame($email, $reply->getEmail());
+        $this->assertSame($repository, $reply->getRepository());
         $this->assertNotEmpty($reply->getCreatedAt());
 
-        $fetched = $this->service->GetSubscription($this->ctx, new GetSubscriptionRequest(['id' => $reply->getId()]));
+        $fetched = $this->service->GetSubscription(
+            $this->ctx,
+            new GetSubscriptionRequest(['id' => $reply->getId()])
+        );
         $this->assertSame($reply->getId(), $fetched->getId());
     }
 
     public function testCreateSubscriptionIsIdempotent(): void
     {
+        $email = $this->faker->safeEmail();
+        $repository = $this->repoName();
+
         $first = $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'dup@example.com',
-            'repository' => 'docker/compose',
+            'email' => $email,
+            'repository' => $repository,
         ]));
 
         $second = $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'dup@example.com',
-            'repository' => 'docker/compose',
+            'email' => $email,
+            'repository' => $repository,
         ]));
 
         $this->assertSame($first->getId(), $second->getId());
 
         $list = $this->service->ListSubscriptions($this->ctx, new ListSubscriptionsRequest([
-            'email' => 'dup@example.com',
+            'email' => $email,
         ]));
         $this->assertCount(1, $list->getSubscriptions());
     }
@@ -100,7 +86,7 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
 
         $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
             'email' => 'not-an-email',
-            'repository' => 'docker/compose',
+            'repository' => $this->repoName(),
         ]));
     }
 
@@ -110,21 +96,15 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
         $this->expectExceptionCode(StatusCode::INVALID_ARGUMENT);
 
         $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'user@example.com',
+            'email' => $this->faker->safeEmail(),
             'repository' => 'invalid-repo',
         ]));
     }
 
     public function testListSubscriptionsReturnsPersistedRows(): void
     {
-        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'a@example.com',
-            'repository' => 'docker/compose',
-        ]));
-        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'b@example.com',
-            'repository' => 'golang/go',
-        ]));
+        $this->createSubscription();
+        $this->createSubscription();
 
         $reply = $this->service->ListSubscriptions($this->ctx, new ListSubscriptionsRequest());
 
@@ -133,31 +113,23 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
 
     public function testListSubscriptionsFiltersByEmail(): void
     {
-        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'a@example.com',
-            'repository' => 'docker/compose',
-        ]));
-        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'b@example.com',
-            'repository' => 'golang/go',
-        ]));
+        $mine = $this->faker->safeEmail();
+        $this->createSubscription($mine);
+        $this->createSubscription();
 
         $reply = $this->service->ListSubscriptions($this->ctx, new ListSubscriptionsRequest([
-            'email' => 'a@example.com',
+            'email' => $mine,
         ]));
 
         $this->assertCount(1, $reply->getSubscriptions());
-        $this->assertSame('a@example.com', $reply->getSubscriptions()[0]->getEmail());
+        $this->assertSame($mine, $reply->getSubscriptions()[0]->getEmail());
     }
 
     public function testListSubscriptionsRespectsPagination(): void
     {
-        foreach (['a@example.com', 'b@example.com', 'c@example.com'] as $email) {
-            $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-                'email' => $email,
-                'repository' => 'docker/compose',
-            ]));
-        }
+        $this->createSubscription();
+        $this->createSubscription();
+        $this->createSubscription();
 
         $firstPage = $this->service->ListSubscriptions($this->ctx, new ListSubscriptionsRequest([
             'limit' => 2,
@@ -177,14 +149,17 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
         $this->expectException(GRPCException::class);
         $this->expectExceptionCode(StatusCode::NOT_FOUND);
 
-        $this->service->GetSubscription($this->ctx, new GetSubscriptionRequest(['id' => 999999]));
+        $this->service->GetSubscription(
+            $this->ctx,
+            new GetSubscriptionRequest(['id' => $this->faker->numberBetween(1_000_000, 9_999_999)])
+        );
     }
 
     public function testDeleteSubscriptionRemovesRow(): void
     {
         $created = $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
-            'email' => 'delete@example.com',
-            'repository' => 'docker/compose',
+            'email' => $this->faker->safeEmail(),
+            'repository' => $this->repoName(),
         ]));
 
         $reply = $this->service->DeleteSubscription($this->ctx, new DeleteSubscriptionRequest([
@@ -195,7 +170,10 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
 
         $this->expectException(GRPCException::class);
         $this->expectExceptionCode(StatusCode::NOT_FOUND);
-        $this->service->GetSubscription($this->ctx, new GetSubscriptionRequest(['id' => $created->getId()]));
+        $this->service->GetSubscription(
+            $this->ctx,
+            new GetSubscriptionRequest(['id' => $created->getId()])
+        );
     }
 
     public function testDeleteSubscriptionMissingMapsToNotFound(): void
@@ -203,6 +181,22 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
         $this->expectException(GRPCException::class);
         $this->expectExceptionCode(StatusCode::NOT_FOUND);
 
-        $this->service->DeleteSubscription($this->ctx, new DeleteSubscriptionRequest(['id' => 999999]));
+        $this->service->DeleteSubscription(
+            $this->ctx,
+            new DeleteSubscriptionRequest(['id' => $this->faker->numberBetween(1_000_000, 9_999_999)])
+        );
+    }
+
+    private function createSubscription(?string $email = null): void
+    {
+        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
+            'email' => $email ?? $this->faker->safeEmail(),
+            'repository' => $this->repoName(),
+        ]));
+    }
+
+    private function repoName(): string
+    {
+        return $this->faker->unique()->userName() . '/' . $this->faker->unique()->userName();
     }
 }
