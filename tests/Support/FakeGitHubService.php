@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Service;
+namespace Tests\Support;
+
+use App\Service\GitHubServiceInterface;
 
 /**
  * Deterministic in-process replacement for GitHubService used in test stacks
