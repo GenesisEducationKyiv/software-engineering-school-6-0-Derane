@@ -1,0 +1,23 @@
+name: Unit Tests
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: unit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  phpunit:
+    name: PHPUnit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: make test

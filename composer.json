@@ -45,7 +45,7 @@
     },
     "scripts": {
         "test": "phpunit --configuration phpunit.xml",
-        "lint": "phpcs --standard=PSR12 src/ config/ bin/ tests/",
+        "lint": "phpcs",
         "psalm": "psalm",
         "acceptance": "behat --colors --format=progress",
         "migrate": "php bin/migrate.php",

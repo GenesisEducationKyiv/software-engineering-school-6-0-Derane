@@ -1,0 +1,26 @@
+name: Integration Tests
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  phpunit-integration:
+    name: PHPUnit (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Postgres + Redis
+        run: make integration-up
+
+      - name: Run Integration suite
+        run: make integration-run

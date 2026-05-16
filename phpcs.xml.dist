@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="github-release-notifier">
+    <description>PSR-12 with project-specific exclusions.</description>
+
+    <arg name="basepath" value="."/>
+    <arg name="colors"/>
+    <arg name="extensions" value="php"/>
+
+    <file>src</file>
+    <file>config</file>
+    <file>bin</file>
+    <file>tests</file>
+
+    <exclude-pattern>tests/e2e/</exclude-pattern>
+    <exclude-pattern>generated/</exclude-pattern>
+    <exclude-pattern>vendor/</exclude-pattern>
+
+    <rule ref="PSR12"/>
+</ruleset>
