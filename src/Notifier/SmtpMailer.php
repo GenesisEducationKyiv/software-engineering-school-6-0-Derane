@@ -8,7 +8,7 @@ use App\Config\SmtpConfig;
 use App\Factory\MailerFactoryInterface;
 
 /** @psalm-api */
-final class SmtpMailer implements MailerInterface
+final readonly class SmtpMailer implements MailerInterface
 {
     public function __construct(
         private SmtpConfig $config,

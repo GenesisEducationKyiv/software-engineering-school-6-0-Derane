@@ -26,7 +26,7 @@ use Spiral\RoadRunner\GRPC\Exception\ServiceException;
 use Spiral\RoadRunner\GRPC\StatusCode;
 
 /** @psalm-api */
-final class ReleaseNotifierService implements ReleaseNotifierServiceInterface
+final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInterface
 {
     // gRPC method names are generated from the proto contract and must keep exact casing.
     // phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps

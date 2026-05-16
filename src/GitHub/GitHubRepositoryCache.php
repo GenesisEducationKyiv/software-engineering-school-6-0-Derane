@@ -7,7 +7,7 @@ namespace App\GitHub;
 use App\Cache\GitHubCacheInterface;
 
 /** @psalm-api */
-final class GitHubRepositoryCache
+final readonly class GitHubRepositoryCache implements RepositoryExistenceCacheInterface
 {
     public function __construct(
         private GitHubCacheInterface $cache,
@@ -15,6 +15,7 @@ final class GitHubRepositoryCache
     ) {
     }
 
+    #[\Override]
     public function getExists(string $repository): ?bool
     {
         $cached = $this->cache->get($this->key($repository));
@@ -25,6 +26,7 @@ final class GitHubRepositoryCache
         return $cached === '1';
     }
 
+    #[\Override]
     public function putExists(string $repository, bool $exists): void
     {
         $this->cache->set($this->key($repository), $this->ttl, $exists ? '1' : '0');

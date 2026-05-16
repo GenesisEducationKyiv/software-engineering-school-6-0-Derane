@@ -11,7 +11,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class HealthController
+final readonly class HealthController
 {
     public function __construct(
         private HealthCheckInterface $healthCheck,

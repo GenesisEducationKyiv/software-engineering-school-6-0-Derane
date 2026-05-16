@@ -9,7 +9,7 @@ use App\Metrics\PrometheusFormatter;
 use App\Repository\MetricsRepositoryInterface;
 
 /** @psalm-api */
-final class MetricsService implements MetricsServiceInterface
+final readonly class MetricsService implements MetricsServiceInterface
 {
     public function __construct(
         private MetricsRepositoryInterface $metricsRepository,

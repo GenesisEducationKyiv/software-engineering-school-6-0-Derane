@@ -9,21 +9,14 @@ use App\Domain\RepositoryStatus;
 use PDO;
 
 /** @psalm-api */
-final class TrackedRepositoryRepository implements TrackedRepositoryRepositoryInterface
+final readonly class TrackedRepositoryReader implements
+    RepositoryStatusReader,
+    ScanCandidateSource
 {
     public function __construct(
         private PDO $pdo,
         private RepositoryStatusFactoryInterface $statusFactory
     ) {
-    }
-
-    #[\Override]
-    public function ensureExists(string $fullName): void
-    {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO repositories (full_name) VALUES (:full_name) ON CONFLICT (full_name) DO NOTHING'
-        );
-        $stmt->execute(['full_name' => $fullName]);
     }
 
     #[\Override]
@@ -50,23 +43,5 @@ final class TrackedRepositoryRepository implements TrackedRepositoryRepositoryIn
         $stmt->execute();
         /** @var list<string> */
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
-    }
-
-    #[\Override]
-    public function markChecked(string $fullName): void
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE repositories SET last_checked_at = NOW() WHERE full_name = :repository'
-        );
-        $stmt->execute(['repository' => $fullName]);
-    }
-
-    #[\Override]
-    public function markReleaseSeen(string $fullName, string $tag): void
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE repositories SET last_seen_tag = :tag, last_checked_at = NOW() WHERE full_name = :repository'
-        );
-        $stmt->execute(['tag' => $tag, 'repository' => $fullName]);
     }
 }

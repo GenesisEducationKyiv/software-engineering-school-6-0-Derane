@@ -7,7 +7,7 @@ namespace App\Repository;
 use PDO;
 
 /** @psalm-api */
-final class NotificationLedger implements NotificationLedgerInterface
+final readonly class NotificationLedger implements NotificationLedgerInterface
 {
     public function __construct(private PDO $pdo)
     {

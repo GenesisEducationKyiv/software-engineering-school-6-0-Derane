@@ -7,10 +7,10 @@ namespace App\Cache;
 use Predis\ClientInterface as RedisClientInterface;
 
 /** @psalm-api */
-final class RedisGitHubCache implements GitHubCacheInterface
+final readonly class RedisGitHubCache implements GitHubCacheInterface
 {
     public function __construct(
-        private readonly RedisClientInterface $redis
+        private RedisClientInterface $redis
     ) {
     }
 

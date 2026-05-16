@@ -14,7 +14,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class ErrorHandlerMiddleware implements MiddlewareInterface
+final readonly class ErrorHandlerMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private LoggerInterface $logger,

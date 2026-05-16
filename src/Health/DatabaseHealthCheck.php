@@ -7,7 +7,7 @@ namespace App\Health;
 use PDO;
 
 /** @psalm-api */
-final class DatabaseHealthCheck implements HealthCheckInterface
+final readonly class DatabaseHealthCheck implements HealthCheckInterface
 {
     public function __construct(private PDO $pdo)
     {

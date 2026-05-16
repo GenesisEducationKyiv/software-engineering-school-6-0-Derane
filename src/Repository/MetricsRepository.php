@@ -8,7 +8,7 @@ use App\Domain\MetricsSnapshot;
 use PDO;
 
 /** @psalm-api */
-final class MetricsRepository implements MetricsRepositoryInterface
+final readonly class MetricsRepository implements MetricsRepositoryInterface
 {
     public function __construct(private PDO $pdo)
     {

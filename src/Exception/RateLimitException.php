@@ -6,7 +6,7 @@ namespace App\Exception;
 
 final class RateLimitException extends \RuntimeException
 {
-    public function __construct(string $retryAfter = '')
+    public function __construct(public readonly string $retryAfter = '')
     {
         $message = 'GitHub API rate limit exceeded.';
         if ($retryAfter !== '') {

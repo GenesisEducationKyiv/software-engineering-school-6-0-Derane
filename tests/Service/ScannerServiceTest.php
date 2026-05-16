@@ -10,8 +10,10 @@ use App\Domain\SubscriberCollection;
 use App\Domain\SubscriberRef;
 use App\Exception\RateLimitException;
 use App\Repository\NotificationLedgerInterface;
+use App\Repository\RepositoryStatusReader;
+use App\Repository\ScanCandidateSource;
+use App\Repository\ScanProgressWriter;
 use App\Repository\SubscriberFinderInterface;
-use App\Repository\TrackedRepositoryRepositoryInterface;
 use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
@@ -24,7 +26,9 @@ use Psr\Log\NullLogger;
 class ScannerServiceTest extends TestCase
 {
     private SubscriberFinderInterface&MockObject $subscribers;
-    private TrackedRepositoryRepositoryInterface&MockObject $trackedRepositories;
+    private ScanCandidateSource&MockObject $candidates;
+    private ScanProgressWriter&MockObject $progress;
+    private RepositoryStatusReader&MockObject $statusReader;
     private NotificationLedgerInterface&MockObject $ledger;
     private GitHubServiceInterface&MockObject $gitHub;
     private NotifierInterface&MockObject $notifier;
@@ -33,14 +37,17 @@ class ScannerServiceTest extends TestCase
     protected function setUp(): void
     {
         $this->subscribers = $this->createMock(SubscriberFinderInterface::class);
-        $this->trackedRepositories = $this->createMock(TrackedRepositoryRepositoryInterface::class);
+        $this->candidates = $this->createMock(ScanCandidateSource::class);
+        $this->progress = $this->createMock(ScanProgressWriter::class);
+        $this->statusReader = $this->createMock(RepositoryStatusReader::class);
         $this->ledger = $this->createMock(NotificationLedgerInterface::class);
         $this->gitHub = $this->createMock(GitHubServiceInterface::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
 
         $this->scanner = new ScannerService(
-            $this->trackedRepositories,
-            new ReleaseDetector($this->gitHub, $this->trackedRepositories, new NullLogger()),
+            $this->candidates,
+            $this->progress,
+            new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
             new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
             new NullLogger()
         );
@@ -53,7 +60,7 @@ class ScannerServiceTest extends TestCase
 
     public function testScanFindsNewRelease(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -63,7 +70,7 @@ class ScannerServiceTest extends TestCase
             ->with('golang/go')
             ->willReturn($this->release('v1.22.0', 'Go 1.22'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->with('golang/go')
             ->willReturn(new RepositoryStatus('golang/go', 'v1.21.0', null));
@@ -87,7 +94,7 @@ class ScannerServiceTest extends TestCase
             ->method('recordResult')
             ->with(10, 'golang/go', 'v1.22.0', true, null);
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markReleaseSeen')
             ->with('golang/go', 'v1.22.0');
 
@@ -96,7 +103,7 @@ class ScannerServiceTest extends TestCase
 
     public function testScanNoNewRelease(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -106,23 +113,23 @@ class ScannerServiceTest extends TestCase
             ->with('golang/go')
             ->willReturn($this->release('v1.21.0'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->willReturn(new RepositoryStatus('golang/go', 'v1.21.0', null));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markChecked')
             ->with('golang/go');
 
         $this->notifier->expects($this->never())->method('notifyReleaseAvailable');
-        $this->trackedRepositories->expects($this->never())->method('markReleaseSeen');
+        $this->progress->expects($this->never())->method('markReleaseSeen');
 
         $this->scanner->scan();
     }
 
     public function testScanNoReleases(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['some/repo']);
@@ -132,7 +139,7 @@ class ScannerServiceTest extends TestCase
             ->with('some/repo')
             ->willReturn(null);
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markChecked')
             ->with('some/repo');
 
@@ -143,7 +150,7 @@ class ScannerServiceTest extends TestCase
 
     public function testScanHandlesRateLimit(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -159,7 +166,7 @@ class ScannerServiceTest extends TestCase
 
     public function testScanMultipleSubscribers(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -168,7 +175,7 @@ class ScannerServiceTest extends TestCase
             ->method('getLatestRelease')
             ->willReturn($this->release('v2.0.0', 'Go 2.0', 'Major release'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->willReturn(new RepositoryStatus('golang/go', 'v1.0.0', null));
 
@@ -192,7 +199,7 @@ class ScannerServiceTest extends TestCase
             ->method('recordResult')
             ->withAnyParameters();
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markReleaseSeen')
             ->with('golang/go', 'v2.0.0');
 
@@ -201,7 +208,7 @@ class ScannerServiceTest extends TestCase
 
     public function testScanFirstRelease(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['new/repo']);
@@ -210,7 +217,7 @@ class ScannerServiceTest extends TestCase
             ->method('getLatestRelease')
             ->willReturn($this->release('v1.0.0', 'First Release', 'Initial release'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->willReturn(new RepositoryStatus('new/repo', null, null));
 
@@ -231,7 +238,7 @@ class ScannerServiceTest extends TestCase
             ->method('recordResult')
             ->with(99, 'new/repo', 'v1.0.0', true, null);
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markReleaseSeen')
             ->with('new/repo', 'v1.0.0');
 
@@ -240,7 +247,7 @@ class ScannerServiceTest extends TestCase
 
     public function testDoesNotUpdateLastSeenTagWhenAnyNotificationFails(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -249,7 +256,7 @@ class ScannerServiceTest extends TestCase
             ->method('getLatestRelease')
             ->willReturn($this->release('v2.0.0', 'Go 2.0', 'Major release'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->willReturn(new RepositoryStatus('golang/go', 'v1.0.0', null));
 
@@ -272,8 +279,8 @@ class ScannerServiceTest extends TestCase
             ->method('recordResult')
             ->withAnyParameters();
 
-        $this->trackedRepositories->expects($this->never())->method('markReleaseSeen');
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->never())->method('markReleaseSeen');
+        $this->progress->expects($this->once())
             ->method('markChecked')
             ->with('golang/go');
 
@@ -282,7 +289,7 @@ class ScannerServiceTest extends TestCase
 
     public function testSkipsAlreadyDeliveredSubscribersAndAdvancesReleaseWhenRemainingDeliveriesSucceed(): void
     {
-        $this->trackedRepositories->expects($this->once())
+        $this->candidates->expects($this->once())
             ->method('getDueForScan')
             ->with(100)
             ->willReturn(['golang/go']);
@@ -292,7 +299,7 @@ class ScannerServiceTest extends TestCase
             ->with('golang/go')
             ->willReturn($this->release('v3.0.0', 'Go 3.0', 'New release'));
 
-        $this->trackedRepositories->expects($this->once())
+        $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->with('golang/go')
             ->willReturn(new RepositoryStatus('golang/go', 'v2.0.0', null));
@@ -318,7 +325,7 @@ class ScannerServiceTest extends TestCase
             ->method('recordResult')
             ->with(2, 'golang/go', 'v3.0.0', true, null);
 
-        $this->trackedRepositories->expects($this->once())
+        $this->progress->expects($this->once())
             ->method('markReleaseSeen')
             ->with('golang/go', 'v3.0.0');
 

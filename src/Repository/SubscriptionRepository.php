@@ -13,7 +13,7 @@ use App\Domain\SubscriptionPage;
 use PDO;
 
 /** @psalm-api */
-final class SubscriptionRepository implements SubscriptionRepositoryInterface, SubscriberFinderInterface
+final readonly class SubscriptionRepository implements SubscriptionRepositoryInterface, SubscriberFinderInterface
 {
     public function __construct(
         private PDO $pdo,

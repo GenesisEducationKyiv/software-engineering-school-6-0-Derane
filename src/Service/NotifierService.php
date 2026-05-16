@@ -10,7 +10,7 @@ use App\Notifier\ReleaseEmailRenderer;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class NotifierService implements NotifierInterface
+final readonly class NotifierService implements NotifierInterface
 {
     public function __construct(
         private MailerInterface $mailer,

@@ -12,7 +12,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /** @psalm-api */
-final class SubscriptionController
+final readonly class SubscriptionController
 {
     public function __construct(
         private SubscriptionServiceInterface $service,

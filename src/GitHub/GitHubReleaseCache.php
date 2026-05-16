@@ -9,7 +9,7 @@ use App\Domain\Factory\ReleaseFactoryInterface;
 use App\Domain\Release;
 
 /** @psalm-api */
-final class GitHubReleaseCache
+final readonly class GitHubReleaseCache implements LatestReleaseCacheInterface
 {
     public function __construct(
         private GitHubCacheInterface $cache,
@@ -18,6 +18,7 @@ final class GitHubReleaseCache
     ) {
     }
 
+    #[\Override]
     public function getLatestRelease(string $repository): ?Release
     {
         $cached = $this->cache->get($this->key($repository));
@@ -34,6 +35,7 @@ final class GitHubReleaseCache
         return $this->releaseFactory->fromGitHubPayload($payload);
     }
 
+    #[\Override]
     public function putLatestRelease(string $repository, Release $release): void
     {
         $this->cache->set(

@@ -11,7 +11,7 @@ use App\Exception\RepositoryNotFoundException;
 use App\Exception\SubscriptionNotFoundException;
 use App\Exception\ValidationException;
 use App\Repository\SubscriptionRepositoryInterface;
-use App\Repository\TrackedRepositoryRepositoryInterface;
+use App\Repository\TrackedRepositoryRegistrar;
 use App\Service\GitHubServiceInterface;
 use App\Service\SubscriptionService;
 use App\Validation\EmailValidator;
@@ -24,14 +24,14 @@ use Psr\Log\NullLogger;
 class SubscriptionServiceTest extends TestCase
 {
     private SubscriptionRepositoryInterface&MockObject $repository;
-    private TrackedRepositoryRepositoryInterface&MockObject $trackedRepositories;
+    private TrackedRepositoryRegistrar&MockObject $trackedRepositories;
     private GitHubServiceInterface&MockObject $gitHub;
     private SubscriptionService $service;
 
     protected function setUp(): void
     {
         $this->repository = $this->createMock(SubscriptionRepositoryInterface::class);
-        $this->trackedRepositories = $this->createMock(TrackedRepositoryRepositoryInterface::class);
+        $this->trackedRepositories = $this->createMock(TrackedRepositoryRegistrar::class);
         $this->gitHub = $this->createMock(GitHubServiceInterface::class);
         $this->service = new SubscriptionService(
             $this->repository,

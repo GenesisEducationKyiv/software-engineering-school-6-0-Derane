@@ -28,6 +28,8 @@ use App\GitHub\GitHubApiClient;
 use App\GitHub\GitHubApiClientInterface;
 use App\GitHub\GitHubReleaseCache;
 use App\GitHub\GitHubRepositoryCache;
+use App\GitHub\LatestReleaseCacheInterface;
+use App\GitHub\RepositoryExistenceCacheInterface;
 use App\Grpc\ReleaseNotifierService;
 use App\Health\DatabaseHealthCheck;
 use App\Health\HealthCheckInterface;
@@ -43,15 +45,20 @@ use App\Repository\MetricsRepositoryInterface;
 use App\Repository\NotificationLedger;
 use App\Repository\NotificationLedgerInterface;
 use App\Repository\SubscriberFinderInterface;
+use App\Repository\RepositoryStatusReader;
+use App\Repository\ScanCandidateSource;
+use App\Repository\ScanProgressWriter;
 use App\Repository\SubscriptionRepository;
 use App\Repository\SubscriptionRepositoryInterface;
-use App\Repository\TrackedRepositoryRepository;
-use App\Repository\TrackedRepositoryRepositoryInterface;
+use App\Repository\TrackedRepositoryReader;
+use App\Repository\TrackedRepositoryRegistrar;
+use App\Repository\TrackedRepositoryWriter;
 use App\Service\GitHubService;
 use App\Service\GitHubServiceInterface;
 use App\Service\MetricsService;
 use App\Service\MetricsServiceInterface;
 use App\Service\NotificationDispatcher;
+use App\Service\NotificationDispatcherInterface;
 use App\Service\NotifierInterface;
 use App\Service\NotifierService;
 use App\Service\ReleaseDetector;
@@ -137,10 +144,17 @@ return static function (array $settings): Container {
             $c->get(SubscriberRefFactoryInterface::class)
         ),
         SubscriberFinderInterface::class => static fn($c) => $c->get(SubscriptionRepositoryInterface::class),
-        TrackedRepositoryRepositoryInterface::class => static fn($c) => new TrackedRepositoryRepository(
+        TrackedRepositoryReader::class => static fn($c) => new TrackedRepositoryReader(
             $c->get(PDO::class),
             $c->get(RepositoryStatusFactoryInterface::class)
         ),
+        TrackedRepositoryWriter::class => static fn($c) => new TrackedRepositoryWriter(
+            $c->get(PDO::class)
+        ),
+        RepositoryStatusReader::class => static fn($c) => $c->get(TrackedRepositoryReader::class),
+        ScanCandidateSource::class => static fn($c) => $c->get(TrackedRepositoryReader::class),
+        TrackedRepositoryRegistrar::class => static fn($c) => $c->get(TrackedRepositoryWriter::class),
+        ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryWriter::class),
         NotificationLedgerInterface::class => static fn($c) => new NotificationLedger($c->get(PDO::class)),
         MetricsRepositoryInterface::class => static fn($c) => new MetricsRepository($c->get(PDO::class)),
 
@@ -166,11 +180,11 @@ return static function (array $settings): Container {
             $c->get(GuzzleClient::class),
             $settings['github']['token']
         ),
-        GitHubRepositoryCache::class => static fn($c) => new GitHubRepositoryCache(
+        RepositoryExistenceCacheInterface::class => static fn($c) => new GitHubRepositoryCache(
             $c->get(GitHubCacheInterface::class),
             $settings['redis']['cache_ttl']
         ),
-        GitHubReleaseCache::class => static fn($c) => new GitHubReleaseCache(
+        LatestReleaseCacheInterface::class => static fn($c) => new GitHubReleaseCache(
             $c->get(GitHubCacheInterface::class),
             $c->get(ReleaseFactoryInterface::class),
             $settings['redis']['cache_ttl']
@@ -178,8 +192,8 @@ return static function (array $settings): Container {
         GitHubServiceInterface::class => static function ($c) {
             return new GitHubService(
                 $c->get(GitHubApiClientInterface::class),
-                $c->get(GitHubRepositoryCache::class),
-                $c->get(GitHubReleaseCache::class),
+                $c->get(RepositoryExistenceCacheInterface::class),
+                $c->get(LatestReleaseCacheInterface::class),
                 $c->get(ReleaseFactoryInterface::class),
                 $c->get(LoggerInterface::class)
             );
@@ -195,25 +209,26 @@ return static function (array $settings): Container {
         // Application services
         SubscriptionServiceInterface::class => static fn($c) => new SubscriptionService(
             $c->get(SubscriptionRepositoryInterface::class),
-            $c->get(TrackedRepositoryRepositoryInterface::class),
+            $c->get(TrackedRepositoryRegistrar::class),
             $c->get(GitHubServiceInterface::class),
             $c->get(SubscriptionValidator::class),
             $c->get(LoggerInterface::class)
         ),
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
             $c->get(GitHubServiceInterface::class),
-            $c->get(TrackedRepositoryRepositoryInterface::class),
+            $c->get(RepositoryStatusReader::class),
             $c->get(LoggerInterface::class)
         ),
-        NotificationDispatcher::class => static fn($c) => new NotificationDispatcher(
+        NotificationDispatcherInterface::class => static fn($c) => new NotificationDispatcher(
             $c->get(SubscriberFinderInterface::class),
             $c->get(NotificationLedgerInterface::class),
             $c->get(NotifierInterface::class)
         ),
         ScannerService::class => static fn($c) => new ScannerService(
-            $c->get(TrackedRepositoryRepositoryInterface::class),
+            $c->get(ScanCandidateSource::class),
+            $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
-            $c->get(NotificationDispatcher::class),
+            $c->get(NotificationDispatcherInterface::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
         ),

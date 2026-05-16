@@ -8,19 +8,19 @@ use App\Domain\Factory\ReleaseFactoryInterface;
 use App\Domain\Release;
 use App\Exception\RateLimitException;
 use App\GitHub\GitHubApiClientInterface;
-use App\GitHub\GitHubReleaseCache;
-use App\GitHub\GitHubRepositoryCache;
+use App\GitHub\LatestReleaseCacheInterface;
+use App\GitHub\RepositoryExistenceCacheInterface;
 use Fig\Http\Message\StatusCodeInterface;
 use GuzzleHttp\Exception\ClientException;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class GitHubService implements GitHubServiceInterface
+final readonly class GitHubService implements GitHubServiceInterface
 {
     public function __construct(
         private GitHubApiClientInterface $apiClient,
-        private GitHubRepositoryCache $repositoryCache,
-        private GitHubReleaseCache $releaseCache,
+        private RepositoryExistenceCacheInterface $repositoryCache,
+        private LatestReleaseCacheInterface $releaseCache,
         private ReleaseFactoryInterface $releaseFactory,
         private LoggerInterface $logger
     ) {

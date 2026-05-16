@@ -7,7 +7,7 @@ namespace App\GitHub;
 use GuzzleHttp\ClientInterface;
 
 /** @psalm-api */
-final class GitHubApiClient implements GitHubApiClientInterface
+final readonly class GitHubApiClient implements GitHubApiClientInterface
 {
     private const API_BASE = 'https://api.github.com';
 

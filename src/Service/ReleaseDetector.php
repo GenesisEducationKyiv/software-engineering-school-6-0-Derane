@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Domain\Release;
-use App\Repository\TrackedRepositoryRepositoryInterface;
+use App\Repository\RepositoryStatusReader;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class ReleaseDetector
+final readonly class ReleaseDetector
 {
     public function __construct(
         private GitHubServiceInterface $gitHubService,
-        private TrackedRepositoryRepositoryInterface $trackedRepositories,
+        private RepositoryStatusReader $trackedRepositories,
         private LoggerInterface $logger
     ) {
     }

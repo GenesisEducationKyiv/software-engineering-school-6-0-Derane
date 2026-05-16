@@ -10,7 +10,7 @@ use App\Repository\NotificationLedgerInterface;
 use App\Repository\SubscriberFinderInterface;
 
 /** @psalm-api */
-final class NotificationDispatcher
+final readonly class NotificationDispatcher implements NotificationDispatcherInterface
 {
     public function __construct(
         private SubscriberFinderInterface $subscribers,
@@ -19,11 +19,7 @@ final class NotificationDispatcher
     ) {
     }
 
-    /**
-     * Filters out subscribers already notified for this release, then delivers
-     * the remaining notifications. Returns true when every attempted delivery
-     * succeeded.
-     */
+    #[\Override]
     public function dispatch(string $repoName, Release $release): bool
     {
         $tag = $release->tagName;

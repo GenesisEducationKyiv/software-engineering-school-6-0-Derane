@@ -10,16 +10,16 @@ use App\Domain\SubscriptionPage;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\SubscriptionNotFoundException;
 use App\Repository\SubscriptionRepositoryInterface;
-use App\Repository\TrackedRepositoryRepositoryInterface;
+use App\Repository\TrackedRepositoryRegistrar;
 use App\Validation\SubscriptionValidator;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class SubscriptionService implements SubscriptionServiceInterface
+final readonly class SubscriptionService implements SubscriptionServiceInterface
 {
     public function __construct(
         private SubscriptionRepositoryInterface $repository,
-        private TrackedRepositoryRepositoryInterface $trackedRepositories,
+        private TrackedRepositoryRegistrar $trackedRepositories,
         private GitHubServiceInterface $gitHubService,
         private SubscriptionValidator $validator,
         private LoggerInterface $logger
