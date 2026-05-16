@@ -144,17 +144,15 @@ return static function (array $settings): Container {
             $c->get(SubscriberRefFactoryInterface::class)
         ),
         SubscriberFinderInterface::class => static fn($c) => $c->get(SubscriptionRepositoryInterface::class),
-        TrackedRepositoryReader::class => static fn($c) => new TrackedRepositoryReader(
+        RepositoryStatusReader::class => static fn($c) => new TrackedRepositoryReader(
             $c->get(PDO::class),
             $c->get(RepositoryStatusFactoryInterface::class)
         ),
-        TrackedRepositoryWriter::class => static fn($c) => new TrackedRepositoryWriter(
+        ScanCandidateSource::class => static fn($c) => $c->get(RepositoryStatusReader::class),
+        TrackedRepositoryRegistrar::class => static fn($c) => new TrackedRepositoryWriter(
             $c->get(PDO::class)
         ),
-        RepositoryStatusReader::class => static fn($c) => $c->get(TrackedRepositoryReader::class),
-        ScanCandidateSource::class => static fn($c) => $c->get(TrackedRepositoryReader::class),
-        TrackedRepositoryRegistrar::class => static fn($c) => $c->get(TrackedRepositoryWriter::class),
-        ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryWriter::class),
+        ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
         NotificationLedgerInterface::class => static fn($c) => new NotificationLedger($c->get(PDO::class)),
         MetricsRepositoryInterface::class => static fn($c) => new MetricsRepository($c->get(PDO::class)),
 
