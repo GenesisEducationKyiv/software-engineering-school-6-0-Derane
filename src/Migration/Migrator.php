@@ -8,7 +8,7 @@ use PDO;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class Migrator
+final readonly class Migrator
 {
     public function __construct(
         private PDO $pdo,

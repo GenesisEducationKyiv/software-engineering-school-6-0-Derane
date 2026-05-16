@@ -12,7 +12,7 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /** @psalm-api */
-final class ApiKeyMiddleware implements MiddlewareInterface
+final readonly class ApiKeyMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private string $apiKey,

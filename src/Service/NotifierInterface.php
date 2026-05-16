@@ -4,14 +4,9 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Domain\Release;
+
 interface NotifierInterface
 {
-    public function sendReleaseNotification(
-        string $email,
-        string $repository,
-        string $tagName,
-        string $releaseName,
-        string $releaseUrl,
-        string $releaseBody
-    ): bool;
+    public function notifyReleaseAvailable(string $email, string $repository, Release $release): bool;
 }

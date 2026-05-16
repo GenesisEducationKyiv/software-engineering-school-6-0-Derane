@@ -6,6 +6,7 @@ namespace Tests\Controller;
 
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
+use App\Health\HealthCheckInterface;
 use App\Service\MetricsServiceInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -38,11 +39,10 @@ class MetricsControllerTest extends TestCase
 
     public function testHealthReturnsOk(): void
     {
-        $pdo = $this->createMock(\PDO::class);
-        $stmt = $this->createMock(\PDOStatement::class);
-        $pdo->method('query')->willReturn($stmt);
+        $healthCheck = $this->createMock(HealthCheckInterface::class);
+        $healthCheck->expects($this->once())->method('check');
 
-        $controller = new HealthController($pdo, new NullLogger());
+        $controller = new HealthController($healthCheck, new NullLogger());
 
         $request = (new RequestFactory())->createRequest('GET', '/health');
         $response = (new ResponseFactory())->createResponse();
@@ -56,10 +56,10 @@ class MetricsControllerTest extends TestCase
 
     public function testHealthReturns503OnDbFailure(): void
     {
-        $pdo = $this->createMock(\PDO::class);
-        $pdo->method('query')->willThrowException(new \Exception('Connection refused'));
+        $healthCheck = $this->createMock(HealthCheckInterface::class);
+        $healthCheck->method('check')->willThrowException(new \RuntimeException('Connection refused'));
 
-        $controller = new HealthController($pdo, new NullLogger());
+        $controller = new HealthController($healthCheck, new NullLogger());
 
         $request = (new RequestFactory())->createRequest('GET', '/health');
         $response = (new ResponseFactory())->createResponse();

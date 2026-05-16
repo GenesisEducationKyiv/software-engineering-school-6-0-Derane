@@ -4,68 +4,46 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Repository\SubscriptionRepositoryInterface;
+use App\Metrics\Gauge;
+use App\Metrics\PrometheusFormatter;
+use App\Repository\MetricsRepositoryInterface;
 
 /** @psalm-api */
-final class MetricsService implements MetricsServiceInterface
+final readonly class MetricsService implements MetricsServiceInterface
 {
-    public function __construct(private SubscriptionRepositoryInterface $repository)
-    {
+    public function __construct(
+        private MetricsRepositoryInterface $metricsRepository,
+        private PrometheusFormatter $formatter
+    ) {
     }
 
     #[\Override]
     public function collect(): string
     {
-        $metrics = $this->repository->getMetrics();
+        $snapshot = $this->metricsRepository->snapshot();
 
-        return $this->format([
-            'app_subscriptions_total' => [
-                'help' => 'Total number of active subscriptions',
-                'type' => 'gauge',
-                'value' => $metrics['subscriptions'],
-            ],
-            'app_repositories_total' => [
-                'help' => 'Total number of tracked repositories',
-                'type' => 'gauge',
-                'value' => $metrics['repositories'],
-            ],
-            'app_repositories_with_releases' => [
-                'help' => 'Repositories that have at least one known release',
-                'type' => 'gauge',
-                'value' => $metrics['repositories_with_releases'],
-            ],
-            'app_info' => [
-                'help' => 'Application info',
-                'type' => 'gauge',
-                'value' => 1,
-                'labels' => ['version' => '1.0.0'],
-            ],
+        return $this->formatter->format([
+            new Gauge(
+                'app_subscriptions_total',
+                'Total number of active subscriptions',
+                $snapshot->subscriptions
+            ),
+            new Gauge(
+                'app_repositories_total',
+                'Total number of tracked repositories',
+                $snapshot->repositories
+            ),
+            new Gauge(
+                'app_repositories_with_releases',
+                'Repositories that have at least one known release',
+                $snapshot->repositoriesWithReleases
+            ),
+            new Gauge(
+                'app_info',
+                'Application info',
+                1,
+                ['version' => '1.0.0']
+            ),
         ]);
-    }
-
-    /**
-     * @param array<string, array{help: string, type: string, value: int|float,
-     *                            labels?: array<string, string>}> $metrics
-     */
-    private function format(array $metrics): string
-    {
-        $output = '';
-
-        foreach ($metrics as $name => $metric) {
-            $output .= "# HELP {$name} {$metric['help']}\n";
-            $output .= "# TYPE {$name} {$metric['type']}\n";
-
-            if (isset($metric['labels'])) {
-                $labels = [];
-                foreach ($metric['labels'] as $k => $v) {
-                    $labels[] = "{$k}=\"{$v}\"";
-                }
-                $output .= "{$name}{" . implode(',', $labels) . "} {$metric['value']}\n";
-            } else {
-                $output .= "{$name} {$metric['value']}\n";
-            }
-        }
-
-        return $output;
     }
 }
