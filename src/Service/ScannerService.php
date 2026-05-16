@@ -36,7 +36,7 @@ final readonly class ScannerService
                     'retry_after' => $e->retryAfter,
                 ]);
                 break;
-            } catch (\Throwable $e) {
+            } catch (\Exception $e) {
                 $this->logger->error('Scan error', [
                     'repository' => $repoName,
                     'error' => $e->getMessage(),
