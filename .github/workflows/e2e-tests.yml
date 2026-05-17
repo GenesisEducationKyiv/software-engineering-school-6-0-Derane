@@ -4,14 +4,10 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
   playwright:
     name: Playwright (browser)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

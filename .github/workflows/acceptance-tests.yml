@@ -4,14 +4,10 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
   behat:
     name: Behat (HTTP contract)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

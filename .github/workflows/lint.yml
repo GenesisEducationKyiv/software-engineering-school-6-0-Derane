@@ -4,14 +4,10 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
   lint:
     name: PHP_CodeSniffer & Psalm
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
