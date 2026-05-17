@@ -16,3 +16,15 @@ jobs:
 
       - name: Run Behat suite
         run: make acceptance-run
+
+  behat-auth:
+    name: Behat (auth enabled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker stack with API_KEY
+        run: make acceptance-auth-up
+
+      - name: Run Behat @auth suite
+        run: make acceptance-auth-run

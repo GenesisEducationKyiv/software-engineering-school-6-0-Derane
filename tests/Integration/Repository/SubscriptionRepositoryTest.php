@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Integration\Repository;
 
 use App\Repository\SubscriptionRepositoryInterface;
+use PDO;
 use Tests\Integration\IntegrationTestCase;
 
 final class SubscriptionRepositoryTest extends IntegrationTestCase
@@ -159,11 +160,68 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $tag = 'v' . $this->faker->numerify('#.#.#');
 
         $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, false, 'smtp down');
+
+        $afterFailure = $this->fetchNotificationRow($sub['id'], $sub['repository'], $tag);
+        $this->assertSame(1, (int) $afterFailure['attempts']);
+        $this->assertSame('smtp down', $afterFailure['last_error']);
+        $this->assertNull($afterFailure['sent_at']);
+
         $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, true);
+
+        $afterSuccess = $this->fetchNotificationRow($sub['id'], $sub['repository'], $tag);
+        $this->assertSame(2, (int) $afterSuccess['attempts']);
+        $this->assertNull($afterSuccess['last_error']);
+        $this->assertNotNull($afterSuccess['sent_at']);
 
         $this->assertTrue(
             $this->repo->hasSuccessfulNotificationForRelease($sub['id'], $sub['repository'], $tag)
         );
+    }
+
+    public function testDeletingSubscriptionCascadesReleaseNotifications(): void
+    {
+        $sub = $this->repo->create($this->faker->safeEmail(), $this->repoName());
+        $tag = 'v' . $this->faker->numerify('#.#.#');
+
+        $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, true);
+        $this->assertSame(1, $this->countNotificationsFor($sub['id']));
+
+        $this->repo->delete($sub['id']);
+
+        $this->assertSame(
+            0,
+            $this->countNotificationsFor($sub['id']),
+            'release_notifications rows should cascade when subscription is deleted'
+        );
+    }
+
+    /**
+     * @return array{attempts: int, last_error: ?string, sent_at: ?string}
+     */
+    private function fetchNotificationRow(int $subscriptionId, string $repository, string $tag): array
+    {
+        $stmt = $this->c->get(PDO::class)->prepare(
+            'SELECT attempts, last_error, sent_at
+               FROM release_notifications
+              WHERE subscription_id = :sid AND repository = :repo AND tag_name = :tag'
+        );
+        $stmt->execute(['sid' => $subscriptionId, 'repo' => $repository, 'tag' => $tag]);
+        /** @var array{attempts: int, last_error: ?string, sent_at: ?string}|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->assertNotFalse($row, 'release_notifications row missing after recordNotificationResult');
+
+        return $row;
+    }
+
+    private function countNotificationsFor(int $subscriptionId): int
+    {
+        $stmt = $this->c->get(PDO::class)->prepare(
+            'SELECT COUNT(*) FROM release_notifications WHERE subscription_id = :sid'
+        );
+        $stmt->execute(['sid' => $subscriptionId]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     public function testGetRepositoriesToScanOrdersByLastChecked(): void

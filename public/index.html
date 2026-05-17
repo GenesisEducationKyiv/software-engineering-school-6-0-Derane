@@ -131,9 +131,9 @@
             <button type="submit" id="submitBtn">Subscribe</button>
         </form>
 
-        <div id="message" class="message"></div>
+        <div id="message" class="message" role="status" aria-live="polite" data-testid="message"></div>
 
-        <div class="subscriptions" id="subscriptionsSection" style="display:none;">
+        <div class="subscriptions" id="subscriptionsSection" data-testid="subscriptions-section" style="display:none;">
             <h3>Your Subscriptions</h3>
             <div id="subscriptionsList"></div>
         </div>
@@ -153,6 +153,7 @@
             const el = document.getElementById('message');
             el.textContent = text;
             el.className = 'message ' + type;
+            el.dataset.state = type;
         }
 
         async function loadSubscriptions(email) {
@@ -174,9 +175,9 @@
                 if (Array.isArray(data) && data.length > 0) {
                     section.style.display = 'block';
                     list.innerHTML = data.map(s => `
-                        <div class="sub-item">
-                            <span class="repo">${s.repository}</span>
-                            <button class="btn-delete" onclick="unsubscribe(${s.id})">Unsubscribe</button>
+                        <div class="sub-item" data-testid="subscription-item" data-subscription-id="${s.id}">
+                            <span class="repo" data-testid="subscription-repo">${s.repository}</span>
+                            <button class="btn-delete" data-testid="subscription-unsubscribe" aria-label="Unsubscribe from ${s.repository}" onclick="unsubscribe(${s.id})">Unsubscribe</button>
                         </div>
                     `).join('');
                 } else {

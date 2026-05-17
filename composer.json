@@ -48,7 +48,8 @@
         "test": "phpunit --configuration phpunit.xml",
         "lint": "phpcs",
         "psalm": "psalm",
-        "acceptance": "behat --colors --format=progress",
+        "acceptance": "behat --colors --format=progress --tags=~@auth",
+        "acceptance-auth": "behat --colors --format=progress --tags=@auth",
         "migrate": "php bin/migrate.php",
         "scanner": "php bin/scanner.php",
         "grpc": "php bin/grpc.php"

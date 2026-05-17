@@ -118,10 +118,12 @@ Feature: Subscription management
     Then the response status code should be equal to 200
     And the response should be in JSON
     And the JSON should have 1 element
+    And the JSON node "[0].email" should be equal to "page1@example.com"
     When I send a GET request to "/api/subscriptions?limit=1&offset=1"
     Then the response status code should be equal to 200
     And the response should be in JSON
     And the JSON should have 1 element
+    And the JSON node "[0].email" should be equal to "page2@example.com"
 
   @cleanup
   Scenario: Get subscription by ID

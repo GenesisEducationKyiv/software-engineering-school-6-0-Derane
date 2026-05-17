@@ -16,17 +16,20 @@ seconds.
 make tests
 ```
 
-Sequence: unit → integration → acceptance → e2e. Each step boots only the
-services it needs and tears them down afterwards — even if the suite fails.
+Sequence: unit → integration → acceptance → acceptance-auth → e2e → e2e-auth.
+Each step boots only the services it needs and tears them down afterwards —
+even if the suite fails.
 
 ## Per-suite commands
 
-| Command            | Suite                        | What runs in Docker                              |
-| ------------------ | ---------------------------- | ------------------------------------------------ |
-| `make test`        | PHPUnit **Unit** (55 tests)  | `app` image                                      |
-| `make integration` | PHPUnit **Integration** (32) | `app` + Postgres + Redis                         |
-| `make acceptance`  | Behat **Acceptance** (27)    | `app` + Postgres + Redis + scanner + grpc + smtp |
-| `make e2e`         | Playwright **E2E** (6)       | `app` + Postgres + Redis + Playwright image      |
+| Command                  | Suite                                | What runs in Docker                                            |
+| ------------------------ | ------------------------------------ | -------------------------------------------------------------- |
+| `make test`              | PHPUnit **Unit** (55 tests)          | `app` image                                                    |
+| `make integration`       | PHPUnit **Integration** (40)         | `app` + Postgres + Redis                                       |
+| `make acceptance`        | Behat **Acceptance** (27)            | `app` + Postgres + Redis + scanner + grpc + smtp; skips `@auth` |
+| `make acceptance-auth`   | Behat **Acceptance auth-on** (4)     | same stack with `API_KEY` set; runs only `@auth` scenarios     |
+| `make e2e`               | Playwright **E2E** (11)              | `app` + Postgres + Redis + Playwright image                    |
+| `make e2e-auth`          | Playwright **E2E auth-on** (3)       | same stack with `API_KEY` set, runs only `*.auth.spec.ts`      |
 
 Each `make X` is end-to-end: it brings the required Docker stack up, runs the
 suite, and brings it down with volumes removed — even on failure. The next
@@ -39,15 +42,30 @@ GitHub 404 so 404 paths stay covered.
 
 ## What each suite covers
 
+Test layering follows the standard pyramid: each suite owns a different
+integration boundary, and **every REST endpoint has integration-level coverage
+in the Behat acceptance suite** (real HTTP, real DB, real middleware stack).
+The "Integration" label below refers to DB/cache/gRPC boundaries; HTTP-layer
+endpoint integration lives under "Acceptance".
+
 - **Unit** — services, controllers, middleware with mocked collaborators. No
   I/O.
-- **Integration** — `SubscriptionRepository`, `RedisGitHubCache`, `Migrator`
-  against real Postgres and Redis. No HTTP layer. Each test starts on a
-  truncated DB and flushed Redis.
-- **Acceptance** — REST API contract: HTTP requests against the running Slim
-  app; responses validated against `swagger.yaml` by `behat-open-api`.
+- **Integration** — `SubscriptionRepository`, `RedisGitHubCache`, `Migrator`,
+  and the gRPC service (in-process) against real Postgres and Redis. No HTTP
+  socket. Each test starts on a truncated DB and flushed Redis.
+- **Acceptance** — endpoint-level integration for the REST API: HTTP requests
+  over a socket against the running Slim app; covers every `/api/*` route
+  (POST/GET/GET-by-id/DELETE), plus `/health`, `/metrics`, `/`. Responses are
+  validated against `swagger.yaml` by `behat-open-api`. Auth-on variant
+  (`make acceptance-auth`) re-runs the stack with `API_KEY` set and exercises
+  the `X-API-Key` middleware: missing / wrong / correct key, plus that
+  `/health` stays public.
 - **E2E** — Playwright drives headless Chromium against the homepage (`/`):
-  subscribe / list / unsubscribe flows.
+  rendering, subscribe / list / unsubscribe, duplicate (idempotent) submit,
+  multi-subscription rendering, deleting one of many, plus simulated API
+  failures via `page.route`. Auth-on variant (`make e2e-auth`) brings the same
+  stack up with `API_KEY` set and exercises the X-API-Key header from the
+  browser: missing / wrong / correct key.
 
 ## Running a single test
 
@@ -74,19 +92,20 @@ For Behat/E2E you must have the stack already up (`make acceptance-up` /
 Each suite is its own GitHub Actions workflow, all running in parallel on
 every push and pull request:
 
-| Workflow                                  | Job                                                    |
-| ----------------------------------------- | ------------------------------------------------------ |
-| `.github/workflows/unit-tests.yml`        | PHPUnit Unit                                           |
-| `.github/workflows/integration-tests.yml` | PHPUnit Integration                                    |
-| `.github/workflows/acceptance-tests.yml`  | Behat                                                  |
-| `.github/workflows/e2e-tests.yml`         | Playwright (uploads HTML report and traces on failure) |
+| Workflow                                  | Jobs                                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `.github/workflows/unit-tests.yml`        | PHPUnit Unit                                                                      |
+| `.github/workflows/integration-tests.yml` | PHPUnit Integration                                                               |
+| `.github/workflows/acceptance-tests.yml`  | Behat (HTTP contract) + Behat (auth enabled)                                      |
+| `.github/workflows/e2e-tests.yml`         | Playwright (browser) + Playwright (auth enabled)                                  |
 
 ## Troubleshooting
 
 - **Port conflict on 5432 / 6379 / 8080** — stop other Postgres / Redis / app
   instances, or change `APP_PORT` in `.env`.
 - **Stale Docker state after a failed run** — `make acceptance-down` /
-  `make e2e-down` / `make integration-down` removes containers and volumes.
+  `make acceptance-auth-down` / `make e2e-down` / `make e2e-auth-down` /
+  `make integration-down` removes containers and volumes.
 - **Root-owned files in `tests/e2e/`** — Playwright container runs as root.
   Clean with:
   ```bash

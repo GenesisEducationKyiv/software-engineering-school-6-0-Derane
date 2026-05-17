@@ -144,6 +144,58 @@ final class ReleaseNotifierServiceIntegrationTest extends IntegrationTestCase
         $this->assertCount(1, $secondPage->getSubscriptions());
     }
 
+    public function testListSubscriptionsLimitZeroDefaultsToFullPage(): void
+    {
+        for ($i = 0; $i < 3; $i++) {
+            $this->createSubscription();
+        }
+
+        $reply = $this->service->ListSubscriptions(
+            $this->ctx,
+            new ListSubscriptionsRequest(['limit' => 0, 'offset' => 0])
+        );
+
+        $this->assertCount(3, $reply->getSubscriptions());
+    }
+
+    public function testListSubscriptionsLimitAboveMaxIsClampedToHundred(): void
+    {
+        for ($i = 0; $i < 101; $i++) {
+            $this->createSubscription();
+        }
+
+        $reply = $this->service->ListSubscriptions(
+            $this->ctx,
+            new ListSubscriptionsRequest(['limit' => 5000, 'offset' => 0])
+        );
+
+        $this->assertCount(100, $reply->getSubscriptions());
+    }
+
+    public function testListSubscriptionsNegativeOffsetIsClampedToZero(): void
+    {
+        $this->createSubscription();
+        $this->createSubscription();
+
+        $reply = $this->service->ListSubscriptions(
+            $this->ctx,
+            new ListSubscriptionsRequest(['limit' => 100, 'offset' => -10])
+        );
+
+        $this->assertCount(2, $reply->getSubscriptions());
+    }
+
+    public function testCreateSubscriptionForNonexistentRepoMapsToNotFound(): void
+    {
+        $this->expectException(GRPCException::class);
+        $this->expectExceptionCode(StatusCode::NOT_FOUND);
+
+        $this->service->CreateSubscription($this->ctx, new CreateSubscriptionRequest([
+            'email' => $this->faker->safeEmail(),
+            'repository' => 'nonexistent999/repo999',
+        ]));
+    }
+
     public function testGetSubscriptionNotFoundMapsToGrpcNotFound(): void
     {
         $this->expectException(GRPCException::class);

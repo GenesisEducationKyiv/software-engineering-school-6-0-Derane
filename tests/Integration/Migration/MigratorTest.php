@@ -53,4 +53,76 @@ final class MigratorTest extends IntegrationTestCase
             $this->assertTrue((bool) $exists, "Table {$table} should exist");
         }
     }
+
+    /**
+     * @return list<array{table: string, columns: array<int, string>}>
+     */
+    public static function uniqueConstraintProvider(): array
+    {
+        return [
+            'subscriptions(email, repository)' => [
+                ['table' => 'subscriptions', 'columns' => ['email', 'repository']],
+            ],
+            'release_notifications(subscription_id, repository, tag_name)' => [
+                ['table' => 'release_notifications', 'columns' => ['subscription_id', 'repository', 'tag_name']],
+            ],
+        ];
+    }
+
+    /**
+     * @param array{table: string, columns: array<int, string>} $spec
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('uniqueConstraintProvider')]
+    public function testUniqueConstraintExists(array $spec): void
+    {
+        $pdo = $this->c->get(PDO::class);
+
+        $stmt = $pdo->prepare(
+            "SELECT array_agg(a.attname::text ORDER BY array_position(c.conkey, a.attnum)) AS columns
+               FROM pg_constraint c
+               JOIN pg_class t ON t.oid = c.conrelid
+               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+              WHERE c.contype = 'u'
+                AND t.relname = :table
+              GROUP BY c.oid
+             HAVING array_agg(a.attname::text ORDER BY array_position(c.conkey, a.attnum)) = :columns::text[]"
+        );
+        $stmt->execute([
+            'table' => $spec['table'],
+            'columns' => '{' . implode(',', $spec['columns']) . '}',
+        ]);
+
+        $this->assertNotFalse(
+            $stmt->fetchColumn(),
+            sprintf(
+                'Expected a UNIQUE constraint on %s(%s)',
+                $spec['table'],
+                implode(', ', $spec['columns'])
+            )
+        );
+    }
+
+    public function testReleaseNotificationsCascadeOnSubscriptionDelete(): void
+    {
+        $pdo = $this->c->get(PDO::class);
+
+        $stmt = $pdo->query(
+            "SELECT c.confdeltype
+               FROM pg_constraint c
+               JOIN pg_class t ON t.oid = c.conrelid
+               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+               JOIN pg_class r ON r.oid = c.confrelid
+              WHERE c.contype = 'f'
+                AND t.relname = 'release_notifications'
+                AND a.attname = 'subscription_id'
+                AND r.relname = 'subscriptions'"
+        );
+        $action = $stmt !== false ? $stmt->fetchColumn() : false;
+
+        $this->assertSame(
+            'c',
+            $action,
+            'release_notifications.subscription_id FK should be ON DELETE CASCADE'
+        );
+    }
 }

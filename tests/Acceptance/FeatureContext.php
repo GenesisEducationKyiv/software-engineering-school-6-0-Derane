@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Acceptance;
 
 use Behat\Behat\Context\Context;
+use Behat\Behat\Hook\Scope\AfterScenarioScope;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\MinkExtension\Context\RawMinkContext;
 
@@ -23,7 +24,20 @@ class FeatureContext extends RawMinkContext implements Context
     /**
      * @BeforeScenario @cleanup
      */
-    public function cleanupSubscriptions(BeforeScenarioScope $scope): void
+    public function cleanupSubscriptionsBefore(BeforeScenarioScope $scope): void
+    {
+        $this->wipeSubscriptions();
+    }
+
+    /**
+     * @AfterScenario @cleanup
+     */
+    public function cleanupSubscriptionsAfter(AfterScenarioScope $scope): void
+    {
+        $this->wipeSubscriptions();
+    }
+
+    private function wipeSubscriptions(): void
     {
         $host = (string) parse_url($this->baseUrl, PHP_URL_HOST);
         if (!in_array($host, ['localhost', '127.0.0.1'], true)) {
@@ -82,7 +96,16 @@ class FeatureContext extends RawMinkContext implements Context
             throw new \RuntimeException('No subscription id stored');
         }
 
-        $this->getSession()->visit($this->baseUrl . '/api/subscriptions/' . $this->lastSubscriptionId);
+        /** @var \Behat\Mink\Driver\BrowserKitDriver $driver */
+        $driver = $this->getSession()->getDriver();
+        $client = $driver->getClient();
+        $client->request(
+            'GET',
+            $this->baseUrl . '/api/subscriptions/' . $this->lastSubscriptionId,
+            [],
+            [],
+            $this->serverHeadersWithApiKey()
+        );
     }
 
     /**
@@ -97,7 +120,21 @@ class FeatureContext extends RawMinkContext implements Context
         /** @var \Behat\Mink\Driver\BrowserKitDriver $driver */
         $driver = $this->getSession()->getDriver();
         $client = $driver->getClient();
-        $client->request('DELETE', $this->baseUrl . '/api/subscriptions/' . $this->lastSubscriptionId);
+        $client->request(
+            'DELETE',
+            $this->baseUrl . '/api/subscriptions/' . $this->lastSubscriptionId,
+            [],
+            [],
+            $this->serverHeadersWithApiKey()
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function serverHeadersWithApiKey(): array
+    {
+        return $this->apiKey !== '' ? ['HTTP_X_API_KEY' => $this->apiKey] : [];
     }
 
     /**

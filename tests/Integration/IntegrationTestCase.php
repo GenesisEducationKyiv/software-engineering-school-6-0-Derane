@@ -31,16 +31,6 @@ abstract class IntegrationTestCase extends TestCase
         $this->flushRedis();
     }
 
-    /**
-     * Override an environment integration with a custom stub for a single test.
-     * Useful when a test needs different behaviour than the global stub
-     * (e.g. simulating a missing GitHub repository).
-     */
-    protected function override(string $id, object $instance): void
-    {
-        $this->c->set($id, $instance);
-    }
-
     protected static function container(): Container
     {
         if (self::$container !== null) {
