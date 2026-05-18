@@ -4,46 +4,44 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Cache\GitHubCacheInterface;
+use App\Domain\Factory\ReleaseFactoryInterface;
+use App\Domain\Release;
 use App\Exception\RateLimitException;
+use App\GitHub\GitHubApiClientInterface;
+use App\GitHub\LatestReleaseCacheInterface;
+use App\GitHub\RepositoryExistenceCacheInterface;
 use Fig\Http\Message\StatusCodeInterface;
-use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ClientException;
-use GuzzleHttp\Exception\GuzzleException;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
-final class GitHubService implements GitHubServiceInterface
+final readonly class GitHubService implements GitHubServiceInterface
 {
-    private const API_BASE = 'https://api.github.com';
-
     public function __construct(
-        private ClientInterface $httpClient,
-        private GitHubCacheInterface $cache,
-        private LoggerInterface $logger,
-        private string $token = '',
-        private int $cacheTtl = 600
+        private GitHubApiClientInterface $apiClient,
+        private RepositoryExistenceCacheInterface $repositoryCache,
+        private LatestReleaseCacheInterface $releaseCache,
+        private ReleaseFactoryInterface $releaseFactory,
+        private LoggerInterface $logger
     ) {
     }
 
     #[\Override]
     public function repositoryExists(string $repository): bool
     {
-        $cacheKey = "github:repo_exists:{$repository}";
-
-        $cached = $this->cache->get($cacheKey);
+        $cached = $this->repositoryCache->getExists($repository);
         if ($cached !== null) {
-            return $cached === '1';
+            return $cached;
         }
 
         try {
-            $this->request('GET', "/repos/{$repository}");
-            $this->cache->set($cacheKey, $this->cacheTtl, '1');
+            $this->apiClient->getRepository($repository);
+            $this->repositoryCache->putExists($repository, true);
             return true;
         } catch (ClientException $e) {
             $statusCode = $e->getResponse()->getStatusCode();
             if ($statusCode === StatusCodeInterface::STATUS_NOT_FOUND) {
-                $this->cache->set($cacheKey, $this->cacheTtl, '0');
+                $this->repositoryCache->putExists($repository, false);
                 return false;
             }
             if ($statusCode === StatusCodeInterface::STATUS_TOO_MANY_REQUESTS) {
@@ -55,32 +53,20 @@ final class GitHubService implements GitHubServiceInterface
     }
 
     #[\Override]
-    public function getLatestRelease(string $repository): ?array
+    public function getLatestRelease(string $repository): ?Release
     {
-        $cacheKey = "github:latest_release:{$repository}";
-
-        $cached = $this->cache->get($cacheKey);
+        $cached = $this->releaseCache->getLatestRelease($repository);
         if ($cached !== null) {
-            /** @var array{tag_name: string|null, name: string, html_url: string, published_at: string, body: string}|null */
-            return json_decode($cached, true);
+            return $cached;
         }
 
         try {
-            $response = $this->request('GET', "/repos/{$repository}/releases/latest");
-            /** @var array<string, mixed> $data */
-            $data = json_decode($response->getBody()->getContents(), true);
+            $payload = $this->apiClient->getLatestRelease($repository);
+            $release = $this->releaseFactory->fromGitHubPayload($payload);
 
-            $result = [
-                'tag_name' => isset($data['tag_name']) ? (string) $data['tag_name'] : null,
-                'name' => isset($data['name']) ? (string) $data['name'] : '',
-                'html_url' => isset($data['html_url']) ? (string) $data['html_url'] : '',
-                'published_at' => isset($data['published_at']) ? (string) $data['published_at'] : '',
-                'body' => isset($data['body']) ? (string) $data['body'] : '',
-            ];
+            $this->releaseCache->putLatestRelease($repository, $release);
 
-            $this->cache->set($cacheKey, $this->cacheTtl, json_encode($result, JSON_THROW_ON_ERROR));
-
-            return $result;
+            return $release;
         } catch (ClientException $e) {
             if ($e->getResponse()->getStatusCode() === StatusCodeInterface::STATUS_NOT_FOUND) {
                 return null;
@@ -88,31 +74,6 @@ final class GitHubService implements GitHubServiceInterface
             if ($e->getResponse()->getStatusCode() === StatusCodeInterface::STATUS_TOO_MANY_REQUESTS) {
                 $this->logger->warning("GitHub API rate limit hit for {$repository}");
                 throw new RateLimitException($e->getResponse()->getHeaderLine('Retry-After'));
-            }
-            throw $e;
-        }
-    }
-
-    private function request(string $method, string $uri): \Psr\Http\Message\ResponseInterface
-    {
-        $headers = [
-            'Accept' => 'application/vnd.github.v3+json',
-            'User-Agent' => 'GitHub-Release-Notifier/1.0',
-        ];
-
-        if ($this->token !== '') {
-            $headers['Authorization'] = "Bearer {$this->token}";
-        }
-
-        try {
-            return $this->httpClient->request($method, self::API_BASE . $uri, [
-                'headers' => $headers,
-                'timeout' => 10,
-            ]);
-        } catch (ClientException $e) {
-            if ($e->getResponse()->getStatusCode() === StatusCodeInterface::STATUS_TOO_MANY_REQUESTS) {
-                $this->logger->warning("GitHub API rate limit exceeded");
-                throw $e;
             }
             throw $e;
         }

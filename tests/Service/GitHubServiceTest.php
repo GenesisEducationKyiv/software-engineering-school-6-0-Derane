@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Exception\RateLimitException;
 use App\Cache\NullGitHubCache;
+use App\Domain\Factory\ReleaseFactory;
+use App\Exception\RateLimitException;
+use App\GitHub\GitHubApiClient;
+use App\GitHub\GitHubReleaseCache;
+use App\GitHub\GitHubRepositoryCache;
 use App\Service\GitHubService;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Psr7\Response;
-use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
@@ -24,7 +28,16 @@ class GitHubServiceTest extends TestCase
         $handler = HandlerStack::create($mock);
         $client = new Client(['handler' => $handler]);
 
-        return new GitHubService($client, new NullGitHubCache(), new NullLogger(), '', 600);
+        $cache = new NullGitHubCache();
+        $releaseFactory = new ReleaseFactory();
+
+        return new GitHubService(
+            new GitHubApiClient($client),
+            new GitHubRepositoryCache($cache, 600),
+            new GitHubReleaseCache($cache, $releaseFactory, 600),
+            $releaseFactory,
+            new NullLogger()
+        );
     }
 
     public function testRepositoryExistsReturnsTrue(): void
@@ -66,8 +79,8 @@ class GitHubServiceTest extends TestCase
         $result = $service->getLatestRelease('golang/go');
 
         $this->assertNotNull($result);
-        $this->assertEquals('v1.22.0', $result['tag_name']);
-        $this->assertEquals('Go 1.22', $result['name']);
+        $this->assertEquals('v1.22.0', $result->tagName);
+        $this->assertEquals('Go 1.22', $result->name);
     }
 
     public function testGetLatestReleaseNotFound(): void

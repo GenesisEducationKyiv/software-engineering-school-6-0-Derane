@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Cache;
 
 /** @psalm-api */
-final class NullGitHubCache implements GitHubCacheInterface
+final readonly class NullGitHubCache implements GitHubCacheInterface
 {
     #[\Override]
     public function get(string $key): ?string

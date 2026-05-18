@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Repository\SubscriptionRepositoryInterface;
+use App\Domain\MetricsSnapshot;
+use App\Metrics\PrometheusFormatter;
+use App\Repository\MetricsRepositoryInterface;
 use App\Service\MetricsService;
 use PHPUnit\Framework\TestCase;
 
@@ -12,14 +14,10 @@ class MetricsServiceTest extends TestCase
 {
     public function testCollectReturnsPrometheusFormat(): void
     {
-        $repository = $this->createMock(SubscriptionRepositoryInterface::class);
-        $repository->method('getMetrics')->willReturn([
-            'subscriptions' => 10,
-            'repositories' => 5,
-            'repositories_with_releases' => 3,
-        ]);
+        $repository = $this->createMock(MetricsRepositoryInterface::class);
+        $repository->method('snapshot')->willReturn(new MetricsSnapshot(10, 5, 3));
 
-        $service = new MetricsService($repository);
+        $service = new MetricsService($repository, new PrometheusFormatter());
         $output = $service->collect();
 
         $this->assertStringContainsString('app_subscriptions_total 10', $output);
