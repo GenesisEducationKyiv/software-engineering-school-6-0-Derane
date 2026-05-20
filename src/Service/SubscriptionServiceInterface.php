@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Config\Pagination;
+use App\Domain\Subscription;
+use App\Domain\SubscriptionPage;
+
 interface SubscriptionServiceInterface
 {
-    /** @return array{id: int, email: string, repository: string, created_at: string} */
-    public function subscribe(string $email, string $repoName): array;
+    public function subscribe(string $email, string $repoName): Subscription;
 
     public function unsubscribe(int $id): void;
 
-    /** @return array{id: int, email: string, repository: string, created_at: string} */
-    public function getSubscription(int $id): array;
+    public function getSubscription(int $id): Subscription;
 
-    /** @return list<array{id: int, email: string, repository: string, created_at: string}> */
-    public function listSubscriptions(?string $email = null, int $limit = 100, int $offset = 0): array;
+    public function listSubscriptions(?string $email, Pagination $pagination): SubscriptionPage;
 }

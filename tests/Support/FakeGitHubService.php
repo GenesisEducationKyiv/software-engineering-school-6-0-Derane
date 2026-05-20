@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use App\Domain\Release;
 use App\Service\GitHubServiceInterface;
 
 /**
@@ -25,7 +26,7 @@ final class FakeGitHubService implements GitHubServiceInterface
     }
 
     #[\Override]
-    public function getLatestRelease(string $repository): ?array
+    public function getLatestRelease(string $repository): ?Release
     {
         return null;
     }

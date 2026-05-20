@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Repository;
 
+use App\Config\Pagination;
 use App\Repository\SubscriptionRepositoryInterface;
-use PDO;
 use Tests\Integration\IntegrationTestCase;
 
 final class SubscriptionRepositoryTest extends IntegrationTestCase
@@ -18,21 +18,17 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $this->repo = $this->c->get(SubscriptionRepositoryInterface::class);
     }
 
-    public function testCreatePersistsRowAndAutoRegistersRepository(): void
+    public function testCreatePersistsRow(): void
     {
         $email = $this->faker->safeEmail();
         $repository = $this->repoName();
 
-        $row = $this->repo->create($email, $repository);
+        $subscription = $this->repo->create($email, $repository);
 
-        $this->assertSame($email, $row['email']);
-        $this->assertSame($repository, $row['repository']);
-        $this->assertGreaterThan(0, $row['id']);
-        $this->assertNotEmpty($row['created_at']);
-
-        $info = $this->repo->getRepositoryInfo($repository);
-        $this->assertNotNull($info, 'create() should register repository');
-        $this->assertSame($repository, $info['full_name']);
+        $this->assertSame($email, $subscription->email);
+        $this->assertSame($repository, $subscription->repository);
+        $this->assertGreaterThan(0, $subscription->id);
+        $this->assertNotEmpty($subscription->createdAt);
     }
 
     public function testCreateIsIdempotentOnDuplicate(): void
@@ -43,8 +39,8 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $first = $this->repo->create($email, $repository);
         $second = $this->repo->create($email, $repository);
 
-        $this->assertSame($first['id'], $second['id']);
-        $this->assertCount(1, $this->repo->findAll());
+        $this->assertSame($first->id, $second->id);
+        $this->assertCount(1, $this->repo->findAll(new Pagination(10, 0))->items);
     }
 
     public function testFindByIdReturnsNullForMissing(): void
@@ -56,11 +52,11 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
     {
         $created = $this->repo->create($this->faker->safeEmail(), $this->repoName());
 
-        $found = $this->repo->findById($created['id']);
+        $found = $this->repo->findById($created->id);
 
         $this->assertNotNull($found);
-        $this->assertSame($created['email'], $found['email']);
-        $this->assertSame($created['repository'], $found['repository']);
+        $this->assertSame($created->email, $found->email);
+        $this->assertSame($created->repository, $found->repository);
     }
 
     public function testFindByEmailFiltersAndPaginates(): void
@@ -74,17 +70,20 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $this->repo->create($owner, $repoB);
         $this->repo->create($other, $this->repoName());
 
-        $ownerRows = $this->repo->findByEmail($owner);
-        $this->assertCount(2, $ownerRows);
-        $repos = array_column($ownerRows, 'repository');
+        $allForOwner = $this->repo->findByEmail($owner, new Pagination(10, 0));
+        $this->assertSame(2, $allForOwner->total);
+        $this->assertCount(2, $allForOwner->items);
+        $repos = array_map(fn($s) => $s->repository, $allForOwner->items);
         $this->assertContains($repoA, $repos);
         $this->assertContains($repoB, $repos);
 
-        $firstPage = $this->repo->findByEmail($owner, 1, 0);
-        $secondPage = $this->repo->findByEmail($owner, 1, 1);
-        $this->assertCount(1, $firstPage);
-        $this->assertCount(1, $secondPage);
-        $this->assertNotSame($firstPage[0]['id'], $secondPage[0]['id']);
+        $firstPage = $this->repo->findByEmail($owner, new Pagination(1, 0));
+        $secondPage = $this->repo->findByEmail($owner, new Pagination(1, 1));
+        $this->assertCount(1, $firstPage->items);
+        $this->assertCount(1, $secondPage->items);
+        $this->assertNotSame($firstPage->items[0]->id, $secondPage->items[0]->id);
+        $this->assertTrue($firstPage->hasNextPage());
+        $this->assertFalse($secondPage->hasNextPage());
     }
 
     public function testFindAllPaginates(): void
@@ -93,16 +92,22 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $this->repo->create($this->faker->safeEmail(), $this->repoName());
         $this->repo->create($this->faker->safeEmail(), $this->repoName());
 
-        $this->assertCount(2, $this->repo->findAll(2, 0));
-        $this->assertCount(1, $this->repo->findAll(2, 2));
+        $page1 = $this->repo->findAll(new Pagination(2, 0));
+        $page2 = $this->repo->findAll(new Pagination(2, 2));
+
+        $this->assertCount(2, $page1->items);
+        $this->assertCount(1, $page2->items);
+        $this->assertSame(3, $page1->total);
+        $this->assertTrue($page1->hasNextPage());
+        $this->assertFalse($page2->hasNextPage());
     }
 
     public function testDeleteReturnsTrueWhenRowExisted(): void
     {
-        $row = $this->repo->create($this->faker->safeEmail(), $this->repoName());
+        $subscription = $this->repo->create($this->faker->safeEmail(), $this->repoName());
 
-        $this->assertTrue($this->repo->delete($row['id']));
-        $this->assertNull($this->repo->findById($row['id']));
+        $this->assertTrue($this->repo->delete($subscription->id));
+        $this->assertNull($this->repo->findById($subscription->id));
     }
 
     public function testDeleteReturnsFalseWhenRowMissing(): void
@@ -110,131 +115,20 @@ final class SubscriptionRepositoryTest extends IntegrationTestCase
         $this->assertFalse($this->repo->delete($this->faker->numberBetween(1_000_000, 9_999_999)));
     }
 
-    public function testGetActiveRepositoriesReturnsDistinctList(): void
+    public function testFindSubscribersByRepositoryReturnsCollection(): void
     {
-        $shared = $this->repoName();
-        $unique = $this->repoName();
-
-        $this->repo->create($this->faker->safeEmail(), $shared);
-        $this->repo->create($this->faker->safeEmail(), $shared);
-        $this->repo->create($this->faker->safeEmail(), $unique);
-
-        $repos = $this->repo->getActiveRepositories();
-        sort($repos);
-        $expected = [$shared, $unique];
-        sort($expected);
-        $this->assertSame($expected, $repos);
-    }
-
-    public function testGetMetricsReflectsTableState(): void
-    {
-        $repoWithRelease = $this->repoName();
-        $this->repo->create($this->faker->safeEmail(), $repoWithRelease);
+        $repository = $this->repoName();
+        $first = $this->repo->create($this->faker->safeEmail(), $repository);
+        $second = $this->repo->create($this->faker->safeEmail(), $repository);
         $this->repo->create($this->faker->safeEmail(), $this->repoName());
-        $this->repo->updateLastSeenTag($repoWithRelease, 'v1.0.0');
 
-        $metrics = $this->repo->getMetrics();
-        $this->assertSame(2, $metrics['subscriptions']);
-        $this->assertSame(2, $metrics['repositories']);
-        $this->assertSame(1, $metrics['repositories_with_releases']);
-    }
+        $subscribers = $this->repo->findSubscribersByRepository($repository);
 
-    public function testRecordAndQueryNotificationLifecycle(): void
-    {
-        $sub = $this->repo->create($this->faker->safeEmail(), $this->repoName());
-        $tag = 'v' . $this->faker->numerify('#.#.#');
-
-        $this->assertFalse(
-            $this->repo->hasSuccessfulNotificationForRelease($sub['id'], $sub['repository'], $tag)
-        );
-
-        $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, true);
-        $this->assertTrue(
-            $this->repo->hasSuccessfulNotificationForRelease($sub['id'], $sub['repository'], $tag)
-        );
-    }
-
-    public function testRecordNotificationResultUpsertsOnRetry(): void
-    {
-        $sub = $this->repo->create($this->faker->safeEmail(), $this->repoName());
-        $tag = 'v' . $this->faker->numerify('#.#.#');
-
-        $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, false, 'smtp down');
-
-        $afterFailure = $this->fetchNotificationRow($sub['id'], $sub['repository'], $tag);
-        $this->assertSame(1, (int) $afterFailure['attempts']);
-        $this->assertSame('smtp down', $afterFailure['last_error']);
-        $this->assertNull($afterFailure['sent_at']);
-
-        $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, true);
-
-        $afterSuccess = $this->fetchNotificationRow($sub['id'], $sub['repository'], $tag);
-        $this->assertSame(2, (int) $afterSuccess['attempts']);
-        $this->assertNull($afterSuccess['last_error']);
-        $this->assertNotNull($afterSuccess['sent_at']);
-
-        $this->assertTrue(
-            $this->repo->hasSuccessfulNotificationForRelease($sub['id'], $sub['repository'], $tag)
-        );
-    }
-
-    public function testDeletingSubscriptionCascadesReleaseNotifications(): void
-    {
-        $sub = $this->repo->create($this->faker->safeEmail(), $this->repoName());
-        $tag = 'v' . $this->faker->numerify('#.#.#');
-
-        $this->repo->recordNotificationResult($sub['id'], $sub['repository'], $tag, true);
-        $this->assertSame(1, $this->countNotificationsFor($sub['id']));
-
-        $this->repo->delete($sub['id']);
-
-        $this->assertSame(
-            0,
-            $this->countNotificationsFor($sub['id']),
-            'release_notifications rows should cascade when subscription is deleted'
-        );
-    }
-
-    /**
-     * @return array{attempts: int, last_error: ?string, sent_at: ?string}
-     */
-    private function fetchNotificationRow(int $subscriptionId, string $repository, string $tag): array
-    {
-        $stmt = $this->c->get(PDO::class)->prepare(
-            'SELECT attempts, last_error, sent_at
-               FROM release_notifications
-              WHERE subscription_id = :sid AND repository = :repo AND tag_name = :tag'
-        );
-        $stmt->execute(['sid' => $subscriptionId, 'repo' => $repository, 'tag' => $tag]);
-        /** @var array{attempts: int, last_error: ?string, sent_at: ?string}|false $row */
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        $this->assertNotFalse($row, 'release_notifications row missing after recordNotificationResult');
-
-        return $row;
-    }
-
-    private function countNotificationsFor(int $subscriptionId): int
-    {
-        $stmt = $this->c->get(PDO::class)->prepare(
-            'SELECT COUNT(*) FROM release_notifications WHERE subscription_id = :sid'
-        );
-        $stmt->execute(['sid' => $subscriptionId]);
-
-        return (int) $stmt->fetchColumn();
-    }
-
-    public function testGetRepositoriesToScanOrdersByLastChecked(): void
-    {
-        $checkedEarlier = $this->repoName();
-        $neverChecked = $this->repoName();
-
-        $this->repo->create($this->faker->safeEmail(), $checkedEarlier);
-        $this->repo->create($this->faker->safeEmail(), $neverChecked);
-        $this->repo->updateLastChecked($checkedEarlier);
-
-        $toScan = $this->repo->getRepositoriesToScan(10);
-        $this->assertSame([$neverChecked, $checkedEarlier], $toScan);
+        $ids = array_map(fn($ref) => $ref->id, iterator_to_array($subscribers));
+        sort($ids);
+        $expected = [$first->id, $second->id];
+        sort($expected);
+        $this->assertSame($expected, $ids);
     }
 
     private function repoName(): string
