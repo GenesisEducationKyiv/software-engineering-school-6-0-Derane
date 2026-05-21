@@ -189,7 +189,7 @@ return static function (array $settings): Container {
             $settings['redis']['cache_ttl']
         ),
         GitHubServiceInterface::class => static function ($c) use ($settings) {
-            if (($settings['github']['stub'] ?? false) === true) {
+            if ($settings['github']['stub']) {
                 return new FakeGitHubService();
             }
 
