@@ -21,7 +21,8 @@ final readonly class MetricsService implements MetricsServiceInterface
     public function __construct(
         private \Closure $snapshotProvider,
         private RegistryInterface $registry,
-        private LoggerInterface $logger
+        private LoggerInterface $logger,
+        private string $version
     ) {
     }
 
@@ -31,7 +32,7 @@ final readonly class MetricsService implements MetricsServiceInterface
         // app_info needs no I/O, so it is always present.
         $this->registry
             ->getOrRegisterGauge('', 'app_info', 'Application info', ['version'])
-            ->set(1, ['1.0.0']);
+            ->set(1, [$this->version]);
 
         try {
             $snapshot = ($this->snapshotProvider)();

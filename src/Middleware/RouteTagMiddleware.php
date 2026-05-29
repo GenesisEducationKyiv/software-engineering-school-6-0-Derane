@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Observability\CorrelationContext;
+use App\Observability\RouteContextInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
@@ -14,8 +14,8 @@ use Slim\Routing\RouteContext;
 
 /**
  * Records the matched Slim route *pattern* into the request-scoped
- * {@see CorrelationContext} so the outer {@see RequestMetricsMiddleware} can use
- * it as a bounded metric label.
+ * {@see RouteContextInterface} so the outer {@see RequestMetricsMiddleware} can
+ * use it as a bounded metric label.
  *
  * Runs inside the routing middleware (where the route is resolved) but the
  * metric is recorded by the outer middleware — that split is what lets RED also
@@ -25,7 +25,7 @@ use Slim\Routing\RouteContext;
  */
 final readonly class RouteTagMiddleware implements MiddlewareInterface
 {
-    public function __construct(private CorrelationContext $correlation)
+    public function __construct(private RouteContextInterface $correlation)
     {
     }
 

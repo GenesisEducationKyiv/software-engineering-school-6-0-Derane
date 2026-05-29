@@ -18,7 +18,8 @@ class MetricsServiceTest extends TestCase
         $service = new MetricsService(
             static fn(): MetricsSnapshot => new MetricsSnapshot(10, 5, 3),
             new CollectorRegistry(new InMemory(), false),
-            new NullLogger()
+            new NullLogger(),
+            '9.9.9'
         );
 
         $output = $service->collect();
@@ -26,7 +27,8 @@ class MetricsServiceTest extends TestCase
         $this->assertStringContainsString('app_subscriptions_total 10', $output);
         $this->assertStringContainsString('app_repositories_total 5', $output);
         $this->assertStringContainsString('app_repositories_with_releases 3', $output);
-        $this->assertStringContainsString('app_info{version="1.0.0"} 1', $output);
+        // version comes from the injected config value, not a hardcoded literal.
+        $this->assertStringContainsString('app_info{version="9.9.9"} 1', $output);
         $this->assertStringContainsString('# TYPE app_subscriptions_total gauge', $output);
         $this->assertStringContainsString('# HELP app_subscriptions_total', $output);
     }
@@ -42,7 +44,8 @@ class MetricsServiceTest extends TestCase
         $service = new MetricsService(
             static fn(): MetricsSnapshot => throw new \RuntimeException('database is down'),
             $registry,
-            new NullLogger()
+            new NullLogger(),
+            '1.0.0'
         );
 
         $output = $service->collect();

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Observability\Logging;
 
-use App\Observability\CorrelationContext;
+use App\Observability\CorrelationContextInterface;
 use Monolog\LogRecord;
 use Monolog\Processor\ProcessorInterface;
 
@@ -18,7 +18,7 @@ use Monolog\Processor\ProcessorInterface;
 final readonly class ContextProcessor implements ProcessorInterface
 {
     public function __construct(
-        private CorrelationContext $correlation,
+        private CorrelationContextInterface $correlation,
         private string $component,
         private string $env
     ) {

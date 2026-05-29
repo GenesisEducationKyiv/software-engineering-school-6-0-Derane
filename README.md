@@ -109,7 +109,11 @@ make obs-down   # зупинити та прибрати томи
 
 Усі три процеси (`api`, `grpc`, `scanner`) пишуть логи у форматі JSON у stdout/stderr.
 Кожен запис містить `component`, `env` і `correlation_id` (один id на запит/виклик/цикл
-сканування; HTTP підхоплює вхідний `X-Request-Id`). Filebeat збирає логи контейнерів,
+сканування; HTTP підхоплює вхідний `X-Request-Id`, gRPC — метадані `x-request-id`, тож
+трасування може охоплювати межі сервісів). Кожен HTTP-запит і gRPC-виклик
+лишає структурований access-рядок (`http request handled` / `grpc call handled` з
+`grpc_method`/`grpc_code`/`duration_ms`); серверні збої (HTTP 500 / gRPC `INTERNAL`)
+додатково логуються на рівні `error` з винятком. Filebeat збирає логи контейнерів,
 розбирає JSON і відправляє в Elasticsearch; у Kibana їх можна шукати й агрегувати за
 `extra.component`, `extra.correlation_id`, `level_name`, `channel`.
 

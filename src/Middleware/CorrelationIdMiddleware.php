@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Observability\CorrelationContext;
+use App\Observability\CorrelationContextInterface;
+use App\Observability\CorrelationIdGeneratorInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
@@ -24,8 +25,10 @@ final readonly class CorrelationIdMiddleware implements MiddlewareInterface
 {
     private const HEADER = 'X-Request-Id';
 
-    public function __construct(private CorrelationContext $correlation)
-    {
+    public function __construct(
+        private CorrelationContextInterface $correlation,
+        private CorrelationIdGeneratorInterface $idGenerator
+    ) {
     }
 
     #[\Override]
@@ -33,7 +36,7 @@ final readonly class CorrelationIdMiddleware implements MiddlewareInterface
     {
         $id = $request->getHeaderLine(self::HEADER);
         if ($id === '') {
-            $id = bin2hex(random_bytes(16));
+            $id = $this->idGenerator->generate();
         }
 
         $this->correlation->start($id);

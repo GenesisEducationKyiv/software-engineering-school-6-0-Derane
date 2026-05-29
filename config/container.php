@@ -35,6 +35,7 @@ use App\Grpc\ReleaseNotifierService;
 use App\Health\DatabaseHealthCheck;
 use App\Health\HealthCheckInterface;
 use App\Observability\Metrics\GrpcMetrics;
+use App\Observability\Metrics\GrpcStatusName;
 use App\Observability\Metrics\HttpMetrics;
 use App\Observability\Metrics\MeasuredInvoker;
 use App\Observability\Metrics\PrometheusGrpcMetrics;
@@ -51,7 +52,11 @@ use App\Notifier\MailerInterface;
 use App\Notifier\ReleaseEmailRenderer;
 use App\Notifier\SmtpMailer;
 use App\Observability\CorrelationContext;
+use App\Observability\CorrelationContextInterface;
+use App\Observability\CorrelationIdGeneratorInterface;
 use App\Observability\Logging\ContextProcessor;
+use App\Observability\RandomCorrelationIdGenerator;
+use App\Observability\RouteContextInterface;
 use App\Repository\MetricsRepository;
 use App\Repository\MetricsRepositoryInterface;
 use App\Repository\NotificationLedger;
@@ -106,10 +111,13 @@ return static function (array $settings): Container {
     $containerBuilder->addDefinitions([
         'settings' => $settings,
 
-        CorrelationContext::class => static fn() => new CorrelationContext(),
+        // One mutable holder, shared via two narrow interfaces (id vs route).
+        CorrelationContextInterface::class => static fn() => new CorrelationContext(),
+        RouteContextInterface::class => static fn($c) => $c->get(CorrelationContextInterface::class),
+        CorrelationIdGeneratorInterface::class => static fn() => new RandomCorrelationIdGenerator(),
 
         ContextProcessor::class => static fn($c) => new ContextProcessor(
-            $c->get(CorrelationContext::class),
+            $c->get(CorrelationContextInterface::class),
             $settings['app']['component'],
             $settings['app']['env']
         ),
@@ -249,14 +257,19 @@ return static function (array $settings): Container {
             return new CollectorRegistry($storage, false);
         },
         HttpMetrics::class => static fn($c) => new PrometheusHttpMetrics($c->get(RegistryInterface::class)),
-        GrpcMetrics::class => static fn($c) => new PrometheusGrpcMetrics($c->get(RegistryInterface::class)),
+        GrpcStatusName::class => static fn() => new GrpcStatusName(),
+        GrpcMetrics::class => static fn($c) => new PrometheusGrpcMetrics(
+            $c->get(RegistryInterface::class),
+            $c->get(GrpcStatusName::class)
+        ),
         ScanMetrics::class => static fn($c) => new PrometheusScanMetrics($c->get(RegistryInterface::class)),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
             // Lazy: resolve the DB-backed repository only when collect() runs, inside its
             // try/catch — a DB/PDO failure must not block export of the RED metrics.
             static fn(): MetricsSnapshot => $c->get(MetricsRepositoryInterface::class)->snapshot(),
             $c->get(RegistryInterface::class),
-            $c->get(LoggerInterface::class)
+            $c->get(LoggerInterface::class),
+            $settings['app']['version']
         ),
 
         // Application services
@@ -316,20 +329,24 @@ return static function (array $settings): Container {
             $c->get(ExceptionStatusMap::class)
         ),
         CorrelationIdMiddleware::class => static fn($c) => new CorrelationIdMiddleware(
-            $c->get(CorrelationContext::class)
+            $c->get(CorrelationContextInterface::class),
+            $c->get(CorrelationIdGeneratorInterface::class)
         ),
         RequestMetricsMiddleware::class => static fn($c) => new RequestMetricsMiddleware(
             $c->get(HttpMetrics::class),
-            $c->get(CorrelationContext::class),
+            $c->get(RouteContextInterface::class),
             $c->get(LoggerInterface::class)
         ),
         RouteTagMiddleware::class => static fn($c) => new RouteTagMiddleware(
-            $c->get(CorrelationContext::class)
+            $c->get(RouteContextInterface::class)
         ),
         InvokerInterface::class => static fn($c) => new MeasuredInvoker(
             new Invoker(),
             $c->get(GrpcMetrics::class),
-            $c->get(CorrelationContext::class)
+            $c->get(GrpcStatusName::class),
+            $c->get(CorrelationContextInterface::class),
+            $c->get(CorrelationIdGeneratorInterface::class),
+            $c->get(LoggerInterface::class)
         ),
 
         Migrator::class => static fn($c) => new Migrator(

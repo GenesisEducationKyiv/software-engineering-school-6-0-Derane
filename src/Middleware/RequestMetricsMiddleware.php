@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Observability\CorrelationContext;
 use App\Observability\Metrics\HttpMetrics;
+use App\Observability\RouteContextInterface;
 use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -28,7 +28,7 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private HttpMetrics $metrics,
-        private CorrelationContext $correlation,
+        private RouteContextInterface $routeContext,
         private LoggerInterface $logger
     ) {
     }
@@ -47,7 +47,7 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
             return $response;
         } finally {
             $durationSeconds = microtime(true) - $start;
-            $route = $this->correlation->route() ?? 'unmatched';
+            $route = $this->routeContext->route() ?? 'unmatched';
             $this->metrics->observe($method, $route, $status, $durationSeconds);
             $this->logger->info('http request handled', [
                 'http_method' => $method,

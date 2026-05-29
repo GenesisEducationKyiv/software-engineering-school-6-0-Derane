@@ -33,8 +33,16 @@ PHP is share-nothing per request.
   (api/grpc/scanner), `env`, and `correlation_id`.
 - A per-unit-of-work **correlation id** is held in a request-scoped
   `CorrelationContext` (mutable singleton): set by `CorrelationIdMiddleware` for
-  HTTP (honouring inbound `X-Request-Id`), by `MeasuredInvoker` per gRPC call,
-  and per cycle in the scanner loop.
+  HTTP (honouring an inbound `X-Request-Id`), by `MeasuredInvoker` per gRPC call
+  (honouring an inbound `x-request-id` metadata entry), and per cycle in the
+  scanner loop. The id is minted by a shared `CorrelationIdGeneratorInterface`
+  when none arrives from upstream, so a trace can span service boundaries.
+- Every request/call gets a structured **access log**: HTTP via
+  `RequestMetricsMiddleware` (`http request handled`), gRPC via `MeasuredInvoker`
+  (`grpc call handled`, with `grpc_method`/`grpc_code`/`duration_ms`). Server-side
+  failures (HTTP 500 / gRPC `INTERNAL`) additionally get an `error`-level log with
+  the exception — for HTTP in `ErrorHandlerMiddleware`, for gRPC in `MeasuredInvoker`,
+  each being the single place its transport logs unhandled failures.
 - The app stays unaware of Elasticsearch. **Filebeat** tails container
   stdout/stderr, decodes the JSON, and ships it to Elasticsearch; **Kibana**
   reads it. No Logstash — the logs are already structured.
@@ -55,7 +63,8 @@ PHP is share-nothing per request.
   - gRPC: `MeasuredInvoker` decorates RoadRunner's `InvokerInterface` — the single
     dispatch point — recording `grpc_server_handled_total{grpc_method,grpc_code}`
     and `grpc_server_handling_seconds`. No per-method wrappers; the service is
-    untouched.
+    untouched. The `StatusCode` → name mapping lives once in `GrpcStatusName`,
+    shared by the metric label and the access log below.
   - Scanner: `ScannerService` records cycle count/duration, `scan_errors_total{type}`,
     releases detected and notification outcomes at the orchestration layer.
 - `MetricsService` now renders **everything** through the promphp registry,

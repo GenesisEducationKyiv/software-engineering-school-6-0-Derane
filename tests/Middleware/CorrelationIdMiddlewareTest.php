@@ -6,6 +6,7 @@ namespace Tests\Middleware;
 
 use App\Middleware\CorrelationIdMiddleware;
 use App\Observability\CorrelationContext;
+use App\Observability\RandomCorrelationIdGenerator;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Server\RequestHandlerInterface;
 use Slim\Psr7\Factory\RequestFactory;
@@ -27,7 +28,8 @@ class CorrelationIdMiddlewareTest extends TestCase
         );
 
         $request = (new RequestFactory())->createRequest('GET', '/health');
-        $response = (new CorrelationIdMiddleware($context))->process($request, $handler);
+        $response = (new CorrelationIdMiddleware($context, new RandomCorrelationIdGenerator()))
+            ->process($request, $handler);
 
         $this->assertNotNull($idDuringHandling);
         $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $idDuringHandling);
@@ -45,7 +47,8 @@ class CorrelationIdMiddlewareTest extends TestCase
         $request = (new RequestFactory())->createRequest('GET', '/health')
             ->withHeader('X-Request-Id', 'upstream-trace-id');
 
-        $response = (new CorrelationIdMiddleware($context))->process($request, $handler);
+        $response = (new CorrelationIdMiddleware($context, new RandomCorrelationIdGenerator()))
+            ->process($request, $handler);
 
         $this->assertSame('upstream-trace-id', $response->getHeaderLine('X-Request-Id'));
     }

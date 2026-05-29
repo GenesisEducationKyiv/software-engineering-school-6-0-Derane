@@ -33,6 +33,7 @@ return [
     'app' => [
         'component' => $_ENV['APP_COMPONENT'] ?? 'app',
         'env' => $_ENV['APP_ENV'] ?? 'production',
+        'version' => $_ENV['APP_VERSION'] ?? '1.0.0',
     ],
     'log' => [
         'format' => $_ENV['LOG_FORMAT'] ?? 'json',
