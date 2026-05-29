@@ -46,9 +46,55 @@ model {
         redis = cache "Redis" {
             description "
                 Caches GitHub API responses to stay within
-                rate limits and reduce latency.
+                rate limits and reduce latency. Also backs the
+                shared Prometheus metrics registry so HTTP, gRPC
+                and scanner processes accumulate RED metrics in
+                one place.
             "
             technology "Redis 7"
+        }
+
+        // --- Observability stack (docker-compose.observability.yml) ---
+
+        filebeat = container "Filebeat" {
+            description "
+                Tails container stdout/stderr and ships the
+                application's structured JSON log lines to
+                Elasticsearch.
+            "
+            technology "Elastic Filebeat 8"
+        }
+
+        elasticsearch = database "Elasticsearch" {
+            description "
+                Stores and indexes structured application logs
+                for full-text search and aggregation.
+            "
+            technology "Elasticsearch 8 (single-node)"
+        }
+
+        kibana = container "Kibana" {
+            description "
+                Search, filter and aggregate logs by correlation
+                id, component (api/grpc/scanner) and level.
+            "
+            technology "Kibana 8"
+        }
+
+        prometheus = container "Prometheus" {
+            description "
+                Scrapes RED and business metrics from the HTTP API
+                /metrics endpoint and stores the time series.
+            "
+            technology "Prometheus 2"
+        }
+
+        grafana = container "Grafana" {
+            description "
+                Visualizes the RED metrics dashboard, querying
+                Prometheus as its datasource.
+            "
+            technology "Grafana 11"
         }
     }
 
@@ -67,4 +113,20 @@ model {
     scanner -> redis "Reads/writes cached GitHub responses" "RESP"
     scanner -> github "Polls release metadata" "HTTPS"
     scanner -> smtp "Sends email notifications" "SMTP"
+
+    // Structured logging pipeline: each process emits JSON to stdout, Filebeat
+    // ships it to Elasticsearch, Kibana reads it back for search/aggregation.
+    httpApi -> filebeat "Emits structured JSON logs" "stdout"
+    grpcApi -> filebeat "Emits structured JSON logs" "stdout"
+    scanner -> filebeat "Emits structured JSON logs" "stdout"
+    filebeat -> elasticsearch "Ships logs" "Bulk HTTP"
+    kibana -> elasticsearch "Queries & visualizes logs" "HTTP"
+
+    // Metrics pipeline: processes publish RED metrics into the shared Redis-backed
+    // registry; the HTTP API renders it at /metrics; Prometheus scrapes it; Grafana reads.
+    httpApi -> redis "Publishes RED metrics (shared registry)" "RESP"
+    grpcApi -> redis "Publishes RED metrics (shared registry)" "RESP"
+    scanner -> redis "Publishes RED metrics (shared registry)" "RESP"
+    prometheus -> httpApi "Scrapes metrics" "HTTP /metrics"
+    grafana -> prometheus "Queries metrics" "HTTP"
 }
