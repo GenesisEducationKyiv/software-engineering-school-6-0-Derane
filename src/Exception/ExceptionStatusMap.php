@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Exception;
 
 use Fig\Http\Message\StatusCodeInterface;
+use Slim\Exception\HttpException;
 use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
 
 /**
@@ -21,6 +22,8 @@ final readonly class ExceptionStatusMap
             $e instanceof RepositoryNotFoundException,
             $e instanceof SubscriptionNotFoundException => StatusCodeInterface::STATUS_NOT_FOUND,
             $e instanceof RateLimitException => StatusCodeInterface::STATUS_TOO_MANY_REQUESTS,
+            // Slim routing failures (404 Not Found, 405 Method Not Allowed, ...) carry their HTTP code.
+            $e instanceof HttpException => $e->getCode(),
             default => StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR,
         };
     }
@@ -43,6 +46,7 @@ final readonly class ExceptionStatusMap
             $e instanceof ValidationException,
             $e instanceof RepositoryNotFoundException,
             $e instanceof SubscriptionNotFoundException => $e->getMessage(),
+            $e instanceof HttpException => $e->getMessage(),
             default => 'Internal server error',
         };
     }

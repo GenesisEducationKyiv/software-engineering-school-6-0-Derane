@@ -16,6 +16,7 @@ namespace App\Observability;
 final class CorrelationContext
 {
     private ?string $id = null;
+    private ?string $route = null;
 
     public function start(string $id): void
     {
@@ -27,8 +28,20 @@ final class CorrelationContext
         return $this->id;
     }
 
+    /** HTTP-only: the matched Slim route pattern for the current request, set after routing. */
+    public function setRoute(string $route): void
+    {
+        $this->route = $route;
+    }
+
+    public function route(): ?string
+    {
+        return $this->route;
+    }
+
     public function reset(): void
     {
         $this->id = null;
+        $this->route = null;
     }
 }

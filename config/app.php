@@ -10,6 +10,7 @@ use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
 use App\Middleware\RequestMetricsMiddleware;
+use App\Middleware\RouteTagMiddleware;
 use Slim\Factory\AppFactory;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -31,14 +32,16 @@ AppFactory::setContainer($container);
 $app = AppFactory::create();
 
 // Middleware execution order (outermost first):
-//   CorrelationId -> ErrorHandler -> Routing -> RequestMetrics -> ApiKey -> BodyParsing -> handler
-// RequestMetrics sits inside Routing (so it can label by route pattern) and is
-// added before the routing middleware here (LIFO: later add() == outer layer).
+//   CorrelationId -> RequestMetrics -> ErrorHandler -> Routing -> RouteTag -> ApiKey -> BodyParsing -> handler
+// RequestMetrics runs OUTSIDE routing + error handling so it records every response
+// (including 404/405 raised by the router); RouteTag runs INSIDE routing to capture
+// the matched route pattern for the metric label. LIFO: later add() == outer layer.
 $app->addBodyParsingMiddleware();
 $app->add($container->get(ApiKeyMiddleware::class));
-$app->add($container->get(RequestMetricsMiddleware::class));
+$app->add($container->get(RouteTagMiddleware::class));
 $app->addRoutingMiddleware();
 $app->add($container->get(ErrorHandlerMiddleware::class));
+$app->add($container->get(RequestMetricsMiddleware::class));
 $app->add($container->get(CorrelationIdMiddleware::class));
 
 $app->get('/health', HealthController::class);

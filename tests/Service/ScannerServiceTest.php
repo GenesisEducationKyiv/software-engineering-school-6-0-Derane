@@ -23,6 +23,7 @@ use App\Service\ScannerService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Prometheus\CollectorRegistry;
+use Prometheus\RenderTextFormat;
 use Prometheus\Storage\InMemory;
 use Psr\Log\NullLogger;
 
@@ -36,6 +37,7 @@ class ScannerServiceTest extends TestCase
     private GitHubServiceInterface&MockObject $gitHub;
     private NotifierInterface&MockObject $notifier;
     private ScannerService $scanner;
+    private CollectorRegistry $metricsRegistry;
 
     protected function setUp(): void
     {
@@ -47,13 +49,14 @@ class ScannerServiceTest extends TestCase
         $this->gitHub = $this->createMock(GitHubServiceInterface::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
 
+        $this->metricsRegistry = new CollectorRegistry(new InMemory(), false);
         $this->scanner = new ScannerService(
             $this->candidates,
             $this->progress,
             new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
             new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
             new NullLogger(),
-            new PrometheusScanMetrics(new CollectorRegistry(new InMemory(), false))
+            new PrometheusScanMetrics($this->metricsRegistry)
         );
     }
 
@@ -334,5 +337,35 @@ class ScannerServiceTest extends TestCase
             ->with('golang/go', 'v3.0.0');
 
         $this->scanner->scan();
+    }
+
+    public function testRateLimitOnFirstRepositoryCountsOneAttemptNotWholeBatch(): void
+    {
+        $this->candidates->method('getDueForScan')->willReturn(['a/b', 'c/d', 'e/f']);
+        $this->gitHub->method('getLatestRelease')->willThrowException(new RateLimitException('60'));
+
+        $this->scanner->scan();
+
+        $output = $this->renderMetrics();
+        $this->assertStringContainsString('scan_repositories_total 1', $output);
+        $this->assertStringContainsString('scan_cycles_total 1', $output);
+        $this->assertStringContainsString('scan_errors_total{type="rate_limit"} 1', $output);
+    }
+
+    public function testCycleLevelFailureIsRecordedAndDoesNotThrow(): void
+    {
+        $this->candidates->method('getDueForScan')
+            ->willThrowException(new \RuntimeException('candidate query failed'));
+
+        $this->scanner->scan();
+
+        $output = $this->renderMetrics();
+        $this->assertStringContainsString('scan_errors_total{type="cycle"} 1', $output);
+        $this->assertStringContainsString('scan_cycles_total 1', $output);
+    }
+
+    private function renderMetrics(): string
+    {
+        return (new RenderTextFormat())->render($this->metricsRegistry->getMetricFamilySamples());
     }
 }

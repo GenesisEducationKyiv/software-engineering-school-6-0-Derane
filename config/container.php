@@ -21,6 +21,7 @@ use App\Domain\Factory\SubscriberRefFactory;
 use App\Domain\Factory\SubscriberRefFactoryInterface;
 use App\Domain\Factory\SubscriptionFactory;
 use App\Domain\Factory\SubscriptionFactoryInterface;
+use App\Domain\MetricsSnapshot;
 use App\Exception\ExceptionStatusMap;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
@@ -44,6 +45,7 @@ use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
 use App\Middleware\RequestMetricsMiddleware;
+use App\Middleware\RouteTagMiddleware;
 use App\Migration\Migrator;
 use App\Notifier\MailerInterface;
 use App\Notifier\ReleaseEmailRenderer;
@@ -91,7 +93,7 @@ use Predis\Client as RedisClient;
 use Prometheus\CollectorRegistry;
 use Prometheus\RegistryInterface;
 use Prometheus\Storage\InMemory;
-use Prometheus\Storage\Redis as PrometheusRedisStorage;
+use Prometheus\Storage\Predis as PrometheusPredisStorage;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -238,12 +240,10 @@ return static function (array $settings): Container {
 
         // Metrics — shared Prometheus registry (Redis-backed in prod so HTTP, gRPC
         // and scanner processes all feed the single /metrics endpoint).
-        RegistryInterface::class => static function () use ($settings) {
+        RegistryInterface::class => static function ($c) use ($settings) {
+            // Reuse the predis/predis client (no ext-redis dependency); InMemory in tests.
             $storage = $settings['metrics']['storage'] === 'redis'
-                ? new PrometheusRedisStorage([
-                    'host' => $settings['redis']['host'],
-                    'port' => $settings['redis']['port'],
-                ])
+                ? PrometheusPredisStorage::fromExistingConnection($c->get(RedisClient::class))
                 : new InMemory();
 
             return new CollectorRegistry($storage, false);
@@ -252,8 +252,11 @@ return static function (array $settings): Container {
         GrpcMetrics::class => static fn($c) => new PrometheusGrpcMetrics($c->get(RegistryInterface::class)),
         ScanMetrics::class => static fn($c) => new PrometheusScanMetrics($c->get(RegistryInterface::class)),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
-            $c->get(MetricsRepositoryInterface::class),
-            $c->get(RegistryInterface::class)
+            // Lazy: resolve the DB-backed repository only when collect() runs, inside its
+            // try/catch — a DB/PDO failure must not block export of the RED metrics.
+            static fn(): MetricsSnapshot => $c->get(MetricsRepositoryInterface::class)->snapshot(),
+            $c->get(RegistryInterface::class),
+            $c->get(LoggerInterface::class)
         ),
 
         // Application services
@@ -317,8 +320,11 @@ return static function (array $settings): Container {
         ),
         RequestMetricsMiddleware::class => static fn($c) => new RequestMetricsMiddleware(
             $c->get(HttpMetrics::class),
-            $c->get(ExceptionStatusMap::class),
+            $c->get(CorrelationContext::class),
             $c->get(LoggerInterface::class)
+        ),
+        RouteTagMiddleware::class => static fn($c) => new RouteTagMiddleware(
+            $c->get(CorrelationContext::class)
         ),
         InvokerInterface::class => static fn($c) => new MeasuredInvoker(
             new Invoker(),

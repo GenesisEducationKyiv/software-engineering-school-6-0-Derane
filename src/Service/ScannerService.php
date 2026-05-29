@@ -27,29 +27,41 @@ final readonly class ScannerService
     public function scan(): void
     {
         $start = microtime(true);
-        $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
-        $this->logger->info('Scanning ' . count($repositories) . ' repositories for new releases');
+        $attempted = 0;
 
-        foreach ($repositories as $repoName) {
-            try {
-                $this->checkRepository($repoName);
-            } catch (RateLimitException $e) {
-                $this->metrics->errorOccurred('rate_limit');
-                $this->logger->warning('Rate limited — stopping scan cycle early', [
-                    'repository' => $repoName,
-                    'retry_after' => $e->retryAfter,
-                ]);
-                break;
-            } catch (\Exception $e) {
-                $this->metrics->errorOccurred('error');
-                $this->logger->error('Scan error', [
-                    'repository' => $repoName,
-                    'error' => $e->getMessage(),
-                ]);
+        try {
+            $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
+            $this->logger->info('Scanning ' . count($repositories) . ' repositories for new releases');
+
+            foreach ($repositories as $repoName) {
+                $attempted++;
+                try {
+                    $this->checkRepository($repoName);
+                } catch (RateLimitException $e) {
+                    $this->metrics->errorOccurred('rate_limit');
+                    $this->logger->warning('Rate limited — stopping scan cycle early', [
+                        'repository' => $repoName,
+                        'retry_after' => $e->retryAfter,
+                    ]);
+                    break;
+                } catch (\Exception $e) {
+                    $this->metrics->errorOccurred('error');
+                    $this->logger->error('Scan error', [
+                        'repository' => $repoName,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
+        } catch (\Throwable $e) {
+            // Cycle-level failure (e.g. the candidate query itself failed).
+            $this->metrics->errorOccurred('cycle');
+            $this->logger->error('Scan cycle failed', ['error' => $e->getMessage()]);
+        } finally {
+            // Count repositories actually attempted (a rate-limit break stops early,
+            // so the batch size would overstate throughput) and always record the
+            // cycle and its duration, even when it failed.
+            $this->metrics->cycleCompleted($attempted, microtime(true) - $start);
         }
-
-        $this->metrics->cycleCompleted(count($repositories), microtime(true) - $start);
     }
 
     private function checkRepository(string $repoName): void

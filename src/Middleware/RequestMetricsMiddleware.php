@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
-use App\Exception\ExceptionStatusMap;
+use App\Observability\CorrelationContext;
 use App\Observability\Metrics\HttpMetrics;
 use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -12,16 +12,15 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
-use Slim\Interfaces\RouteInterface;
-use Slim\Routing\RouteContext;
 
 /**
  * Records RED metrics for every HTTP request and emits a structured access log.
  *
- * Runs inside the routing middleware so the matched route *pattern* is used as
- * the label (bounding cardinality), and reuses {@see ExceptionStatusMap} to
- * label the status of a thrown exception with the same code the error handler
- * will map it to, then re-throws so the error handler still builds the response.
+ * Sits OUTSIDE the routing + error-handling middleware so it observes the final
+ * response for *every* request — including routing failures (404/405) that the
+ * router raises before the handler runs. The status label is taken from the
+ * response the error handler produced, and the route label from the pattern
+ * {@see RouteTagMiddleware} recorded inside routing (or `unmatched`).
  *
  * @psalm-api
  */
@@ -29,7 +28,7 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private HttpMetrics $metrics,
-        private ExceptionStatusMap $statusMap,
+        private CorrelationContext $correlation,
         private LoggerInterface $logger
     ) {
     }
@@ -38,7 +37,6 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $method = $request->getMethod();
-        $route = $this->routePattern($request);
         $status = StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR;
         $start = microtime(true);
 
@@ -47,11 +45,9 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
             $status = $response->getStatusCode();
 
             return $response;
-        } catch (\Throwable $e) {
-            $status = $this->statusMap->toHttpStatus($e);
-            throw $e;
         } finally {
             $durationSeconds = microtime(true) - $start;
+            $route = $this->correlation->route() ?? 'unmatched';
             $this->metrics->observe($method, $route, $status, $durationSeconds);
             $this->logger->info('http request handled', [
                 'http_method' => $method,
@@ -60,13 +56,5 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
                 'duration_ms' => round($durationSeconds * 1000.0, 2),
             ]);
         }
-    }
-
-    private function routePattern(ServerRequestInterface $request): string
-    {
-        /** @var RouteInterface|null $route — Slim sets this to the matched route, or it is absent */
-        $route = $request->getAttribute(RouteContext::ROUTE);
-
-        return $route instanceof RouteInterface ? $route->getPattern() : 'unmatched';
     }
 }
