@@ -3,3 +3,10 @@ services:
     environment:
       - API_KEY=
       - GITHUB_SCAN_INTERVAL=9999
+      - GITHUB_STUB=true
+  scanner:
+    environment:
+      - GITHUB_STUB=true
+  grpc:
+    environment:
+      - GITHUB_STUB=true

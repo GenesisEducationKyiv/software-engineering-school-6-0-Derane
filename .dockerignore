@@ -1,6 +1,12 @@
 vendor/
+node_modules/
 .env
 .git
 .github
 *.md
 docker-compose.yml
+docker-compose.test.yml
+docker-compose.e2e.yml
+docker-compose.architecture.yml
+tests/e2e/playwright-report/
+tests/e2e/test-results/

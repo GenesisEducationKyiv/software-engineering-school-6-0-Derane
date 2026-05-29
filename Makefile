@@ -1,10 +1,19 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto behat-up behat-run behat-down behat ci c4-up c4-down c4-logs c4-validate
+.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto \
+        acceptance-up acceptance-run acceptance-down acceptance \
+        acceptance-auth-up acceptance-auth-run acceptance-auth-down acceptance-auth \
+        integration-up integration-run integration-down integration \
+        e2e-up e2e-run e2e-down e2e \
+        e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
+        tests ci c4-up c4-down c4-logs c4-validate
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
 COMPOSE := docker compose
 TEST_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml
+E2E_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml -f docker-compose.e2e.yml
+E2E_AUTH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml -f docker-compose.e2e.yml -f docker-compose.e2e-auth.yml
+ACCEPTANCE_AUTH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml -f docker-compose.acceptance-auth.yml
 C4_COMPOSE := HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose -f docker-compose.architecture.yml
 C4_RUN := $(C4_COMPOSE) run --rm --no-deps -T likec4
 
@@ -34,41 +43,95 @@ logs: ## Show Docker logs
 migrate: ensure-env ## Run database migrations inside Docker
 	$(COMPOSE) exec -T app php bin/migrate.php
 
-test: install ## Run PHPUnit inside Docker
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
+test: install ## Run PHPUnit Unit suite inside Docker
+	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Unit --testdox
 
 lint: install ## Run PHP_CodeSniffer inside Docker
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
+	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
 
 psalm: install ## Run Psalm inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 
 check: install ## Run lint, static analysis and unit tests inside Docker
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
+	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
+	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Unit --testdox
 
 proto: install ## Generate protobuf and gRPC PHP classes inside Docker
 	$(COMPOSE) run --rm --no-deps -v "$(PWD):/app" app bash -lc "chmod +x tools/bin/protoc-gen-php-grpc-2025.1.12-linux-amd64/protoc-gen-php-grpc && mkdir -p generated && chown -R $(HOST_UID):$(HOST_GID) generated && protoc --plugin=protoc-gen-php-grpc=tools/bin/protoc-gen-php-grpc-2025.1.12-linux-amd64/protoc-gen-php-grpc --php_out=generated --php-grpc_out=generated proto/release_notifier.proto && chown -R $(HOST_UID):$(HOST_GID) generated"
 
-behat-up: ensure-env ## Start acceptance environment in Docker
-	$(TEST_COMPOSE) up -d --build --wait
+integration-up: install ensure-env ## Start Postgres + Redis for integration tests
+	$(TEST_COMPOSE) up -d --wait postgres redis
 
-behat-run: ## Run Behat tests inside Docker (requires running services)
-	$(TEST_COMPOSE) exec -T app composer acceptance
+integration-run: ## Run PHPUnit Integration suite inside Docker (requires running services)
+	$(TEST_COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Integration --testdox
 
-behat-down: ## Stop acceptance environment and remove test volumes
+integration-down: ## Stop integration environment and remove volumes
 	$(TEST_COMPOSE) down -v
 
-behat: behat-up ## Run Behat acceptance tests inside Docker
-	$(MAKE) behat-run
-	$(MAKE) behat-down
+integration: integration-up ## Run PHPUnit Integration suite end-to-end
+	@$(MAKE) integration-run; status=$$?; $(MAKE) integration-down; exit $$status
 
-ci: install ## Run the full Dockerized CI pipeline
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs --standard=PSR12 src/ config/ bin/ tests/
-	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
-	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --configuration phpunit.xml --testdox
-	$(MAKE) behat
+acceptance-up: ensure-env ## Start acceptance environment in Docker
+	$(TEST_COMPOSE) up -d --build --wait
+
+acceptance-run: ## Run Behat acceptance tests inside Docker (requires running services)
+	$(TEST_COMPOSE) exec -T app composer acceptance
+
+acceptance-down: ## Stop acceptance environment and remove volumes
+	$(TEST_COMPOSE) down -v
+
+acceptance: acceptance-up ## Run Behat acceptance tests end-to-end
+	@$(MAKE) acceptance-run; status=$$?; $(MAKE) acceptance-down; exit $$status
+
+acceptance-auth-up: ensure-env ## Start acceptance environment with API_KEY auth enabled
+	$(ACCEPTANCE_AUTH_COMPOSE) up -d --build --wait
+
+acceptance-auth-run: ## Run Behat @auth scenarios inside Docker (requires running services)
+	$(ACCEPTANCE_AUTH_COMPOSE) exec -T app composer acceptance-auth
+
+acceptance-auth-down: ## Stop the auth-enabled acceptance environment and remove volumes
+	$(ACCEPTANCE_AUTH_COMPOSE) down -v
+
+acceptance-auth: acceptance-auth-up ## Run Behat @auth suite end-to-end
+	@$(MAKE) acceptance-auth-run; status=$$?; $(MAKE) acceptance-auth-down; exit $$status
+
+e2e-up: ensure-env ## Start E2E environment (app stack) in Docker
+	$(E2E_COMPOSE) up -d --build --wait app
+
+e2e-run: ## Run Playwright E2E tests inside Docker (requires running app)
+	$(E2E_COMPOSE) run --rm playwright
+
+e2e-down: ## Stop E2E environment and remove volumes
+	$(E2E_COMPOSE) down -v
+
+e2e: e2e-up ## Run Playwright E2E tests end-to-end
+	@$(MAKE) e2e-run; status=$$?; $(MAKE) e2e-down; exit $$status
+
+e2e-auth-up: ensure-env ## Start E2E environment with API_KEY auth enabled
+	$(E2E_AUTH_COMPOSE) up -d --build --wait app
+
+e2e-auth-run: ## Run Playwright auth-on suite inside Docker (requires running app)
+	$(E2E_AUTH_COMPOSE) run --rm playwright
+
+e2e-auth-down: ## Stop the auth-enabled E2E environment and remove volumes
+	$(E2E_AUTH_COMPOSE) down -v
+
+e2e-auth: e2e-auth-up ## Run Playwright auth-on E2E suite end-to-end
+	@$(MAKE) e2e-auth-run; status=$$?; $(MAKE) e2e-auth-down; exit $$status
+
+tests: ## Run every test suite (unit, integration, acceptance, acceptance-auth, e2e, e2e-auth)
+	$(MAKE) test
+	$(MAKE) integration
+	$(MAKE) acceptance
+	$(MAKE) acceptance-auth
+	$(MAKE) e2e
+	$(MAKE) e2e-auth
+
+ci: install ## Run the full Dockerized CI pipeline locally
+	$(MAKE) lint
+	$(MAKE) psalm
+	$(MAKE) tests
 
 c4-up: ## Start LikeC4 live preview at http://localhost:5173
 	$(C4_COMPOSE) up -d

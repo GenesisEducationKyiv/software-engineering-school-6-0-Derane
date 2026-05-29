@@ -55,6 +55,7 @@ use App\Repository\TrackedRepositoryRegistrar;
 use App\Repository\TrackedRepositoryWriter;
 use App\Service\GitHubService;
 use App\Service\GitHubServiceInterface;
+use Tests\Support\FakeGitHubService;
 use App\Service\MetricsService;
 use App\Service\MetricsServiceInterface;
 use App\Service\NotificationDispatcher;
@@ -187,7 +188,11 @@ return static function (array $settings): Container {
             $c->get(ReleaseFactoryInterface::class),
             $settings['redis']['cache_ttl']
         ),
-        GitHubServiceInterface::class => static function ($c) {
+        GitHubServiceInterface::class => static function ($c) use ($settings) {
+            if ($settings['github']['stub']) {
+                return new FakeGitHubService();
+            }
+
             return new GitHubService(
                 $c->get(GitHubApiClientInterface::class),
                 $c->get(RepositoryExistenceCacheInterface::class),

@@ -1,0 +1,18 @@
+name: Integration Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  phpunit-integration:
+    name: PHPUnit (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Postgres + Redis
+        run: make integration-up
+
+      - name: Run Integration suite
+        run: make integration-run
