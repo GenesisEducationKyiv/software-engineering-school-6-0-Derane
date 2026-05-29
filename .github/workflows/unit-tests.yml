@@ -1,0 +1,15 @@
+name: Unit Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  phpunit:
+    name: PHPUnit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: make test

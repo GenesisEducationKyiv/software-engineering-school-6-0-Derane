@@ -1,0 +1,30 @@
+name: E2E Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  playwright:
+    name: Playwright (browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker stack
+        run: make e2e-up
+
+      - name: Run Playwright suite
+        run: make e2e-run
+
+  playwright-auth:
+    name: Playwright (auth enabled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker stack with API_KEY
+        run: make e2e-auth-up
+
+      - name: Run Playwright auth suite
+        run: make e2e-auth-run

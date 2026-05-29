@@ -1,0 +1,70 @@
+model {
+    extend notifier {
+        httpApi = container "HTTP API" {
+            description "
+                Public REST API for subscription CRUD.
+                Validates input, talks to repository,
+                checks repos against GitHub.
+                Exposes /health, /metrics and the static
+                HTML subscription form at GET /.
+            "
+            technology "PHP 8.4, Slim 4, FrankenPHP (Caddy)"
+        }
+
+        grpcApi = container "gRPC API" {
+            description "
+                gRPC adapter over the same business logic.
+                Runs on RoadRunner worker protocol.
+                Logger writes to stderr to keep stdout clean
+                for the worker transport.
+            "
+            technology "PHP 8.4, RoadRunner, gRPC"
+        }
+
+        scanner = container "Scanner Worker" {
+            description "
+                Background process. Periodically polls
+                GitHub for new releases of subscribed repos
+                in batches and triggers email notifications.
+                Tracks per-repo last-seen tag and per-subscription
+                delivery state to avoid duplicate emails.
+            "
+            technology "PHP 8.4 CLI, long-running loop"
+        }
+
+        db = database "PostgreSQL" {
+            description "
+                Stores subscriptions, per-repository last seen tag
+                and per-subscription release_notifications
+                (delivery state per release tag).
+                Migrations run with advisory lock to prevent
+                concurrent schema changes.
+            "
+            technology "PostgreSQL 16"
+        }
+
+        redis = cache "Redis" {
+            description "
+                Caches GitHub API responses to stay within
+                rate limits and reduce latency.
+            "
+            technology "Redis 7"
+        }
+    }
+
+    user -> httpApi "REST calls and HTML subscription form" "HTTPS, JSON, X-API-Key"
+    user -> grpcApi "RPC calls" "gRPC"
+
+    httpApi -> db "Reads/writes subscriptions" "SQL/TCP"
+    httpApi -> redis "Reads/writes cached GitHub responses" "RESP"
+    httpApi -> github "Validates owner/repo exists" "HTTPS"
+
+    grpcApi -> db "Reads/writes subscriptions" "SQL/TCP"
+    grpcApi -> redis "Reads/writes cached GitHub responses" "RESP"
+    grpcApi -> github "Validates owner/repo exists" "HTTPS"
+
+    scanner -> db "Reads subscriptions, updates delivery state" "SQL/TCP"
+    scanner -> redis "Reads/writes cached GitHub responses" "RESP"
+    scanner -> github "Polls release metadata" "HTTPS"
+    scanner -> smtp "Sends email notifications" "SMTP"
+}

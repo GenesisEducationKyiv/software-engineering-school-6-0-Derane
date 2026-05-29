@@ -1,0 +1,18 @@
+name: Lint & Static Analysis
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    name: PHP_CodeSniffer & Psalm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run PHP_CodeSniffer
+        run: make lint
+
+      - name: Run Psalm
+        run: make psalm

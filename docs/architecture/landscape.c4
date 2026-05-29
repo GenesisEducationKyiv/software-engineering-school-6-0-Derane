@@ -1,0 +1,41 @@
+model {
+    user = actor "Subscriber" {
+        description "
+            End user who wants to be notified
+            about new GitHub releases of repositories
+            they care about.
+        "
+    }
+
+    github = externalSystem "GitHub" {
+        description "
+            Source of truth for repositories
+            and their releases. Accessed via REST API v3.
+        "
+        style {
+            icon https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg
+        }
+    }
+
+    smtp = externalSystem "SMTP Server" {
+        description "
+            Outbound email gateway used to deliver
+            release notifications to subscribers.
+            In production: external SMTP relay.
+            In dev/staging: Mailpit/MailHog.
+        "
+    }
+
+    notifier = system "GitHub Release Notifier" {
+        description "
+            Lets users subscribe to GitHub repositories
+            and emails them whenever a new release is published.
+            Exposes HTTP and gRPC APIs.
+        "
+    }
+
+    user -> notifier "Subscribes to repositories, manages subscriptions" "HTTPS / gRPC"
+    notifier -> github "Polls release metadata" "HTTPS / REST"
+    notifier -> smtp "Sends notification emails" "SMTP"
+    notifier -> user "Delivers release notifications" "Email"
+}

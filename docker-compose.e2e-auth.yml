@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      - API_KEY=playwright-secret
+
+  playwright:
+    environment:
+      - E2E_AUTH=1
+      - E2E_API_KEY=playwright-secret
