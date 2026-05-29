@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Migration\Migrator;
+use App\Observability\CorrelationContext;
 use App\Service\ScannerService;
 use Psr\Log\LoggerInterface;
 
@@ -21,11 +22,14 @@ $container->get(Migrator::class)->migrate();
 
 $scanner = $container->get(ScannerService::class);
 $logger = $container->get(LoggerInterface::class);
+$correlation = $container->get(CorrelationContext::class);
 $interval = $settings['github']['scan_interval'];
 
 $logger->info("Scanner started. Checking every {$interval} seconds.");
 
 while (true) {
+    $correlation->start(bin2hex(random_bytes(16)));
     $scanner->scan();
+    $correlation->reset();
     sleep($interval);
 }

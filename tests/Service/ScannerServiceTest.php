@@ -16,11 +16,14 @@ use App\Repository\ScanProgressWriter;
 use App\Repository\SubscriberFinderInterface;
 use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
+use App\Observability\Metrics\PrometheusScanMetrics;
 use App\Service\NotifierInterface;
 use App\Service\ReleaseDetector;
 use App\Service\ScannerService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Prometheus\CollectorRegistry;
+use Prometheus\Storage\InMemory;
 use Psr\Log\NullLogger;
 
 class ScannerServiceTest extends TestCase
@@ -49,7 +52,8 @@ class ScannerServiceTest extends TestCase
             $this->progress,
             new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
             new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
-            new NullLogger()
+            new NullLogger(),
+            new PrometheusScanMetrics(new CollectorRegistry(new InMemory(), false))
         );
     }
 

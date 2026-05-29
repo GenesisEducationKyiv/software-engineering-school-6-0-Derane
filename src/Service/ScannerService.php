@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Exception\RateLimitException;
+use App\Observability\Metrics\ScanMetrics;
 use App\Repository\ScanCandidateSource;
 use App\Repository\ScanProgressWriter;
 use Psr\Log\LoggerInterface;
@@ -18,12 +19,14 @@ final readonly class ScannerService
         private ReleaseDetector $detector,
         private NotificationDispatcherInterface $dispatcher,
         private LoggerInterface $logger,
+        private ScanMetrics $metrics,
         private int $scanBatchSize = 100
     ) {
     }
 
     public function scan(): void
     {
+        $start = microtime(true);
         $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
         $this->logger->info('Scanning ' . count($repositories) . ' repositories for new releases');
 
@@ -31,18 +34,22 @@ final readonly class ScannerService
             try {
                 $this->checkRepository($repoName);
             } catch (RateLimitException $e) {
+                $this->metrics->errorOccurred('rate_limit');
                 $this->logger->warning('Rate limited — stopping scan cycle early', [
                     'repository' => $repoName,
                     'retry_after' => $e->retryAfter,
                 ]);
                 break;
             } catch (\Exception $e) {
+                $this->metrics->errorOccurred('error');
                 $this->logger->error('Scan error', [
                     'repository' => $repoName,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
+
+        $this->metrics->cycleCompleted(count($repositories), microtime(true) - $start);
     }
 
     private function checkRepository(string $repoName): void
@@ -53,7 +60,10 @@ final readonly class ScannerService
             return;
         }
 
+        $this->metrics->releaseDetected();
+
         $allDelivered = $this->dispatcher->dispatch($repoName, $release);
+        $this->metrics->notification($allDelivered ? 'sent' : 'failed');
 
         if ($allDelivered && $release->tagName !== null) {
             $this->progress->markReleaseSeen($repoName, $release->tagName);

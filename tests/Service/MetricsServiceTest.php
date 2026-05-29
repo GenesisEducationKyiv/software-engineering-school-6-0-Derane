@@ -5,19 +5,20 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Domain\MetricsSnapshot;
-use App\Metrics\PrometheusFormatter;
 use App\Repository\MetricsRepositoryInterface;
 use App\Service\MetricsService;
 use PHPUnit\Framework\TestCase;
+use Prometheus\CollectorRegistry;
+use Prometheus\Storage\InMemory;
 
 class MetricsServiceTest extends TestCase
 {
-    public function testCollectReturnsPrometheusFormat(): void
+    public function testCollectRendersBusinessGaugesInPrometheusFormat(): void
     {
         $repository = $this->createMock(MetricsRepositoryInterface::class);
         $repository->method('snapshot')->willReturn(new MetricsSnapshot(10, 5, 3));
 
-        $service = new MetricsService($repository, new PrometheusFormatter());
+        $service = new MetricsService($repository, new CollectorRegistry(new InMemory(), false));
         $output = $service->collect();
 
         $this->assertStringContainsString('app_subscriptions_total 10', $output);

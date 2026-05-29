@@ -33,13 +33,23 @@ use App\GitHub\RepositoryExistenceCacheInterface;
 use App\Grpc\ReleaseNotifierService;
 use App\Health\DatabaseHealthCheck;
 use App\Health\HealthCheckInterface;
-use App\Metrics\PrometheusFormatter;
+use App\Observability\Metrics\GrpcMetrics;
+use App\Observability\Metrics\HttpMetrics;
+use App\Observability\Metrics\MeasuredInvoker;
+use App\Observability\Metrics\PrometheusGrpcMetrics;
+use App\Observability\Metrics\PrometheusHttpMetrics;
+use App\Observability\Metrics\PrometheusScanMetrics;
+use App\Observability\Metrics\ScanMetrics;
 use App\Middleware\ApiKeyMiddleware;
+use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
+use App\Middleware\RequestMetricsMiddleware;
 use App\Migration\Migrator;
 use App\Notifier\MailerInterface;
 use App\Notifier\ReleaseEmailRenderer;
 use App\Notifier\SmtpMailer;
+use App\Observability\CorrelationContext;
+use App\Observability\Logging\ContextProcessor;
 use App\Repository\MetricsRepository;
 use App\Repository\MetricsRepositoryInterface;
 use App\Repository\NotificationLedger;
@@ -72,12 +82,21 @@ use App\Validation\SubscriptionValidator;
 use DI\Container;
 use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\StreamHandler;
+use Monolog\Level;
 use Monolog\Logger;
+use Monolog\Processor\PsrLogMessageProcessor;
 use Predis\Client as RedisClient;
+use Prometheus\CollectorRegistry;
+use Prometheus\RegistryInterface;
+use Prometheus\Storage\InMemory;
+use Prometheus\Storage\Redis as PrometheusRedisStorage;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
+use Spiral\RoadRunner\GRPC\Invoker;
+use Spiral\RoadRunner\GRPC\InvokerInterface;
 
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
@@ -85,9 +104,24 @@ return static function (array $settings): Container {
     $containerBuilder->addDefinitions([
         'settings' => $settings,
 
-        LoggerInterface::class => static function () {
-            $logger = new Logger('app');
-            $logger->pushHandler(new StreamHandler('php://stderr'));
+        CorrelationContext::class => static fn() => new CorrelationContext(),
+
+        ContextProcessor::class => static fn($c) => new ContextProcessor(
+            $c->get(CorrelationContext::class),
+            $settings['app']['component'],
+            $settings['app']['env']
+        ),
+
+        LoggerInterface::class => static function ($c) use ($settings) {
+            $handler = new StreamHandler('php://stderr', Level::fromName(strtolower($settings['log']['level'])));
+            if ($settings['log']['format'] === 'json') {
+                $handler->setFormatter(new JsonFormatter());
+            }
+
+            $logger = new Logger($settings['app']['component'], [$handler]);
+            $logger->pushProcessor(new PsrLogMessageProcessor());
+            $logger->pushProcessor($c->get(ContextProcessor::class));
+
             return $logger;
         },
 
@@ -202,11 +236,24 @@ return static function (array $settings): Container {
             );
         },
 
-        // Metrics
-        PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
+        // Metrics — shared Prometheus registry (Redis-backed in prod so HTTP, gRPC
+        // and scanner processes all feed the single /metrics endpoint).
+        RegistryInterface::class => static function () use ($settings) {
+            $storage = $settings['metrics']['storage'] === 'redis'
+                ? new PrometheusRedisStorage([
+                    'host' => $settings['redis']['host'],
+                    'port' => $settings['redis']['port'],
+                ])
+                : new InMemory();
+
+            return new CollectorRegistry($storage, false);
+        },
+        HttpMetrics::class => static fn($c) => new PrometheusHttpMetrics($c->get(RegistryInterface::class)),
+        GrpcMetrics::class => static fn($c) => new PrometheusGrpcMetrics($c->get(RegistryInterface::class)),
+        ScanMetrics::class => static fn($c) => new PrometheusScanMetrics($c->get(RegistryInterface::class)),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
             $c->get(MetricsRepositoryInterface::class),
-            $c->get(PrometheusFormatter::class)
+            $c->get(RegistryInterface::class)
         ),
 
         // Application services
@@ -233,6 +280,7 @@ return static function (array $settings): Container {
             $c->get(ReleaseDetector::class),
             $c->get(NotificationDispatcherInterface::class),
             $c->get(LoggerInterface::class),
+            $c->get(ScanMetrics::class),
             $settings['github']['scan_batch_size']
         ),
 
@@ -263,6 +311,19 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class),
             $c->get(ResponseFactoryInterface::class),
             $c->get(ExceptionStatusMap::class)
+        ),
+        CorrelationIdMiddleware::class => static fn($c) => new CorrelationIdMiddleware(
+            $c->get(CorrelationContext::class)
+        ),
+        RequestMetricsMiddleware::class => static fn($c) => new RequestMetricsMiddleware(
+            $c->get(HttpMetrics::class),
+            $c->get(ExceptionStatusMap::class),
+            $c->get(LoggerInterface::class)
+        ),
+        InvokerInterface::class => static fn($c) => new MeasuredInvoker(
+            new Invoker(),
+            $c->get(GrpcMetrics::class),
+            $c->get(CorrelationContext::class)
         ),
 
         Migrator::class => static fn($c) => new Migrator(

@@ -30,6 +30,17 @@ return [
         'encryption' => $_ENV['SMTP_ENCRYPTION'] ?? '',
     ],
     'api_key' => $_ENV['API_KEY'] ?? '',
+    'app' => [
+        'component' => $_ENV['APP_COMPONENT'] ?? 'app',
+        'env' => $_ENV['APP_ENV'] ?? 'production',
+    ],
+    'log' => [
+        'format' => $_ENV['LOG_FORMAT'] ?? 'json',
+        'level' => $_ENV['LOG_LEVEL'] ?? 'info',
+    ],
+    'metrics' => [
+        'storage' => $_ENV['METRICS_STORAGE'] ?? 'redis',
+    ],
     'bootstrap' => [
         'run_migrations_on_boot' => filter_var(
             $_ENV['RUN_MIGRATIONS_ON_BOOT'] ?? false,

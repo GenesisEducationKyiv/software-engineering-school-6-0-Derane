@@ -7,3 +7,10 @@ grpc:
   listen: "tcp://0.0.0.0:9001"
   proto:
     - "proto/release_notifier.proto"
+
+# Relay worker (PHP) stderr verbatim so the app's structured JSON log lines pass
+# through unwrapped and Filebeat can parse them. Without raw mode RoadRunner would
+# wrap each line in its own log envelope.
+logs:
+  mode: raw
+  level: info
