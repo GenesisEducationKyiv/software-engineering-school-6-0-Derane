@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
+use App\Application\Event\Factory\ApplicationEventFactory;
 use App\Domain\Release;
 use App\Domain\RepositoryStatus;
 use App\Domain\SubscriberCollection;
@@ -16,6 +17,12 @@ use App\Repository\ScanProgressWriter;
 use App\Repository\SubscriberFinderInterface;
 use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
+use App\Observability\Event\ApplicationEventLogger;
+use App\Observability\Event\EventDispatcher;
+use App\Observability\Event\ObservabilityListenerProvider;
+use App\Observability\Event\ScanMetricsListener;
+use App\Observability\Logging\EmailMasker;
+use App\Observability\Logging\FallbackLogger;
 use App\Observability\Metrics\PrometheusScanMetrics;
 use App\Service\NotifierInterface;
 use App\Service\ReleaseDetector;
@@ -26,6 +33,7 @@ use Prometheus\CollectorRegistry;
 use Prometheus\RenderTextFormat;
 use Prometheus\Storage\InMemory;
 use Psr\Log\NullLogger;
+use Tests\Support\ThrowingListenerProvider;
 
 class ScannerServiceTest extends TestCase
 {
@@ -50,19 +58,50 @@ class ScannerServiceTest extends TestCase
         $this->notifier = $this->createMock(NotifierInterface::class);
 
         $this->metricsRegistry = new CollectorRegistry(new InMemory(), false);
+        $events = new EventDispatcher(
+            new ObservabilityListenerProvider(
+                new ScanMetricsListener(new PrometheusScanMetrics($this->metricsRegistry)),
+                new ApplicationEventLogger(new NullLogger())
+            ),
+            new FallbackLogger('test', 'test', new EmailMasker())
+        );
+        $eventFactory = new ApplicationEventFactory();
         $this->scanner = new ScannerService(
             $this->candidates,
             $this->progress,
-            new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
+            new ReleaseDetector($this->gitHub, $this->statusReader, $events, $eventFactory),
             new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
-            new NullLogger(),
-            new PrometheusScanMetrics($this->metricsRegistry)
+            $events,
+            $eventFactory
         );
     }
 
     private function release(string $tag, string $name = 'Release', string $body = 'notes'): Release
     {
         return new Release($tag, $name, "https://github.com/x/y/releases/tag/{$tag}", '2024-01-01', $body);
+    }
+
+    public function testAThrowingListenerDoesNotBreakTheScanCycle(): void
+    {
+        $this->candidates->method('getDueForScan')->willReturn(['a/b']);
+        $this->gitHub->method('getLatestRelease')->willReturn(null);
+        $this->progress->expects($this->once())->method('markChecked')->with('a/b');
+
+        $events = new EventDispatcher(
+            new ThrowingListenerProvider(),
+            new FallbackLogger('test', 'test', new EmailMasker())
+        );
+        $eventFactory = new ApplicationEventFactory();
+        $scanner = new ScannerService(
+            $this->candidates,
+            $this->progress,
+            new ReleaseDetector($this->gitHub, $this->statusReader, $events, $eventFactory),
+            new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
+            $events,
+            $eventFactory
+        );
+
+        $scanner->scan();
     }
 
     public function testScanFindsNewRelease(): void

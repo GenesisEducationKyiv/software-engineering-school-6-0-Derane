@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Application\Event\Factory\NotificationEventFactoryInterface;
 use App\Domain\Release;
 use App\Notifier\MailerInterface;
 use App\Notifier\ReleaseEmailRenderer;
-use Psr\Log\LoggerInterface;
+use App\Application\Event\EventPublisherInterface;
 
 /** @psalm-api */
 final readonly class NotifierService implements NotifierInterface
@@ -15,7 +16,8 @@ final readonly class NotifierService implements NotifierInterface
     public function __construct(
         private MailerInterface $mailer,
         private ReleaseEmailRenderer $renderer,
-        private LoggerInterface $logger
+        private EventPublisherInterface $events,
+        private NotificationEventFactoryInterface $eventFactory
     ) {
     }
 
@@ -24,20 +26,11 @@ final readonly class NotifierService implements NotifierInterface
     {
         try {
             $this->mailer->send($email, $this->renderer->render($repository, $release));
-
-            $this->logger->info('Notification sent', [
-                'email' => $email,
-                'repository' => $repository,
-                'tag' => $release->tagName,
-            ]);
+            $this->events->publish($this->eventFactory->notificationSent($email, $repository, $release->tagName));
 
             return true;
         } catch (\Exception $e) {
-            $this->logger->error('Failed to send notification', [
-                'email' => $email,
-                'repository' => $repository,
-                'error' => $e->getMessage(),
-            ]);
+            $this->events->publish($this->eventFactory->notificationFailed($email, $repository, $e));
             return false;
         }
     }

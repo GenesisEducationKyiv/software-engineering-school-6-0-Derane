@@ -5,11 +5,17 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Config\Pagination;
+use App\Application\Event\Factory\ApplicationEventFactory;
+use App\Application\Event\SubscriptionCreated;
+use App\Application\Event\SubscriptionDeleted;
 use App\Domain\Subscription;
 use App\Domain\SubscriptionPage;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\SubscriptionNotFoundException;
 use App\Exception\ValidationException;
+use App\Observability\Event\EventDispatcher;
+use App\Observability\Logging\EmailMasker;
+use App\Observability\Logging\FallbackLogger;
 use App\Repository\SubscriptionRepositoryInterface;
 use App\Repository\TrackedRepositoryRegistrar;
 use App\Service\GitHubServiceInterface;
@@ -19,13 +25,15 @@ use App\Validation\RepositoryNameValidator;
 use App\Validation\SubscriptionValidator;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
+use Tests\Support\RecordingEventPublisher;
+use Tests\Support\ThrowingListenerProvider;
 
 class SubscriptionServiceTest extends TestCase
 {
     private SubscriptionRepositoryInterface&MockObject $repository;
     private TrackedRepositoryRegistrar&MockObject $trackedRepositories;
     private GitHubServiceInterface&MockObject $gitHub;
+    private RecordingEventPublisher $events;
     private SubscriptionService $service;
 
     protected function setUp(): void
@@ -33,13 +41,33 @@ class SubscriptionServiceTest extends TestCase
         $this->repository = $this->createMock(SubscriptionRepositoryInterface::class);
         $this->trackedRepositories = $this->createMock(TrackedRepositoryRegistrar::class);
         $this->gitHub = $this->createMock(GitHubServiceInterface::class);
+        $this->events = new RecordingEventPublisher();
         $this->service = new SubscriptionService(
             $this->repository,
             $this->trackedRepositories,
             $this->gitHub,
             new SubscriptionValidator(new EmailValidator(), new RepositoryNameValidator()),
-            new NullLogger()
+            $this->events,
+            new ApplicationEventFactory()
         );
+    }
+
+    public function testAThrowingListenerDoesNotBreakSubscribe(): void
+    {
+        $this->gitHub->method('repositoryExists')->willReturn(true);
+        $expected = new Subscription(1, 'test@example.com', 'golang/go', '2024-01-01T00:00:00Z');
+        $this->repository->method('create')->willReturn($expected);
+
+        $service = new SubscriptionService(
+            $this->repository,
+            $this->trackedRepositories,
+            $this->gitHub,
+            new SubscriptionValidator(new EmailValidator(), new RepositoryNameValidator()),
+            new EventDispatcher(new ThrowingListenerProvider(), new FallbackLogger('test', 'test', new EmailMasker())),
+            new ApplicationEventFactory()
+        );
+
+        $this->assertSame($expected, $service->subscribe('test@example.com', 'golang/go'));
     }
 
     public function testSubscribeSuccess(): void
@@ -62,6 +90,11 @@ class SubscriptionServiceTest extends TestCase
 
         $result = $this->service->subscribe('test@example.com', 'golang/go');
         $this->assertSame($expected, $result);
+
+        $created = $this->events->ofType(SubscriptionCreated::class);
+        $this->assertCount(1, $created);
+        $this->assertSame('test@example.com', $created[0]->email);
+        $this->assertSame('golang/go', $created[0]->repository);
     }
 
     public function testSubscribeInvalidEmail(): void
@@ -102,6 +135,10 @@ class SubscriptionServiceTest extends TestCase
             ->with(1);
 
         $this->service->unsubscribe(1);
+
+        $deleted = $this->events->ofType(SubscriptionDeleted::class);
+        $this->assertCount(1, $deleted);
+        $this->assertSame(1, $deleted[0]->id);
     }
 
     public function testUnsubscribeNotFound(): void

@@ -43,6 +43,18 @@ use App\Observability\Metrics\PrometheusHttpMetrics;
 use App\Observability\Metrics\PrometheusScanMetrics;
 use App\Observability\Metrics\SafeMetricsStorage;
 use App\Observability\Metrics\ScanMetrics;
+use App\Application\Event\Factory\ApplicationEventFactory;
+use App\Application\Event\Factory\NotificationEventFactoryInterface;
+use App\Application\Event\Factory\ReleaseEventFactoryInterface;
+use App\Application\Event\Factory\ScanEventFactoryInterface;
+use App\Application\Event\Factory\SubscriptionEventFactoryInterface;
+use App\Observability\Event\ApplicationEventLogger;
+use App\Observability\Event\EventDispatcher;
+use App\Observability\Event\ObservabilityListenerProvider;
+use App\Observability\Event\ScanMetricsListener;
+use App\Observability\Logging\EmailMasker;
+use App\Observability\Logging\EmailRedactingProcessor;
+use App\Observability\Logging\FallbackLogger;
 use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\CorrelationIdMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
@@ -101,6 +113,7 @@ use Prometheus\RegistryInterface;
 use Prometheus\Storage\InMemory;
 use Prometheus\Storage\Predis as PrometheusPredisStorage;
 use Psr\Http\Message\ResponseFactoryInterface;
+use App\Application\Event\EventPublisherInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
 use Spiral\RoadRunner\GRPC\Invoker;
@@ -130,6 +143,9 @@ return static function (array $settings): Container {
             }
 
             $logger = new Logger($settings['app']['component'], [$handler]);
+            // Pushed first so it runs last: redacts PII once the message is
+            // interpolated and context/extra are populated by the others.
+            $logger->pushProcessor(new EmailRedactingProcessor(new EmailMasker()));
             $logger->pushProcessor(new PsrLogMessageProcessor());
             $logger->pushProcessor($c->get(ContextProcessor::class));
 
@@ -216,7 +232,8 @@ return static function (array $settings): Container {
         NotifierInterface::class => static fn($c) => new NotifierService(
             $c->get(MailerInterface::class),
             $c->get(ReleaseEmailRenderer::class),
-            $c->get(LoggerInterface::class)
+            $c->get(EventPublisherInterface::class),
+            $c->get(NotificationEventFactoryInterface::class)
         ),
 
         // GitHub
@@ -269,6 +286,28 @@ return static function (array $settings): Container {
             $c->get(GrpcStatusName::class)
         ),
         ScanMetrics::class => static fn($c) => new PrometheusScanMetrics($c->get(RegistryInterface::class)),
+
+        // Application-event plane — services emit anemic events; these listeners are
+        // the only place a fact becomes a metric (existing ScanMetrics) or a
+        // structured log. The HTTP/gRPC access plane stays in the middleware/invoker.
+        EventPublisherInterface::class => static fn($c) => new EventDispatcher(
+            new ObservabilityListenerProvider(
+                new ScanMetricsListener($c->get(ScanMetrics::class)),
+                new ApplicationEventLogger($c->get(LoggerInterface::class))
+            ),
+            new FallbackLogger(
+                $settings['app']['component'],
+                $settings['app']['env'],
+                new EmailMasker()
+            )
+        ),
+
+        // One stateless event factory shared via the narrow per-consumer interfaces
+        // (services construct events through these instead of `new`).
+        ScanEventFactoryInterface::class => static fn() => new ApplicationEventFactory(),
+        ReleaseEventFactoryInterface::class => static fn($c) => $c->get(ScanEventFactoryInterface::class),
+        NotificationEventFactoryInterface::class => static fn($c) => $c->get(ScanEventFactoryInterface::class),
+        SubscriptionEventFactoryInterface::class => static fn($c) => $c->get(ScanEventFactoryInterface::class),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
             // Lazy: resolve the DB-backed repository only when collect() runs, inside its
             // try/catch — a DB/PDO failure must not block export of the RED metrics.
@@ -284,12 +323,14 @@ return static function (array $settings): Container {
             $c->get(TrackedRepositoryRegistrar::class),
             $c->get(GitHubServiceInterface::class),
             $c->get(SubscriptionValidator::class),
-            $c->get(LoggerInterface::class)
+            $c->get(EventPublisherInterface::class),
+            $c->get(SubscriptionEventFactoryInterface::class)
         ),
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
             $c->get(GitHubServiceInterface::class),
             $c->get(RepositoryStatusReader::class),
-            $c->get(LoggerInterface::class)
+            $c->get(EventPublisherInterface::class),
+            $c->get(ReleaseEventFactoryInterface::class)
         ),
         NotificationDispatcherInterface::class => static fn($c) => new NotificationDispatcher(
             $c->get(SubscriberFinderInterface::class),
@@ -301,8 +342,8 @@ return static function (array $settings): Container {
             $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
             $c->get(NotificationDispatcherInterface::class),
-            $c->get(LoggerInterface::class),
-            $c->get(ScanMetrics::class),
+            $c->get(EventPublisherInterface::class),
+            $c->get(ScanEventFactoryInterface::class),
             $settings['github']['scan_batch_size']
         ),
 

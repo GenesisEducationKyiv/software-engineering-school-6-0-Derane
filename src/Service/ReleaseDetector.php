@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Application\Event\Factory\ReleaseEventFactoryInterface;
 use App\Domain\Release;
 use App\Repository\RepositoryStatusReader;
-use Psr\Log\LoggerInterface;
+use App\Application\Event\EventPublisherInterface;
 
 /** @psalm-api */
 final readonly class ReleaseDetector
@@ -14,7 +15,8 @@ final readonly class ReleaseDetector
     public function __construct(
         private GitHubServiceInterface $gitHubService,
         private RepositoryStatusReader $trackedRepositories,
-        private LoggerInterface $logger
+        private EventPublisherInterface $events,
+        private ReleaseEventFactoryInterface $eventFactory
     ) {
     }
 
@@ -36,11 +38,7 @@ final readonly class ReleaseDetector
             return null;
         }
 
-        $this->logger->info('New release found', [
-            'repository' => $repoName,
-            'tag' => $release->tagName,
-            'previous_tag' => $lastSeenTag,
-        ]);
+        $this->events->publish($this->eventFactory->releaseDetected($repoName, $release->tagName, $lastSeenTag));
 
         return $release;
     }
