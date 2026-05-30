@@ -25,7 +25,7 @@ use Slim\Routing\RouteContext;
  */
 final readonly class RouteTagMiddleware implements MiddlewareInterface
 {
-    public function __construct(private RouteContextInterface $correlation)
+    public function __construct(private RouteContextInterface $routeContext)
     {
     }
 
@@ -35,7 +35,7 @@ final readonly class RouteTagMiddleware implements MiddlewareInterface
         /** @var RouteInterface|null $route — Slim sets this to the matched route */
         $route = $request->getAttribute(RouteContext::ROUTE);
         if ($route instanceof RouteInterface) {
-            $this->correlation->setRoute($route->getPattern());
+            $this->routeContext->setRoute($route->getPattern());
         }
 
         return $handler->handle($request);

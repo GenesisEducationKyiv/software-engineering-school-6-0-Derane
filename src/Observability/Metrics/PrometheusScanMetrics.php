@@ -74,7 +74,7 @@ final readonly class PrometheusScanMetrics implements ScanMetrics
         $notifications = $this->registry->getOrRegisterCounter(
             '',
             'notifications_total',
-            'Total release-notification dispatch outcomes by repository',
+            'Total release-notification dispatch outcomes by result',
             ['result']
         );
         $notifications->inc([$result]);

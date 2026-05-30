@@ -71,10 +71,6 @@ final readonly class MeasuredInvoker implements InvokerInterface
         }
     }
 
-    /**
-     * Reuse an upstream `x-request-id` (gRPC metadata is `array<string, string[]>`)
-     * if present and non-empty; otherwise mint a fresh id.
-     */
     private function resolveCorrelationId(ContextInterface $ctx): string
     {
         /** @var list<string>|null $values — gRPC metadata entries decode to string lists */
