@@ -152,7 +152,7 @@ obs-up: ensure-env ## Start the app stack + observability (Filebeat/ES/Kibana + 
 	$(OBS_COMPOSE) up -d --build
 	@echo "Grafana:       http://localhost:3000 (admin/admin) — dashboard: Release Notifier — RED & Observability"
 	@echo "Prometheus:    http://localhost:9090"
-	@echo "Kibana:        http://localhost:5601 — create data view 'release-notifier-logs-*'"
+	@echo "Kibana:        http://localhost:5601 — data view 'release-notifier-logs-*' is auto-provisioned"
 	@echo "Elasticsearch: http://localhost:9200"
 	@echo "(Kibana/Elasticsearch take ~30-60s to become ready.)"
 

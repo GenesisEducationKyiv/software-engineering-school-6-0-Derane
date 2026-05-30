@@ -102,7 +102,7 @@ make obs-down   # зупинити та прибрати томи
 |--------|-----|----------|
 | Grafana | http://localhost:3000 | admin/admin, дашборд «Release Notifier — RED & Observability» |
 | Prometheus | http://localhost:9090 | таргет `app:8080/metrics` |
-| Kibana | http://localhost:5601 | створити data view `release-notifier-logs-*` |
+| Kibana | http://localhost:5601 | data view `release-notifier-logs-*` створюється автоматично |
 | Elasticsearch | http://localhost:9200 | сховище логів |
 
 ### Структуроване логування

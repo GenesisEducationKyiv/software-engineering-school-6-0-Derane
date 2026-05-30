@@ -40,6 +40,17 @@ services:
     depends_on:
       - elasticsearch
 
+  # One-shot: waits for Kibana, then creates the `release-notifier-logs-*` data
+  # view so logs are searchable out of the box (no manual setup). Exits when done.
+  kibana-setup:
+    image: curlimages/curl:8.8.0
+    restart: "no"
+    depends_on:
+      - kibana
+    volumes:
+      - ./observability/kibana/kibana-setup.sh:/kibana-setup.sh:ro
+    entrypoint: ["sh", "/kibana-setup.sh"]
+
   filebeat:
     image: docker.elastic.co/beats/filebeat:8.13.4
     user: root

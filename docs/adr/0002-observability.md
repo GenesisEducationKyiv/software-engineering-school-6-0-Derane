@@ -46,6 +46,10 @@ PHP is share-nothing per request.
 - The app stays unaware of Elasticsearch. **Filebeat** tails container
   stdout/stderr, decodes the JSON, and ships it to Elasticsearch; **Kibana**
   reads it. No Logstash — the logs are already structured.
+- A one-shot **`kibana-setup`** service waits for Kibana and creates the
+  `release-notifier-logs-*` **data view** via the Data Views API, so the logs are
+  searchable in Kibana on first `make obs-up` with no manual step. It is
+  idempotent (a pre-existing data view is treated as success).
 
 ### RED metrics → Prometheus → Grafana
 
@@ -122,8 +126,6 @@ Run via `make obs-up`.
 
 ## Follow-ups
 
-- Provision a Kibana data view (`release-notifier-logs-*`) as a saved object so it
-  exists on first boot instead of being created manually.
 - Add Prometheus alerting rules (error-ratio / latency SLOs) and wire Alertmanager.
 - Consider ECS-aligned field names in the log JSON for tighter Elastic integration.
 - If any role scales beyond one replica, add an instance label / dedicated exporter.
