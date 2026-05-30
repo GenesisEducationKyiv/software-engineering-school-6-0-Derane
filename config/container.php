@@ -41,6 +41,7 @@ use App\Observability\Metrics\MeasuredInvoker;
 use App\Observability\Metrics\PrometheusGrpcMetrics;
 use App\Observability\Metrics\PrometheusHttpMetrics;
 use App\Observability\Metrics\PrometheusScanMetrics;
+use App\Observability\Metrics\SafeMetricsStorage;
 use App\Observability\Metrics\ScanMetrics;
 use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\CorrelationIdMiddleware;
@@ -249,9 +250,14 @@ return static function (array $settings): Container {
         // Metrics — shared Prometheus registry (Redis-backed in prod so HTTP, gRPC
         // and scanner processes all feed the single /metrics endpoint).
         RegistryInterface::class => static function ($c) use ($settings) {
-            // Reuse the predis/predis client (no ext-redis dependency); InMemory in tests.
+            // Wrap the Redis-backed store so a Redis outage can't make a metric write
+            // throw out of the finally blocks that record RED metrics (which would
+            // replace a successful response or mask the original exception).
             $storage = $settings['metrics']['storage'] === 'redis'
-                ? PrometheusPredisStorage::fromExistingConnection($c->get(RedisClient::class))
+                ? new SafeMetricsStorage(
+                    PrometheusPredisStorage::fromExistingConnection($c->get(RedisClient::class)),
+                    $c->get(LoggerInterface::class)
+                )
                 : new InMemory();
 
             return new CollectorRegistry($storage, false);
