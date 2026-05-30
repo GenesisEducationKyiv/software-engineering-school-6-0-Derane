@@ -83,32 +83,37 @@ views {
         notifier.httpApi.subscriptionSvc -> notifier.httpApi.subscriptionRepo "create(email, owner/repo)"
         notifier.httpApi.subscriptionRepo -> notifier.db "INSERT INTO repositories ON CONFLICT DO NOTHING (ensureRepositoryExists)"
         notifier.httpApi.subscriptionRepo -> notifier.db "INSERT INTO subscriptions ON CONFLICT DO NOTHING RETURNING ..."
+        notifier.httpApi.subscriptionSvc -> notifier.httpApi.eventPublisher "publish(SubscriptionCreated) (fail-open)"
+        notifier.httpApi.eventPublisher -> notifier.httpApi.eventLogger "structured log, masked email"
         notifier.httpApi.subscriptionCtrl -> user "201 Created"
     }
 
     dynamic view scanFlow {
         title "Dynamic — Scan & Notify"
         description "
-            How the scanner worker detects a new release tag and
-            delivers email notifications, deduplicating per
-            subscription via release_notifications.
+            How the scanner detects a new release tag and delivers
+            email notifications, deduplicating per subscription via
+            release_notifications. Observability is a fail-open
+            side-channel: each step publishes an application event.
         "
 
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getRepositoriesToScan(batchSize)"
-        notifier.scanner.scannerRepo -> notifier.db "SELECT repositories"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerGithub "getLatestRelease(owner/repo)"
+        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getDueForScan(batchSize)"
+        notifier.scanner.scannerRepo -> notifier.db "SELECT due repositories"
+        notifier.scanner.scannerSvc -> notifier.scanner.releaseDetector "detect(repo)"
+        notifier.scanner.releaseDetector -> notifier.scanner.scannerGithub "getLatestRelease(repo)"
         notifier.scanner.scannerGithub -> notifier.redis "GET cached response"
         notifier.scanner.scannerGithub -> github "GET /repos/.../releases/latest (on cache miss)"
-        notifier.scanner.scannerGithub -> notifier.redis "SET response with TTL (on cache miss)"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getRepositoryInfo(repo)"
-        notifier.scanner.scannerRepo -> notifier.db "SELECT last_seen_tag"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getSubscriptionsByRepository(repo) (when tag differs)"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "hasSuccessfulNotificationForRelease(sub, repo, tag)"
-        notifier.scanner.scannerSvc -> notifier.scanner.notifierSvc "sendReleaseNotification(email, repo, tag, ...)"
+        notifier.scanner.releaseDetector -> notifier.scanner.scannerRepo "getStatus(repo) → last_seen_tag"
+        notifier.scanner.releaseDetector -> notifier.scanner.scannerEventPublisher "publish(ReleaseDetected) when tag differs"
+        notifier.scanner.scannerSvc -> notifier.scanner.notificationDispatcher "dispatch(repo, release)"
+        notifier.scanner.notificationDispatcher -> notifier.scanner.scannerRepo "find subscribers, check ledger"
+        notifier.scanner.notificationDispatcher -> notifier.scanner.notifierSvc "notifyReleaseAvailable(email, repo, release)"
         notifier.scanner.notifierSvc -> smtp "Deliver email"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "recordNotificationResult(sub, repo, tag, sent)"
-        notifier.scanner.scannerRepo -> notifier.db "INSERT/UPDATE release_notifications"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "updateLastSeenTag(repo, tag) (only when all delivered)"
-        notifier.scanner.scannerRepo -> notifier.db "UPDATE repositories.last_seen_tag"
+        notifier.scanner.notifierSvc -> notifier.scanner.scannerEventPublisher "publish(ReleaseNotificationSent/Failed)"
+        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "markReleaseSeen / markChecked"
+        notifier.scanner.scannerRepo -> notifier.db "UPDATE repositories + release_notifications"
+        notifier.scanner.scannerSvc -> notifier.scanner.scannerEventPublisher "publish(ScanCycleCompleted)"
+        notifier.scanner.scannerEventPublisher -> notifier.scanner.scanMetricsListener "record scan RED metrics"
+        notifier.scanner.scannerEventPublisher -> notifier.scanner.scannerEventLogger "structured logs"
     }
 }
