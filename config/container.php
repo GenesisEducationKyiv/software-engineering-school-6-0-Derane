@@ -66,6 +66,8 @@ use App\Service\ReleaseDetector;
 use App\Service\ScannerService;
 use App\Service\SubscriptionService;
 use App\Service\SubscriptionServiceInterface;
+use App\Shared\Infrastructure\Event\InMemoryEventDispatcher;
+use App\Shared\Infrastructure\Event\ListenerProvider;
 use App\Validation\EmailValidator;
 use App\Validation\RepositoryNameValidator;
 use App\Validation\SubscriptionValidator;
@@ -75,6 +77,8 @@ use GuzzleHttp\Client as GuzzleClient;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 use Predis\Client as RedisClient;
+use Psr\EventDispatcher\EventDispatcherInterface;
+use Psr\EventDispatcher\ListenerProviderInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -160,6 +164,12 @@ return static function (array $settings): Container {
         // Health + exception mapping
         HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
+
+        // In-process PSR-14 event plane (empty listener map until flows wire in P2–P5)
+        ListenerProviderInterface::class => static fn() => new ListenerProvider([]),
+        EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
+            $c->get(ListenerProviderInterface::class)
+        ),
 
         // Notifier
         SmtpConfig::class => static fn($c) => $c->get(SmtpConfigFactoryInterface::class)->fromArray($settings['smtp']),
