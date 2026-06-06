@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
-use App\Controller\SubscriptionController;
 use App\Migration\Migrator;
+use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
 use App\Middleware\ApiKeyMiddleware;
 use App\Middleware\ErrorHandlerMiddleware;
 use Slim\Factory\AppFactory;

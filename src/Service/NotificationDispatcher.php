@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Domain\Release;
-use App\Domain\SubscriberRef;
 use App\Repository\NotificationLedgerInterface;
-use App\Repository\SubscriberFinderInterface;
+use App\Subscription\Subscriptions\Domain\SubscriberFinder;
+use App\Subscription\Subscriptions\Domain\SubscriberRef;
 
 /** @psalm-api */
 final readonly class NotificationDispatcher implements NotificationDispatcherInterface
 {
     public function __construct(
-        private SubscriberFinderInterface $subscribers,
+        private SubscriberFinder $subscribers,
         private NotificationLedgerInterface $ledger,
         private NotifierInterface $notifier
     ) {

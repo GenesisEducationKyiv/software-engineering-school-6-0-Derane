@@ -4,11 +4,18 @@ declare(strict_types=1);
 
 namespace App\Grpc;
 
-use App\Config\Factory\PaginationFactoryInterface;
-use App\Domain\Subscription;
 use App\Exception\ExceptionStatusMap;
 use App\Health\HealthCheckInterface;
-use App\Service\SubscriptionServiceInterface;
+use App\Shared\Application\Pagination\PaginationFactoryInterface;
+use App\Shared\Domain\Bus\Command\CommandBus;
+use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
+use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;
+use App\Subscription\Subscriptions\Application\List\ListSubscriptionsQuery;
+use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
+use App\Subscription\Subscriptions\Application\SubscriptionPageResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use Grpc\ReleaseNotifier\V1\CreateSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionReply;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionRequest;
@@ -31,7 +38,8 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
     // gRPC method names are generated from the proto contract and must keep exact casing.
     // phpcs:disable PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     public function __construct(
-        private SubscriptionServiceInterface $subscriptions,
+        private CommandBus $commandBus,
+        private QueryBus $queryBus,
         private HealthCheckInterface $healthCheck,
         private ExceptionStatusMap $statusMap,
         private PaginationFactoryInterface $paginationFactory,
@@ -57,10 +65,15 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
     public function CreateSubscription(ContextInterface $ctx, CreateSubscriptionRequest $in): SubscriptionReply
     {
         try {
-            return $this->toSubscriptionReply($this->subscriptions->subscribe(
-                trim($in->getEmail()),
-                trim($in->getRepository())
-            ));
+            $email = trim($in->getEmail());
+            $repository = trim($in->getRepository());
+
+            $this->commandBus->dispatch(new SubscribeCommand($email, $repository));
+
+            $response = $this->queryBus->ask(new FindSubscriptionByEmailAndRepositoryQuery($email, $repository));
+            \assert($response instanceof SubscriptionResponse);
+
+            return $this->toSubscriptionReply($response);
         } catch (\Throwable $e) {
             throw $this->mapException($e);
         }
@@ -71,13 +84,14 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
     {
         try {
             $email = trim($in->getEmail());
-            $page = $this->subscriptions->listSubscriptions(
+            $response = $this->queryBus->ask(new ListSubscriptionsQuery(
                 $email !== '' ? $email : null,
                 $this->paginationFactory->fromRequest($in->getLimit(), $in->getOffset())
-            );
+            ));
+            \assert($response instanceof SubscriptionPageResponse);
 
             return new ListSubscriptionsReply([
-                'subscriptions' => array_map($this->toSubscriptionReply(...), $page->items),
+                'subscriptions' => array_map($this->toSubscriptionReply(...), $response->items),
             ]);
         } catch (\Throwable $e) {
             throw $this->mapException($e);
@@ -88,7 +102,10 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
     public function GetSubscription(ContextInterface $ctx, GetSubscriptionRequest $in): SubscriptionReply
     {
         try {
-            return $this->toSubscriptionReply($this->subscriptions->getSubscription($in->getId()));
+            $response = $this->queryBus->ask(new FindSubscriptionByIdQuery($in->getId()));
+            \assert($response instanceof SubscriptionResponse);
+
+            return $this->toSubscriptionReply($response);
         } catch (\Throwable $e) {
             throw $this->mapException($e);
         }
@@ -98,7 +115,7 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
     public function DeleteSubscription(ContextInterface $ctx, DeleteSubscriptionRequest $in): DeleteSubscriptionReply
     {
         try {
-            $this->subscriptions->unsubscribe($in->getId());
+            $this->commandBus->dispatch(new UnsubscribeCommand($in->getId()));
 
             return new DeleteSubscriptionReply(['deleted' => true]);
         } catch (\Throwable $e) {
@@ -106,7 +123,7 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
         }
     }
 
-    private function toSubscriptionReply(Subscription $subscription): SubscriptionReply
+    private function toSubscriptionReply(SubscriptionResponse $subscription): SubscriptionReply
     {
         return new SubscriptionReply([
             'id' => $subscription->id,

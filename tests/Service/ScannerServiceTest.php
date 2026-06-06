@@ -6,26 +6,26 @@ namespace Tests\Service;
 
 use App\Domain\Release;
 use App\Domain\RepositoryStatus;
-use App\Domain\SubscriberCollection;
-use App\Domain\SubscriberRef;
 use App\Exception\RateLimitException;
 use App\Repository\NotificationLedgerInterface;
 use App\Repository\RepositoryStatusReader;
 use App\Repository\ScanCandidateSource;
 use App\Repository\ScanProgressWriter;
-use App\Repository\SubscriberFinderInterface;
 use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
 use App\Service\ReleaseDetector;
 use App\Service\ScannerService;
+use App\Subscription\Subscriptions\Domain\SubscriberCollection;
+use App\Subscription\Subscriptions\Domain\SubscriberFinder;
+use App\Subscription\Subscriptions\Domain\SubscriberRef;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
 class ScannerServiceTest extends TestCase
 {
-    private SubscriberFinderInterface&MockObject $subscribers;
+    private SubscriberFinder&MockObject $subscribers;
     private ScanCandidateSource&MockObject $candidates;
     private ScanProgressWriter&MockObject $progress;
     private RepositoryStatusReader&MockObject $statusReader;
@@ -36,7 +36,7 @@ class ScannerServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->subscribers = $this->createMock(SubscriberFinderInterface::class);
+        $this->subscribers = $this->createMock(SubscriberFinder::class);
         $this->candidates = $this->createMock(ScanCandidateSource::class);
         $this->progress = $this->createMock(ScanProgressWriter::class);
         $this->statusReader = $this->createMock(RepositoryStatusReader::class);

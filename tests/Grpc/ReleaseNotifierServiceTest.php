@@ -4,42 +4,53 @@ declare(strict_types=1);
 
 namespace Tests\Grpc;
 
-use App\Config\Factory\PaginationFactory;
-use App\Config\Pagination;
-use App\Domain\Subscription;
-use App\Domain\SubscriptionPage;
 use App\Exception\ExceptionStatusMap;
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\ValidationException;
 use App\Grpc\ReleaseNotifierService;
 use App\Health\HealthCheckInterface;
-use App\Service\SubscriptionServiceInterface;
+use App\Shared\Application\Pagination\PaginationFactory;
+use App\Shared\Domain\Bus\Command\Command;
+use App\Shared\Domain\Bus\Command\CommandBus;
+use App\Shared\Domain\Bus\Query\Query;
+use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Shared\Domain\ValueObject\Pagination;
+use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;
+use App\Subscription\Subscriptions\Application\List\ListSubscriptionsQuery;
+use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
+use App\Subscription\Subscriptions\Application\SubscriptionPageResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use Grpc\ReleaseNotifier\V1\CreateSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\DeleteSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\GetSubscriptionRequest;
 use Grpc\ReleaseNotifier\V1\HealthCheckRequest;
 use Grpc\ReleaseNotifier\V1\ListSubscriptionsRequest;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Spiral\RoadRunner\GRPC\ContextInterface;
 use Spiral\RoadRunner\GRPC\Exception\GRPCException;
 use Spiral\RoadRunner\GRPC\StatusCode;
 
-class ReleaseNotifierServiceTest extends TestCase
+final class ReleaseNotifierServiceTest extends TestCase
 {
-    private SubscriptionServiceInterface $subscriptions;
-    private HealthCheckInterface $healthCheck;
-    private ContextInterface $context;
+    private CommandBus&MockObject $commandBus;
+    private QueryBus&MockObject $queryBus;
+    private HealthCheckInterface&MockObject $healthCheck;
+    private ContextInterface&MockObject $context;
     private ReleaseNotifierService $service;
 
     protected function setUp(): void
     {
-        $this->subscriptions = $this->createMock(SubscriptionServiceInterface::class);
+        $this->commandBus = $this->createMock(CommandBus::class);
+        $this->queryBus = $this->createMock(QueryBus::class);
         $this->healthCheck = $this->createMock(HealthCheckInterface::class);
         $this->context = $this->createMock(ContextInterface::class);
 
         $this->service = new ReleaseNotifierService(
-            $this->subscriptions,
+            $this->commandBus,
+            $this->queryBus,
             $this->healthCheck,
             new ExceptionStatusMap(),
             new PaginationFactory(),
@@ -66,12 +77,18 @@ class ReleaseNotifierServiceTest extends TestCase
         $this->service->Health($this->context, new HealthCheckRequest());
     }
 
-    public function testCreateSubscriptionReturnsReply(): void
+    public function testCreateSubscriptionDispatchesCommandThenReadsBack(): void
     {
-        $this->subscriptions->expects($this->once())
-            ->method('subscribe')
-            ->with('grpc@example.com', 'docker/compose')
-            ->willReturn(new Subscription(7, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'));
+        $this->commandBus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(static fn(Command $c): bool =>
+                $c instanceof SubscribeCommand
+                && $c->email === 'grpc@example.com'
+                && $c->repository === 'docker/compose'));
+
+        $this->queryBus->expects($this->once())
+            ->method('ask')
+            ->willReturn(new SubscriptionResponse(7, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'));
 
         $reply = $this->service->CreateSubscription($this->context, new CreateSubscriptionRequest([
             'email' => 'grpc@example.com',
@@ -80,21 +97,23 @@ class ReleaseNotifierServiceTest extends TestCase
 
         $this->assertSame(7, $reply->getId());
         $this->assertSame('grpc@example.com', $reply->getEmail());
+        $this->assertSame('docker/compose', $reply->getRepository());
+        $this->assertSame('2026-04-12T00:00:00Z', $reply->getCreatedAt());
     }
 
     public function testListSubscriptionsPassesPagination(): void
     {
-        $this->subscriptions->expects($this->once())
-            ->method('listSubscriptions')
-            ->with(
-                'grpc@example.com',
-                $this->callback(static fn(Pagination $p): bool => $p->limit === 20 && $p->offset === 5)
-            )
-            ->willReturn(new SubscriptionPage(
-                [new Subscription(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z')],
-                new Pagination(20, 5),
-                1
-            ));
+        $this->queryBus->expects($this->once())
+            ->method('ask')
+            ->with($this->callback(static fn(Query $q): bool =>
+                $q instanceof ListSubscriptionsQuery
+                && $q->email === 'grpc@example.com'
+                && $q->pagination instanceof Pagination
+                && $q->pagination->limit === 20
+                && $q->pagination->offset === 5))
+            ->willReturn(new SubscriptionPageResponse([
+                new SubscriptionResponse(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'),
+            ]));
 
         $reply = $this->service->ListSubscriptions($this->context, new ListSubscriptionsRequest([
             'email' => 'grpc@example.com',
@@ -106,11 +125,23 @@ class ReleaseNotifierServiceTest extends TestCase
         $this->assertSame('docker/compose', $reply->getSubscriptions()[0]->getRepository());
     }
 
+    public function testGetSubscriptionAsksByIdAndMapsReply(): void
+    {
+        $this->queryBus->expects($this->once())
+            ->method('ask')
+            ->with($this->callback(static fn(Query $q): bool =>
+                $q instanceof FindSubscriptionByIdQuery && $q->id === 4))
+            ->willReturn(new SubscriptionResponse(4, 'g@h.com', 'docker/compose', '2026-04-12T00:00:00Z'));
+
+        $reply = $this->service->GetSubscription($this->context, new GetSubscriptionRequest(['id' => 4]));
+
+        $this->assertSame(4, $reply->getId());
+    }
+
     public function testGetSubscriptionMapsNotFoundToGrpcNotFound(): void
     {
-        $this->subscriptions->expects($this->once())
-            ->method('getSubscription')
-            ->with(999)
+        $this->queryBus->expects($this->once())
+            ->method('ask')
             ->willThrowException(new RepositoryNotFoundException('missing/repo'));
 
         $this->expectException(GRPCException::class);
@@ -121,9 +152,10 @@ class ReleaseNotifierServiceTest extends TestCase
 
     public function testDeleteSubscriptionReturnsDeletedTrue(): void
     {
-        $this->subscriptions->expects($this->once())
-            ->method('unsubscribe')
-            ->with(5);
+        $this->commandBus->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(static fn(Command $c): bool =>
+                $c instanceof UnsubscribeCommand && $c->id === 5));
 
         $reply = $this->service->DeleteSubscription($this->context, new DeleteSubscriptionRequest(['id' => 5]));
 
@@ -132,8 +164,8 @@ class ReleaseNotifierServiceTest extends TestCase
 
     public function testValidationExceptionMapsToInvalidArgument(): void
     {
-        $this->subscriptions->expects($this->once())
-            ->method('subscribe')
+        $this->commandBus->expects($this->once())
+            ->method('dispatch')
             ->willThrowException(new ValidationException('bad input'));
 
         $this->expectException(GRPCException::class);

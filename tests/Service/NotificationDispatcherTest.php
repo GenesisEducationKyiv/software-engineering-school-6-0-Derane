@@ -5,25 +5,25 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Domain\Release;
-use App\Domain\SubscriberCollection;
-use App\Domain\SubscriberRef;
 use App\Repository\NotificationLedgerInterface;
-use App\Repository\SubscriberFinderInterface;
 use App\Service\NotificationDispatcher;
+use App\Subscription\Subscriptions\Domain\SubscriberCollection;
+use App\Subscription\Subscriptions\Domain\SubscriberFinder;
+use App\Subscription\Subscriptions\Domain\SubscriberRef;
 use App\Service\NotifierInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 final class NotificationDispatcherTest extends TestCase
 {
-    private SubscriberFinderInterface&MockObject $subscribers;
+    private SubscriberFinder&MockObject $subscribers;
     private NotificationLedgerInterface&MockObject $ledger;
     private NotifierInterface&MockObject $notifier;
     private NotificationDispatcher $dispatcher;
 
     protected function setUp(): void
     {
-        $this->subscribers = $this->createMock(SubscriberFinderInterface::class);
+        $this->subscribers = $this->createMock(SubscriberFinder::class);
         $this->ledger = $this->createMock(NotificationLedgerInterface::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
         $this->dispatcher = new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier);

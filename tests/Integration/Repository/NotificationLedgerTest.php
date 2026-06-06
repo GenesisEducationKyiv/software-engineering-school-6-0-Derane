@@ -5,84 +5,96 @@ declare(strict_types=1);
 namespace Tests\Integration\Repository;
 
 use App\Repository\NotificationLedgerInterface;
-use App\Repository\SubscriptionRepositoryInterface;
+use App\Shared\Domain\ValueObject\EmailAddress;
+use App\Shared\Domain\ValueObject\RepositoryName;
+use App\Subscription\Subscriptions\Domain\Subscription;
+use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PDO;
 use Tests\Integration\IntegrationTestCase;
 
 final class NotificationLedgerTest extends IntegrationTestCase
 {
     private NotificationLedgerInterface $ledger;
-    private SubscriptionRepositoryInterface $subscriptions;
+    private SubscriptionRepository $subscriptions;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->ledger = $this->c->get(NotificationLedgerInterface::class);
-        $this->subscriptions = $this->c->get(SubscriptionRepositoryInterface::class);
+        $this->subscriptions = $this->c->get(SubscriptionRepository::class);
     }
 
     public function testHasSuccessfulNotificationIsFalseBeforeRecording(): void
     {
-        $sub = $this->subscriptions->create($this->faker->safeEmail(), $this->repoName());
+        $sub = $this->subscribe($this->faker->safeEmail(), $this->repoName());
 
         $this->assertFalse(
-            $this->ledger->hasSuccessfulNotification($sub->id, $sub->repository, 'v1.0.0')
+            $this->ledger->hasSuccessfulNotification((int) $sub->id(), $sub->repository(), 'v1.0.0')
         );
     }
 
     public function testRecordResultMarksSuccess(): void
     {
-        $sub = $this->subscriptions->create($this->faker->safeEmail(), $this->repoName());
+        $sub = $this->subscribe($this->faker->safeEmail(), $this->repoName());
         $tag = 'v' . $this->faker->numerify('#.#.#');
 
-        $this->ledger->recordResult($sub->id, $sub->repository, $tag, true);
+        $this->ledger->recordResult((int) $sub->id(), $sub->repository(), $tag, true);
 
         $this->assertTrue(
-            $this->ledger->hasSuccessfulNotification($sub->id, $sub->repository, $tag)
+            $this->ledger->hasSuccessfulNotification((int) $sub->id(), $sub->repository(), $tag)
         );
     }
 
     public function testRecordResultUpsertsOnRetry(): void
     {
-        $sub = $this->subscriptions->create($this->faker->safeEmail(), $this->repoName());
+        $sub = $this->subscribe($this->faker->safeEmail(), $this->repoName());
         $tag = 'v' . $this->faker->numerify('#.#.#');
 
-        $this->ledger->recordResult($sub->id, $sub->repository, $tag, false, 'smtp down');
+        $this->ledger->recordResult((int) $sub->id(), $sub->repository(), $tag, false, 'smtp down');
 
-        $afterFailure = $this->fetchNotificationRow($sub->id, $sub->repository, $tag);
+        $afterFailure = $this->fetchNotificationRow((int) $sub->id(), $sub->repository(), $tag);
         $this->assertSame(1, (int) $afterFailure['attempts']);
         $this->assertSame('smtp down', $afterFailure['last_error']);
         $this->assertNull($afterFailure['sent_at']);
         $this->assertFalse(
-            $this->ledger->hasSuccessfulNotification($sub->id, $sub->repository, $tag)
+            $this->ledger->hasSuccessfulNotification((int) $sub->id(), $sub->repository(), $tag)
         );
 
-        $this->ledger->recordResult($sub->id, $sub->repository, $tag, true);
+        $this->ledger->recordResult((int) $sub->id(), $sub->repository(), $tag, true);
 
-        $afterSuccess = $this->fetchNotificationRow($sub->id, $sub->repository, $tag);
+        $afterSuccess = $this->fetchNotificationRow((int) $sub->id(), $sub->repository(), $tag);
         $this->assertSame(2, (int) $afterSuccess['attempts']);
         $this->assertNull($afterSuccess['last_error']);
         $this->assertNotNull($afterSuccess['sent_at']);
         $this->assertTrue(
-            $this->ledger->hasSuccessfulNotification($sub->id, $sub->repository, $tag)
+            $this->ledger->hasSuccessfulNotification((int) $sub->id(), $sub->repository(), $tag)
         );
     }
 
     public function testDeletingSubscriptionCascadesNotifications(): void
     {
-        $sub = $this->subscriptions->create($this->faker->safeEmail(), $this->repoName());
+        $sub = $this->subscribe($this->faker->safeEmail(), $this->repoName());
         $tag = 'v' . $this->faker->numerify('#.#.#');
 
-        $this->ledger->recordResult($sub->id, $sub->repository, $tag, true);
-        $this->assertSame(1, $this->countNotificationsFor($sub->id));
+        $this->ledger->recordResult((int) $sub->id(), $sub->repository(), $tag, true);
+        $this->assertSame(1, $this->countNotificationsFor((int) $sub->id()));
 
-        $this->subscriptions->delete($sub->id);
+        $this->subscriptions->delete((int) $sub->id());
 
         $this->assertSame(
             0,
-            $this->countNotificationsFor($sub->id),
+            $this->countNotificationsFor((int) $sub->id()),
             'release_notifications rows should cascade when subscription is deleted'
         );
+    }
+
+    private function subscribe(string $email, string $repository): Subscription
+    {
+        return $this->subscriptions->create(Subscription::subscribe(
+            new EmailAddress($email),
+            new RepositoryName($repository),
+            (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM)
+        ));
     }
 
     /**

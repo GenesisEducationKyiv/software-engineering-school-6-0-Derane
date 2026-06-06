@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exception;
 
+use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
 use Fig\Http\Message\StatusCodeInterface;
 use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
 
