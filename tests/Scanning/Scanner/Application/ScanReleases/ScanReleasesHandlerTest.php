@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Service;
+namespace Tests\Scanning\Scanner\Application\ScanReleases;
 
 use App\Releases\Sourcing\Domain\RateLimitException;
 use App\Releases\Sourcing\Domain\Release;
@@ -12,10 +12,11 @@ use App\RepositoryTracking\Repositories\Domain\RepositoryStatus;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
 use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
 use App\Service\ReleaseDetector;
-use App\Service\ScannerService;
 use App\Subscription\Subscriptions\Domain\SubscriberCollection;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\SubscriberRef;
@@ -23,7 +24,7 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
-class ScannerServiceTest extends TestCase
+final class ScanReleasesHandlerTest extends TestCase
 {
     private SubscriberFinder&MockObject $subscribers;
     private ScanCandidateSource&MockObject $candidates;
@@ -32,7 +33,7 @@ class ScannerServiceTest extends TestCase
     private NotificationLedgerInterface&MockObject $ledger;
     private ReleaseSource&MockObject $gitHub;
     private NotifierInterface&MockObject $notifier;
-    private ScannerService $scanner;
+    private ScanReleasesHandler $handler;
 
     protected function setUp(): void
     {
@@ -44,7 +45,7 @@ class ScannerServiceTest extends TestCase
         $this->gitHub = $this->createMock(ReleaseSource::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
 
-        $this->scanner = new ScannerService(
+        $this->handler = new ScanReleasesHandler(
             $this->candidates,
             $this->progress,
             new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
@@ -58,7 +59,7 @@ class ScannerServiceTest extends TestCase
         return new Release($tag, $name, "https://github.com/x/y/releases/tag/{$tag}", '2024-01-01', $body);
     }
 
-    public function testScanFindsNewRelease(): void
+    public function testHandlerFindsNewRelease(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -98,10 +99,10 @@ class ScannerServiceTest extends TestCase
             ->method('markReleaseSeen')
             ->with('golang/go', 'v1.22.0');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
-    public function testScanNoNewRelease(): void
+    public function testHandlerNoNewRelease(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -124,10 +125,10 @@ class ScannerServiceTest extends TestCase
         $this->notifier->expects($this->never())->method('notifyReleaseAvailable');
         $this->progress->expects($this->never())->method('markReleaseSeen');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
-    public function testScanNoReleases(): void
+    public function testHandlerNoReleases(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -145,10 +146,10 @@ class ScannerServiceTest extends TestCase
 
         $this->notifier->expects($this->never())->method('notifyReleaseAvailable');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
-    public function testScanHandlesRateLimit(): void
+    public function testHandlerHandlesRateLimit(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -161,10 +162,10 @@ class ScannerServiceTest extends TestCase
 
         $this->notifier->expects($this->never())->method('notifyReleaseAvailable');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
-    public function testScanMultipleSubscribers(): void
+    public function testHandlerMultipleSubscribers(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -203,10 +204,10 @@ class ScannerServiceTest extends TestCase
             ->method('markReleaseSeen')
             ->with('golang/go', 'v2.0.0');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
-    public function testScanFirstRelease(): void
+    public function testHandlerFirstRelease(): void
     {
         $this->candidates->expects($this->once())
             ->method('getDueForScan')
@@ -242,7 +243,7 @@ class ScannerServiceTest extends TestCase
             ->method('markReleaseSeen')
             ->with('new/repo', 'v1.0.0');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
     public function testDoesNotUpdateLastSeenTagWhenAnyNotificationFails(): void
@@ -284,7 +285,7 @@ class ScannerServiceTest extends TestCase
             ->method('markChecked')
             ->with('golang/go');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 
     public function testSkipsAlreadyDeliveredSubscribersAndAdvancesReleaseWhenRemainingDeliveriesSucceed(): void
@@ -329,6 +330,6 @@ class ScannerServiceTest extends TestCase
             ->method('markReleaseSeen')
             ->with('golang/go', 'v3.0.0');
 
-        $this->scanner->scan();
+        $this->handler->__invoke(new ScanReleasesCommand());
     }
 }

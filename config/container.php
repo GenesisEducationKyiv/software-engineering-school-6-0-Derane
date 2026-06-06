@@ -29,6 +29,9 @@ use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
 use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
+use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
 use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\Health\DatabaseHealthCheck;
 use App\Health\HealthCheckInterface;
@@ -65,7 +68,6 @@ use App\Service\NotificationDispatcherInterface;
 use App\Service\NotifierInterface;
 use App\Service\NotifierService;
 use App\Service\ReleaseDetector;
-use App\Service\ScannerService;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
@@ -278,6 +280,7 @@ return static function (array $settings): Container {
             RegisterRepositoryCommand::class => $c->get(RegisterRepositoryCommandHandler::class),
             MarkCheckedCommand::class => $c->get(MarkCheckedCommandHandler::class),
             MarkReleaseSeenCommand::class => $c->get(MarkReleaseSeenCommandHandler::class),
+            ScanReleasesCommand::class => $c->get(ScanReleasesHandler::class),
         ]),
         QueryBus::class => static fn($c) => new InMemoryQueryBus([
             FindSubscriptionByIdQuery::class => $c->get(FindSubscriptionByIdHandler::class),
@@ -320,13 +323,20 @@ return static function (array $settings): Container {
             $c->get(NotificationLedgerInterface::class),
             $c->get(NotifierInterface::class)
         ),
-        ScannerService::class => static fn($c) => new ScannerService(
+
+        // Scanning context — CQRS handler + CLI runner (B4)
+        ScanReleasesHandler::class => static fn($c) => new ScanReleasesHandler(
             $c->get(ScanCandidateSource::class),
             $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
             $c->get(NotificationDispatcherInterface::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
+        ),
+        ScannerCliRunner::class => static fn($c) => new ScannerCliRunner(
+            $c->get(CommandBus::class),
+            $c->get(LoggerInterface::class),
+            $settings['github']['scan_interval']
         ),
 
         // Boundaries

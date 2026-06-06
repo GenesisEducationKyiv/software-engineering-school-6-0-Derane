@@ -263,8 +263,11 @@ deptrac:
     Scanning.Application:
       - Shared.Domain
       - Shared.Application
+      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException; future C2 uses Release
+      - RepositoryTracking.Domain     # B4: ScanReleasesHandler uses ScanCandidateSource + ScanProgressWriter ports
+      - Legacy.Application            # B4 transitional: ReleaseDetector + NotificationDispatcherInterface (B5 moves them into Scanning)
     Scanning.Infrastructure:
-      - Scanning.Application
+      - Scanning.Application          # B4: ScannerCliRunner dispatches ScanReleasesCommand
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure

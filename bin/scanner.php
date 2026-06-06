@@ -3,8 +3,7 @@
 declare(strict_types=1);
 
 use App\Migration\Migrator;
-use App\Service\ScannerService;
-use Psr\Log\LoggerInterface;
+use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -18,14 +17,4 @@ $buildContainer = require __DIR__ . '/../config/container.php';
 $container = $buildContainer($settings);
 
 $container->get(Migrator::class)->migrate();
-
-$scanner = $container->get(ScannerService::class);
-$logger = $container->get(LoggerInterface::class);
-$interval = $settings['github']['scan_interval'];
-
-$logger->info("Scanner started. Checking every {$interval} seconds.");
-
-while (true) {
-    $scanner->scan();
-    sleep($interval);
-}
+$container->get(ScannerCliRunner::class)->run();

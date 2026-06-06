@@ -2,27 +2,35 @@
 
 declare(strict_types=1);
 
-namespace App\Service;
+namespace App\Scanning\Scanner\Application\ScanReleases;
 
 use App\Releases\Sourcing\Domain\RateLimitException;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
+use App\Service\NotificationDispatcherInterface;
+use App\Service\ReleaseDetector;
+use App\Shared\Domain\Bus\Command\Command;
+use App\Shared\Domain\Bus\Command\CommandHandler;
 use Psr\Log\LoggerInterface;
 
-/** @psalm-api */
-final readonly class ScannerService
+/**
+ * @implements CommandHandler<ScanReleasesCommand>
+ * @psalm-api
+ */
+final readonly class ScanReleasesHandler implements CommandHandler
 {
     public function __construct(
         private ScanCandidateSource $candidates,
         private ScanProgressWriter $progress,
-        private ReleaseDetector $detector,
-        private NotificationDispatcherInterface $dispatcher,
+        private ReleaseDetector $detector,                    // transitional: moves to Scanning in B5
+        private NotificationDispatcherInterface $dispatcher,  // transitional: moves to Scanning in B5
         private LoggerInterface $logger,
         private int $scanBatchSize = 100
     ) {
     }
 
-    public function scan(): void
+    #[\Override]
+    public function __invoke(Command $command): void
     {
         $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
         $this->logger->info('Scanning ' . count($repositories) . ' repositories for new releases');
