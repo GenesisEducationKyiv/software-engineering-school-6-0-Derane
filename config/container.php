@@ -66,6 +66,10 @@ use App\Service\ReleaseDetector;
 use App\Service\ScannerService;
 use App\Service\SubscriptionService;
 use App\Service\SubscriptionServiceInterface;
+use App\Shared\Domain\Bus\Command\CommandBus;
+use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Shared\Infrastructure\Bus\InMemoryCommandBus;
+use App\Shared\Infrastructure\Bus\InMemoryQueryBus;
 use App\Shared\Infrastructure\Event\InMemoryEventDispatcher;
 use App\Shared\Infrastructure\Event\ListenerProvider;
 use App\Validation\EmailValidator;
@@ -170,6 +174,10 @@ return static function (array $settings): Container {
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
             $c->get(ListenerProviderInterface::class)
         ),
+
+        // In-house CQRS buses (empty handler maps until contexts wire handlers in Epic B)
+        CommandBus::class => static fn() => new InMemoryCommandBus([]),
+        QueryBus::class => static fn() => new InMemoryQueryBus([]),
 
         // Notifier
         SmtpConfig::class => static fn($c) => $c->get(SmtpConfigFactoryInterface::class)->fromArray($settings['smtp']),
