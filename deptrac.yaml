@@ -1,0 +1,347 @@
+# deptrac architecture gate (Story A6 / HW7)
+#
+# Model: ONE layer per token, named <Context>.<Layer>. This combines the two
+# concerns the architecture cares about into a single, non-overlapping layer
+# space (so deptrac never warns "token is in more than one layer"):
+#
+#   * Clean-architecture LAYER (Domain / Application / Infrastructure) — the
+#     dependency rule (architecture.md §3): arrows point inward only; Domain
+#     depends on nothing outward.
+#   * Bounded CONTEXT (Shared, Subscription, RepositoryTracking, Releases,
+#     Scanning, Notification\Publishing, Notification\Sending, apps/*) —
+#     cross-context Infrastructure coupling is forbidden (architecture.md §4,
+#     lines 140-142).
+#
+# Encoding both in the layer name lets the ruleset express BOTH rules precisely:
+#   - <Ctx>.Domain may depend only on Shared.Domain (+ its own layer, which
+#     deptrac always allows) -> Domain purity.
+#   - <Ctx>.Application -> own Domain + Shared.Domain/Application (NOT
+#     Infrastructure, NOT another context's Infrastructure).
+#   - <Ctx>.Infrastructure -> own Domain/Application + Shared.* ONLY
+#     -> cross-context Infrastructure coupling is impossible.
+# Legitimate cross-context edges at the Domain/Application level (e.g. Scanning ->
+# Releases/RepositoryTracking ports, per architecture.md §5) are GRANTED explicitly
+# in the ruleset as Epic B wires them — never silently allowed.
+#
+# Legacy flat code (src/Domain, src/Service, src/Controller, ...) is a transitional
+# pseudo-context "Legacy", mapped to the three clean-arch layers. Its current leaks
+# (Domain->Infra: App\Domain\SubscriptionPage -> App\Config\Pagination; and the
+# legacy Application->Infrastructure Service edges) are absorbed by
+# deptrac.baseline.yaml so the gate is green on day one. The baseline can only
+# SHRINK as Epic B moves classes into their context homes (Epic B exit criterion);
+# it must never grow without justification.
+#
+# NOTE: deptrac allows intra-layer (same-layer) dependencies by default, so a
+# layer need not list itself in its own ruleset.
+
+imports:
+  - deptrac.baseline.yaml
+
+deptrac:
+  paths:
+    - ./src
+    - ./apps
+
+  layers:
+    # ---------------------------------------------------------------------
+    # Shared kernel
+    # ---------------------------------------------------------------------
+    - name: Shared.Domain
+      collectors:
+        - type: directory
+          value: src/Shared/Domain/.*
+    - name: Shared.Application
+      collectors:
+        - type: directory
+          value: src/Shared/Application/.*
+    - name: Shared.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Shared/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Subscription context (module: Subscriptions)
+    # ---------------------------------------------------------------------
+    - name: Subscription.Domain
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Domain/.*
+    - name: Subscription.Application
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Application/.*
+    - name: Subscription.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # RepositoryTracking context (module: Repositories)
+    # ---------------------------------------------------------------------
+    - name: RepositoryTracking.Domain
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Domain/.*
+    - name: RepositoryTracking.Application
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Application/.*
+    - name: RepositoryTracking.Infrastructure
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Releases context (module: Sourcing)
+    # ---------------------------------------------------------------------
+    - name: Releases.Domain
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Domain/.*
+    - name: Releases.Application
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Application/.*
+    - name: Releases.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Scanning context (module: Scanner) — orchestration, NO Domain layer
+    # ---------------------------------------------------------------------
+    - name: Scanning.Application
+      collectors:
+        - type: directory
+          value: src/Scanning/Scanner/Application/.*
+    - name: Scanning.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Scanning/Scanner/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Notification\Publishing context (monolith publisher side)
+    # ---------------------------------------------------------------------
+    - name: NotificationPublishing.Domain
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Domain/.*
+    - name: NotificationPublishing.Application
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Application/.*
+    - name: NotificationPublishing.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Notification\Sending context (the EXTRACTED service's context)
+    # ---------------------------------------------------------------------
+    - name: NotificationSending.Domain
+      collectors:
+        - type: directory
+          value: src/Notification/Sending/Domain/.*
+    - name: NotificationSending.Application
+      collectors:
+        - type: directory
+          value: src/Notification/Sending/Application/.*
+    - name: NotificationSending.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Notification/Sending/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # apps/* deployables (composition roots / thin entrypoints)
+    # ---------------------------------------------------------------------
+    - name: Apps.Monolith
+      collectors:
+        - type: directory
+          value: apps/monolith/.*
+    - name: Apps.Notification
+      collectors:
+        - type: directory
+          value: apps/notification/.*
+
+    # ---------------------------------------------------------------------
+    # Legacy flat code (transitional; drains over Epic B). Layer-only, no context.
+    # ---------------------------------------------------------------------
+    - name: Legacy.Domain
+      collectors:
+        - type: directory
+          value: src/Domain/.*
+        - type: directory
+          value: src/Exception/.*
+    - name: Legacy.Application
+      collectors:
+        - type: directory
+          value: src/Service/.*
+        - type: directory
+          value: src/Validation/.*
+    - name: Legacy.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Controller/.*
+        - type: directory
+          value: src/Middleware/.*
+        - type: directory
+          value: src/Grpc/.*
+        - type: directory
+          value: src/Repository/.*
+        - type: directory
+          value: src/GitHub/.*
+        - type: directory
+          value: src/Notifier/.*
+        - type: directory
+          value: src/Cache/.*
+        - type: directory
+          value: src/Metrics/.*
+        - type: directory
+          value: src/Health/.*
+        - type: directory
+          value: src/Migration/.*
+        - type: directory
+          value: src/Factory/.*
+        - type: directory
+          value: src/Config/.*
+
+  ruleset:
+    # ===== Shared kernel: depended on by all; depends on nothing outside Shared.
+    Shared.Domain: []                      # Domain purity (intra-layer allowed by default)
+    Shared.Application:
+      - Shared.Domain
+    Shared.Infrastructure:
+      - Shared.Domain
+      - Shared.Application
+
+    # ===== Subscription
+    Subscription.Domain:
+      - Shared.Domain
+    Subscription.Application:
+      - Subscription.Domain
+      - Shared.Domain
+      - Shared.Application
+    Subscription.Infrastructure:
+      - Subscription.Domain
+      - Subscription.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== RepositoryTracking
+    RepositoryTracking.Domain:
+      - Shared.Domain
+    RepositoryTracking.Application:
+      - RepositoryTracking.Domain
+      - Shared.Domain
+      - Shared.Application
+    RepositoryTracking.Infrastructure:
+      - RepositoryTracking.Domain
+      - RepositoryTracking.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Releases
+    Releases.Domain:
+      - Shared.Domain
+    Releases.Application:
+      - Releases.Domain
+      - Shared.Domain
+      - Shared.Application
+    Releases.Infrastructure:
+      - Releases.Domain
+      - Releases.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Scanning (orchestrator). In Epic B it gains cross-context port edges to
+    # Releases.Domain + RepositoryTracking.Domain (architecture §5); GRANT them here
+    # when B4 wires them. No Domain layer of its own.
+    Scanning.Application:
+      - Shared.Domain
+      - Shared.Application
+    Scanning.Infrastructure:
+      - Scanning.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Notification\Publishing. In Epic B the listener gains edges to
+    # Subscription.Domain (SubscriberFinder) + Releases.Domain (Release); GRANT then.
+    NotificationPublishing.Domain:
+      - Shared.Domain
+    NotificationPublishing.Application:
+      - NotificationPublishing.Domain
+      - Shared.Domain
+      - Shared.Application
+    NotificationPublishing.Infrastructure:
+      - NotificationPublishing.Domain
+      - NotificationPublishing.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Notification\Sending (extracted service)
+    NotificationSending.Domain:
+      - Shared.Domain
+    NotificationSending.Application:
+      - NotificationSending.Domain
+      - Shared.Domain
+      - Shared.Application
+    NotificationSending.Infrastructure:
+      - NotificationSending.Domain
+      - NotificationSending.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== apps/monolith: the monolith composition root — wires every monolith
+    # context's layers + Shared + Legacy (during the transition).
+    Apps.Monolith:
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - Subscription.Domain
+      - Subscription.Application
+      - Subscription.Infrastructure
+      - RepositoryTracking.Domain
+      - RepositoryTracking.Application
+      - RepositoryTracking.Infrastructure
+      - Releases.Domain
+      - Releases.Application
+      - Releases.Infrastructure
+      - Scanning.Application
+      - Scanning.Infrastructure
+      - NotificationPublishing.Domain
+      - NotificationPublishing.Application
+      - NotificationPublishing.Infrastructure
+      - Legacy.Domain
+      - Legacy.Application
+      - Legacy.Infrastructure
+
+    # ===== apps/notification (extracted service): MUST NOT reach monolith-only
+    # contexts. Allowed: Shared + NotificationSending only. Fully bites in Epic D.
+    Apps.Notification:
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - NotificationSending.Domain
+      - NotificationSending.Application
+      - NotificationSending.Infrastructure
+
+    # ===== Legacy transitional code (drains over Epic B). Its current
+    # Domain->Infra and Application->Infra leaks are absorbed by the baseline.
+    Legacy.Domain:
+      - Shared.Domain
+    Legacy.Application:
+      - Legacy.Domain
+      - Shared.Domain
+      - Shared.Application
+    Legacy.Infrastructure:
+      - Legacy.Domain
+      - Legacy.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure

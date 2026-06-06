@@ -31,7 +31,8 @@
         "symfony/browser-kit": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/mime": "^8.0",
-        "fakerphp/faker": "^1.24"
+        "fakerphp/faker": "^1.24",
+        "deptrac/deptrac": "^4.6"
     },
     "autoload": {
         "psr-4": {
@@ -47,7 +48,10 @@
     },
     "scripts": {
         "test": "phpunit --configuration phpunit.xml",
-        "lint": "phpcs",
+        "lint": [
+            "phpcs",
+            "deptrac analyse --no-progress --no-cache"
+        ],
         "psalm": "psalm",
         "acceptance": "behat --colors --format=progress --tags=~@auth",
         "acceptance-auth": "behat --colors --format=progress --tags=@auth",

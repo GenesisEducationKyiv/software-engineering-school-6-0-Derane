@@ -1,0 +1,29 @@
+deptrac:
+  skip_violations:
+    App\Domain\SubscriptionPage:
+      - App\Config\Pagination
+    App\Service\GitHubService:
+      - App\GitHub\GitHubApiClientInterface
+      - App\GitHub\LatestReleaseCacheInterface
+      - App\GitHub\RepositoryExistenceCacheInterface
+    App\Service\MetricsService:
+      - App\Metrics\Gauge
+      - App\Metrics\PrometheusFormatter
+      - App\Repository\MetricsRepositoryInterface
+    App\Service\NotificationDispatcher:
+      - App\Repository\NotificationLedgerInterface
+      - App\Repository\SubscriberFinderInterface
+    App\Service\NotifierService:
+      - App\Notifier\MailerInterface
+      - App\Notifier\ReleaseEmailRenderer
+    App\Service\ReleaseDetector:
+      - App\Repository\RepositoryStatusReader
+    App\Service\ScannerService:
+      - App\Repository\ScanCandidateSource
+      - App\Repository\ScanProgressWriter
+    App\Service\SubscriptionService:
+      - App\Config\Pagination
+      - App\Repository\SubscriptionRepositoryInterface
+      - App\Repository\TrackedRepositoryRegistrar
+    App\Service\SubscriptionServiceInterface:
+      - App\Config\Pagination
