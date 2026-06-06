@@ -12,8 +12,8 @@ use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Domain\Factory\ReleaseFactory;
 use App\Domain\Factory\ReleaseFactoryInterface;
-use App\Domain\Factory\RepositoryStatusFactory;
-use App\Domain\Factory\RepositoryStatusFactoryInterface;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\Exception\ExceptionStatusMap;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
@@ -37,12 +37,20 @@ use App\Repository\MetricsRepository;
 use App\Repository\MetricsRepositoryInterface;
 use App\Repository\NotificationLedger;
 use App\Repository\NotificationLedgerInterface;
-use App\Repository\RepositoryStatusReader;
-use App\Repository\ScanCandidateSource;
-use App\Repository\ScanProgressWriter;
-use App\Repository\TrackedRepositoryReader;
-use App\Repository\TrackedRepositoryRegistrar;
-use App\Repository\TrackedRepositoryWriter;
+use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
+use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanQuery;
+use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommand;
+use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommandHandler;
+use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseSeenCommand;
+use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseSeenCommandHandler;
+use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommand;
+use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommandHandler;
+use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
+use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
+use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
+use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
+use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryReader;
+use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryWriter;
 use App\Service\GitHubService;
 use App\Service\GitHubServiceInterface;
 use Tests\Support\FakeGitHubService;
@@ -161,12 +169,12 @@ return static function (array $settings): Container {
             $c->get(SubscriberRefFactoryInterface::class)
         ),
         SubscriberFinder::class => static fn($c) => $c->get(SubscriptionRepository::class),
-        RepositoryStatusReader::class => static fn($c) => new TrackedRepositoryReader(
+        RepositoryStatusReader::class => static fn($c) => new PdoTrackedRepositoryReader(
             $c->get(PDO::class),
             $c->get(RepositoryStatusFactoryInterface::class)
         ),
         ScanCandidateSource::class => static fn($c) => $c->get(RepositoryStatusReader::class),
-        TrackedRepositoryRegistrar::class => static fn($c) => new TrackedRepositoryWriter(
+        TrackedRepositoryRegistrar::class => static fn($c) => new PdoTrackedRepositoryWriter(
             $c->get(PDO::class)
         ),
         ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
@@ -207,16 +215,36 @@ return static function (array $settings): Container {
             $c->get(SubscriptionRepository::class)
         ),
 
+        // RepositoryTracking context — CQRS handlers (B2)
+        RegisterRepositoryCommandHandler::class => static fn($c) => new RegisterRepositoryCommandHandler(
+            $c->get(TrackedRepositoryRegistrar::class)
+        ),
+        MarkCheckedCommandHandler::class => static fn($c) => new MarkCheckedCommandHandler(
+            $c->get(ScanProgressWriter::class),
+            $c->get(EventDispatcherInterface::class)
+        ),
+        MarkReleaseSeenCommandHandler::class => static fn($c) => new MarkReleaseSeenCommandHandler(
+            $c->get(ScanProgressWriter::class),
+            $c->get(EventDispatcherInterface::class)
+        ),
+        GetDueForScanHandler::class => static fn($c) => new GetDueForScanHandler(
+            $c->get(ScanCandidateSource::class)
+        ),
+
         // In-house CQRS buses (handler maps filled per context across Epic B)
         CommandBus::class => static fn($c) => new InMemoryCommandBus([
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
+            RegisterRepositoryCommand::class => $c->get(RegisterRepositoryCommandHandler::class),
+            MarkCheckedCommand::class => $c->get(MarkCheckedCommandHandler::class),
+            MarkReleaseSeenCommand::class => $c->get(MarkReleaseSeenCommandHandler::class),
         ]),
         QueryBus::class => static fn($c) => new InMemoryQueryBus([
             FindSubscriptionByIdQuery::class => $c->get(FindSubscriptionByIdHandler::class),
             FindSubscriptionByEmailAndRepositoryQuery::class =>
                 $c->get(FindSubscriptionByEmailAndRepositoryHandler::class),
             ListSubscriptionsQuery::class => $c->get(ListSubscriptionsHandler::class),
+            GetDueForScanQuery::class => $c->get(GetDueForScanHandler::class),
         ]),
 
         // Notifier

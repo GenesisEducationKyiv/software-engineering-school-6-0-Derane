@@ -13,8 +13,3 @@ deptrac:
     App\Service\NotifierService:
       - App\Notifier\MailerInterface
       - App\Notifier\ReleaseEmailRenderer
-    App\Service\ReleaseDetector:
-      - App\Repository\RepositoryStatusReader
-    App\Service\ScannerService:
-      - App\Repository\ScanCandidateSource
-      - App\Repository\ScanProgressWriter

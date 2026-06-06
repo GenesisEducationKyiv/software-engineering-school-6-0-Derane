@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Domain\Release;
-use App\Repository\RepositoryStatusReader;
+use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
@@ -30,7 +30,7 @@ final readonly class ReleaseDetector
         }
 
         $status = $this->trackedRepositories->getStatus($repoName);
-        $lastSeenTag = $status?->lastSeenTag;
+        $lastSeenTag = $status?->lastSeenTag();
 
         if ($lastSeenTag === $release->tagName) {
             return null;

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Exception\RateLimitException;
-use App\Repository\ScanCandidateSource;
-use App\Repository\ScanProgressWriter;
+use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
+use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use Psr\Log\LoggerInterface;
 
 /** @psalm-api */

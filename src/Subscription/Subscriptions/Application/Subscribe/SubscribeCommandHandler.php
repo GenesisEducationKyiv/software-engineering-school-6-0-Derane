@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Subscription\Subscriptions\Application\Subscribe;
 
 use App\Exception\RepositoryNotFoundException;
-use App\Repository\TrackedRepositoryRegistrar;
+use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\Service\GitHubServiceInterface;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;

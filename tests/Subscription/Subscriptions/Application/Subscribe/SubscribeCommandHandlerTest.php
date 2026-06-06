@@ -6,7 +6,7 @@ namespace Tests\Subscription\Subscriptions\Application\Subscribe;
 
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\ValidationException;
-use App\Repository\TrackedRepositoryRegistrar;
+use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\Service\GitHubServiceInterface;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;

@@ -82,8 +82,6 @@ deptrac:
       collectors:
         - type: directory
           value: src/RepositoryTracking/Repositories/Domain/.*
-        - type: classNameRegex                  # B1 transitional — remove in B2
-          value: '#^App\\Repository\\TrackedRepositoryRegistrar$#'
     - name: RepositoryTracking.Application
       collectors:
         - type: directory
@@ -198,16 +196,8 @@ deptrac:
           value: src/Middleware/.*
         - type: directory
           value: src/Grpc/.*
-        # src/Repository/* EXCEPT TrackedRepositoryRegistrar, which B1 pre-classifies
-        # into RepositoryTracking.Domain (className regex above). Keeping it
-        # single-layer avoids a multi-layer token. Remove this bool wrapper in B2.
-        - type: bool
-          must:
-            - type: directory
-              value: src/Repository/.*
-          must_not:
-            - type: classNameRegex
-              value: '#^App\\Repository\\TrackedRepositoryRegistrar$#'
+        - type: directory
+          value: src/Repository/.*
         - type: directory
           value: src/GitHub/.*
         - type: directory
@@ -368,6 +358,7 @@ deptrac:
       - Shared.Application
       - Subscription.Domain           # B1: NotificationDispatcher uses SubscriberFinder/SubscriberRef/SubscriberCollection
       - Releases.Domain               # B1 transitional: GitHubService/ReleaseDetector use pre-classified GitHubServiceInterface (B3)
+      - RepositoryTracking.Domain     # B2: ReleaseDetector uses RepositoryStatusReader; ScannerService uses ScanCandidateSource/ScanProgressWriter
     Legacy.Infrastructure:
       - Legacy.Domain
       - Legacy.Application
@@ -376,4 +367,3 @@ deptrac:
       - Shared.Infrastructure
       - Subscription.Application       # B1: ReleaseNotifierService news the commands/queries/responses
       - Subscription.Domain           # B1: ExceptionStatusMap references SubscriptionNotFoundException
-      - RepositoryTracking.Domain     # B1 transitional: TrackedRepositoryWriter implements pre-classified TrackedRepositoryRegistrar (B2)

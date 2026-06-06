@@ -2,14 +2,20 @@
 
 declare(strict_types=1);
 
-namespace App\Repository;
+namespace App\RepositoryTracking\Repositories\Infrastructure\Persistence;
 
+use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
+use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use PDO;
 
-/** @psalm-api */
-final readonly class TrackedRepositoryWriter implements
-    TrackedRepositoryRegistrar,
-    ScanProgressWriter
+/**
+ * PDO write adapter for the `repositories` table. Implements both write-side
+ * ports (TrackedRepositoryRegistrar + ScanProgressWriter) — per-consumer ISP,
+ * one impl. SQL is byte-identical to the legacy TrackedRepositoryWriter.
+ *
+ * @psalm-api
+ */
+final readonly class PdoTrackedRepositoryWriter implements TrackedRepositoryRegistrar, ScanProgressWriter
 {
     public function __construct(private PDO $pdo)
     {

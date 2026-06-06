@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Domain\Release;
-use App\Domain\RepositoryStatus;
 use App\Exception\RateLimitException;
 use App\Repository\NotificationLedgerInterface;
-use App\Repository\RepositoryStatusReader;
-use App\Repository\ScanCandidateSource;
-use App\Repository\ScanProgressWriter;
+use App\RepositoryTracking\Repositories\Domain\RepositoryStatus;
+use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
+use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
+use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
@@ -73,7 +73,7 @@ class ScannerServiceTest extends TestCase
         $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->with('golang/go')
-            ->willReturn(new RepositoryStatus('golang/go', 'v1.21.0', null));
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.21.0', null));
 
         $this->subscribers->expects($this->once())
             ->method('findSubscribersByRepository')
@@ -115,7 +115,7 @@ class ScannerServiceTest extends TestCase
 
         $this->statusReader->expects($this->once())
             ->method('getStatus')
-            ->willReturn(new RepositoryStatus('golang/go', 'v1.21.0', null));
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.21.0', null));
 
         $this->progress->expects($this->once())
             ->method('markChecked')
@@ -177,7 +177,7 @@ class ScannerServiceTest extends TestCase
 
         $this->statusReader->expects($this->once())
             ->method('getStatus')
-            ->willReturn(new RepositoryStatus('golang/go', 'v1.0.0', null));
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.0.0', null));
 
         $this->subscribers->expects($this->once())
             ->method('findSubscribersByRepository')
@@ -219,7 +219,7 @@ class ScannerServiceTest extends TestCase
 
         $this->statusReader->expects($this->once())
             ->method('getStatus')
-            ->willReturn(new RepositoryStatus('new/repo', null, null));
+            ->willReturn(RepositoryStatus::reconstitute('new/repo', null, null));
 
         $this->subscribers->expects($this->once())
             ->method('findSubscribersByRepository')
@@ -258,7 +258,7 @@ class ScannerServiceTest extends TestCase
 
         $this->statusReader->expects($this->once())
             ->method('getStatus')
-            ->willReturn(new RepositoryStatus('golang/go', 'v1.0.0', null));
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.0.0', null));
 
         $this->subscribers->expects($this->once())
             ->method('findSubscribersByRepository')
@@ -302,7 +302,7 @@ class ScannerServiceTest extends TestCase
         $this->statusReader->expects($this->once())
             ->method('getStatus')
             ->with('golang/go')
-            ->willReturn(new RepositoryStatus('golang/go', 'v2.0.0', null));
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v2.0.0', null));
 
         $this->subscribers->expects($this->once())
             ->method('findSubscribersByRepository')
