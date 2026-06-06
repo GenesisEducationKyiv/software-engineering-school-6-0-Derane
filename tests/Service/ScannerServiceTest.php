@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Domain\Release;
-use App\Exception\RateLimitException;
+use App\Releases\Sourcing\Domain\RateLimitException;
+use App\Releases\Sourcing\Domain\Release;
+use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\Repository\NotificationLedgerInterface;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatus;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
-use App\Service\GitHubServiceInterface;
 use App\Service\NotificationDispatcher;
 use App\Service\NotifierInterface;
 use App\Service\ReleaseDetector;
@@ -30,7 +30,7 @@ class ScannerServiceTest extends TestCase
     private ScanProgressWriter&MockObject $progress;
     private RepositoryStatusReader&MockObject $statusReader;
     private NotificationLedgerInterface&MockObject $ledger;
-    private GitHubServiceInterface&MockObject $gitHub;
+    private ReleaseSource&MockObject $gitHub;
     private NotifierInterface&MockObject $notifier;
     private ScannerService $scanner;
 
@@ -41,7 +41,7 @@ class ScannerServiceTest extends TestCase
         $this->progress = $this->createMock(ScanProgressWriter::class);
         $this->statusReader = $this->createMock(RepositoryStatusReader::class);
         $this->ledger = $this->createMock(NotificationLedgerInterface::class);
-        $this->gitHub = $this->createMock(GitHubServiceInterface::class);
+        $this->gitHub = $this->createMock(ReleaseSource::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
 
         $this->scanner = new ScannerService(

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
 use App\Repository\NotificationLedgerInterface;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\SubscriberRef;

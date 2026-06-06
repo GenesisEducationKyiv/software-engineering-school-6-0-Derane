@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Exception\RateLimitException;
+use App\Releases\Sourcing\Domain\RateLimitException;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use Psr\Log\LoggerInterface;

@@ -1,9 +1,5 @@
 deptrac:
   skip_violations:
-    App\Service\GitHubService:
-      - App\GitHub\GitHubApiClientInterface
-      - App\GitHub\LatestReleaseCacheInterface
-      - App\GitHub\RepositoryExistenceCacheInterface
     App\Service\MetricsService:
       - App\Metrics\Gauge
       - App\Metrics\PrometheusFormatter

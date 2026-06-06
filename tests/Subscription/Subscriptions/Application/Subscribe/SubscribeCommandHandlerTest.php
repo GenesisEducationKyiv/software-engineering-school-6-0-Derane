@@ -6,8 +6,8 @@ namespace Tests\Subscription\Subscriptions\Application\Subscribe;
 
 use App\Exception\RepositoryNotFoundException;
 use App\Exception\ValidationException;
+use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
-use App\Service\GitHubServiceInterface;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
 use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
@@ -25,7 +25,7 @@ final class SubscribeCommandHandlerTest extends TestCase
 {
     private SubscriptionRepository&MockObject $repository;
     private TrackedRepositoryRegistrar&MockObject $trackedRepositories;
-    private GitHubServiceInterface&MockObject $gitHub;
+    private ReleaseSource&MockObject $gitHub;
     /** @var list<object> */
     private array $dispatchedEvents = [];
     private SubscribeCommandHandler $handler;
@@ -34,7 +34,7 @@ final class SubscribeCommandHandlerTest extends TestCase
     {
         $this->repository = $this->createMock(SubscriptionRepository::class);
         $this->trackedRepositories = $this->createMock(TrackedRepositoryRegistrar::class);
-        $this->gitHub = $this->createMock(GitHubServiceInterface::class);
+        $this->gitHub = $this->createMock(ReleaseSource::class);
         $this->dispatchedEvents = [];
 
         $dispatcher = new class ($this->dispatchedEvents) implements EventDispatcherInterface {

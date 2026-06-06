@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Service;
 
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
 use App\Repository\NotificationLedgerInterface;
 use App\Service\NotificationDispatcher;
 use App\Subscription\Subscriptions\Domain\SubscriberCollection;

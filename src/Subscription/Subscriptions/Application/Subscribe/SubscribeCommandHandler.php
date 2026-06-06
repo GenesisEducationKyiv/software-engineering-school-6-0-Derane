@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Subscription\Subscriptions\Application\Subscribe;
 
 use App\Exception\RepositoryNotFoundException;
+use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
-use App\Service\GitHubServiceInterface;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;
 use App\Shared\Domain\ValueObject\EmailAddress;
@@ -34,7 +34,7 @@ final readonly class SubscribeCommandHandler implements CommandHandler
 {
     public function __construct(
         private SubscriptionRepository $repository,
-        private GitHubServiceInterface $gitHubService,
+        private ReleaseSource $gitHubService,
         private TrackedRepositoryRegistrar $trackedRepositories,
         private SubscriptionValidator $validator,
         private EventDispatcherInterface $eventDispatcher,

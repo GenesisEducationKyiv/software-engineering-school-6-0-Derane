@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
+use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use Psr\Log\LoggerInterface;
 
@@ -12,7 +13,7 @@ use Psr\Log\LoggerInterface;
 final readonly class ReleaseDetector
 {
     public function __construct(
-        private GitHubServiceInterface $gitHubService,
+        private ReleaseSource $gitHubService,
         private RepositoryStatusReader $trackedRepositories,
         private LoggerInterface $logger
     ) {

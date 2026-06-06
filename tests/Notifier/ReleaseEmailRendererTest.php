@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Notifier;
 
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
 use App\Notifier\ReleaseEmailRenderer;
 use PHPUnit\Framework\TestCase;
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Notifier;
 
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
 
 final readonly class ReleaseEmailRenderer
 {

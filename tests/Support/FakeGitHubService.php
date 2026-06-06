@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
-use App\Domain\Release;
-use App\Service\GitHubServiceInterface;
+use App\Releases\Sourcing\Domain\Release;
+use App\Releases\Sourcing\Domain\ReleaseSource;
 
 /**
- * Deterministic in-process replacement for GitHubService used in test stacks
+ * Deterministic in-process replacement for GitHubApiReleaseSource used in test stacks
  * (Behat acceptance + Playwright E2E + PHPUnit Integration). Enabled by
  * setting the GITHUB_STUB env var to a truthy value.
  *
@@ -17,7 +17,7 @@ use App\Service\GitHubServiceInterface;
  *
  * @psalm-api
  */
-final class FakeGitHubService implements GitHubServiceInterface
+final class FakeGitHubService implements ReleaseSource
 {
     #[\Override]
     public function repositoryExists(string $repository): bool

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Middleware;
 
 use App\Exception\ExceptionStatusMap;
-use App\Exception\RateLimitException;
 use App\Exception\RepositoryNotFoundException;
+use App\Releases\Sourcing\Domain\RateLimitException;
 use App\Exception\ValidationException;
 use App\Middleware\ErrorHandlerMiddleware;
 use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Service;
 
-use App\Domain\Factory\ReleaseFactory;
-use App\GitHub\LatestReleaseCacheInterface;
-use App\GitHub\RepositoryExistenceCacheInterface;
-use App\Service\GitHubService;
+use App\Releases\Sourcing\Infrastructure\Cache\LatestReleaseCacheInterface;
+use App\Releases\Sourcing\Infrastructure\Cache\RepositoryExistenceCacheInterface;
+use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactory;
+use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
 use Predis\Client as RedisClient;
 use Psr\Log\NullLogger;
 use Tests\Integration\IntegrationTestCase;
@@ -68,9 +68,9 @@ final class GitHubServiceCacheTest extends IntegrationTestCase
         self::assertLessThanOrEqual((int) ($_ENV['REDIS_CACHE_TTL'] ?? 600), $ttl);
     }
 
-    private function serviceWith(SpyGitHubApiClient $api): GitHubService
+    private function serviceWith(SpyGitHubApiClient $api): GitHubApiReleaseSource
     {
-        return new GitHubService(
+        return new GitHubApiReleaseSource(
             $api,
             $this->c->get(RepositoryExistenceCacheInterface::class),
             $this->c->get(LatestReleaseCacheInterface::class),

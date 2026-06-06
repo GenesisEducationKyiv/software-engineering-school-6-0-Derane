@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Config\Factory\SmtpConfigFactory;
-use App\Domain\Release;
+use App\Releases\Sourcing\Domain\Release;
 use App\Factory\PHPMailerFactory;
 use App\Notifier\ReleaseEmailRenderer;
 use App\Notifier\SmtpMailer;

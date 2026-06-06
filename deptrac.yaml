@@ -98,8 +98,6 @@ deptrac:
       collectors:
         - type: directory
           value: src/Releases/Sourcing/Domain/.*
-        - type: classNameRegex                  # B1 transitional — remove in B3
-          value: '#^App\\Service\\GitHubServiceInterface$#'
     - name: Releases.Application
       collectors:
         - type: directory
@@ -176,16 +174,8 @@ deptrac:
           value: src/Exception/.*
     - name: Legacy.Application
       collectors:
-        # src/Service/* EXCEPT GitHubServiceInterface, which B1 pre-classifies into
-        # Releases.Domain (className regex above). Keeping it single-layer avoids a
-        # multi-layer token. Remove this bool wrapper in B3 when the file moves.
-        - type: bool
-          must:
-            - type: directory
-              value: src/Service/.*
-          must_not:
-            - type: classNameRegex
-              value: '#^App\\Service\\GitHubServiceInterface$#'
+        - type: directory
+          value: src/Service/.*
         - type: directory
           value: src/Validation/.*
     - name: Legacy.Infrastructure
@@ -199,11 +189,7 @@ deptrac:
         - type: directory
           value: src/Repository/.*
         - type: directory
-          value: src/GitHub/.*
-        - type: directory
           value: src/Notifier/.*
-        - type: directory
-          value: src/Cache/.*
         - type: directory
           value: src/Metrics/.*
         - type: directory
@@ -260,7 +246,6 @@ deptrac:
     # ===== Releases
     Releases.Domain:
       - Shared.Domain
-      - Legacy.Domain                 # B1 transitional: pre-classified GitHubServiceInterface still references App\Domain\Release (B3 moves it)
     Releases.Application:
       - Releases.Domain
       - Shared.Domain
@@ -352,12 +337,13 @@ deptrac:
     Legacy.Domain:
       - Shared.Domain
       - Subscription.Domain           # B1: ExceptionStatusMap (src/Exception) references SubscriptionNotFoundException (B5 moves the map)
+      - Releases.Domain               # B3: ExceptionStatusMap references RateLimitException which moved to Releases.Domain (B5 moves the map)
     Legacy.Application:
       - Legacy.Domain
       - Shared.Domain
       - Shared.Application
       - Subscription.Domain           # B1: NotificationDispatcher uses SubscriberFinder/SubscriberRef/SubscriberCollection
-      - Releases.Domain               # B1 transitional: GitHubService/ReleaseDetector use pre-classified GitHubServiceInterface (B3)
+      - Releases.Domain               # B3+: ReleaseDetector uses ReleaseSource port (B4 moves ReleaseDetector into Scanning)
       - RepositoryTracking.Domain     # B2: ReleaseDetector uses RepositoryStatusReader; ScannerService uses ScanCandidateSource/ScanProgressWriter
     Legacy.Infrastructure:
       - Legacy.Domain
@@ -367,3 +353,4 @@ deptrac:
       - Shared.Infrastructure
       - Subscription.Application       # B1: ReleaseNotifierService news the commands/queries/responses
       - Subscription.Domain           # B1: ExceptionStatusMap references SubscriptionNotFoundException
+      - Releases.Domain               # B3: ReleaseEmailRenderer/SmtpMailer in src/Notifier/ use Release VO (B5 moves them)

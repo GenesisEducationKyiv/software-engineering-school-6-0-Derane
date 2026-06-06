@@ -2,28 +2,34 @@
 
 declare(strict_types=1);
 
-use App\Cache\GitHubCacheInterface;
-use App\Cache\RedisGitHubCache;
-use App\Cache\SafeGitHubCacheDecorator;
 use App\Config\Factory\SmtpConfigFactory;
 use App\Config\Factory\SmtpConfigFactoryInterface;
 use App\Config\SmtpConfig;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
-use App\Domain\Factory\ReleaseFactory;
-use App\Domain\Factory\ReleaseFactoryInterface;
-use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
-use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\Exception\ExceptionStatusMap;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
-use App\GitHub\GitHubApiClient;
-use App\GitHub\GitHubApiClientInterface;
-use App\GitHub\GitHubReleaseCache;
-use App\GitHub\GitHubRepositoryCache;
-use App\GitHub\LatestReleaseCacheInterface;
-use App\GitHub\RepositoryExistenceCacheInterface;
 use App\Grpc\ReleaseNotifierService;
+use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseHandler;
+use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseQuery;
+use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsHandler;
+use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsQuery;
+use App\Releases\Sourcing\Domain\ReleaseSource;
+use App\Releases\Sourcing\Infrastructure\Cache\GitHubCacheInterface;
+use App\Releases\Sourcing\Infrastructure\Cache\GitHubReleaseCache;
+use App\Releases\Sourcing\Infrastructure\Cache\GitHubRepositoryCache;
+use App\Releases\Sourcing\Infrastructure\Cache\LatestReleaseCacheInterface;
+use App\Releases\Sourcing\Infrastructure\Cache\RedisGitHubCache;
+use App\Releases\Sourcing\Infrastructure\Cache\RepositoryExistenceCacheInterface;
+use App\Releases\Sourcing\Infrastructure\Cache\SafeGitHubCacheDecorator;
+use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactory;
+use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactoryInterface;
+use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
+use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
+use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\Health\DatabaseHealthCheck;
 use App\Health\HealthCheckInterface;
 use App\Metrics\PrometheusFormatter;
@@ -51,8 +57,6 @@ use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryReader;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryWriter;
-use App\Service\GitHubService;
-use App\Service\GitHubServiceInterface;
 use Tests\Support\FakeGitHubService;
 use App\Service\MetricsService;
 use App\Service\MetricsServiceInterface;
@@ -139,13 +143,49 @@ return static function (array $settings): Container {
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
         MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
+
+        // Releases context (B3) — cache + factory + client + service
         GitHubCacheInterface::class => static fn($c) => new SafeGitHubCacheDecorator(
             new RedisGitHubCache($c->get(RedisClient::class)),
             $c->get(LoggerInterface::class)
         ),
+        ReleaseFactoryInterface::class => static fn() => new ReleaseFactory(),
+        GitHubApiClientInterface::class => static fn($c) => new GitHubApiClient(
+            $c->get(GuzzleClient::class),
+            $settings['github']['token']
+        ),
+        RepositoryExistenceCacheInterface::class => static fn($c) => new GitHubRepositoryCache(
+            $c->get(GitHubCacheInterface::class),
+            $settings['redis']['cache_ttl']
+        ),
+        LatestReleaseCacheInterface::class => static fn($c) => new GitHubReleaseCache(
+            $c->get(GitHubCacheInterface::class),
+            $c->get(ReleaseFactoryInterface::class),
+            $settings['redis']['cache_ttl']
+        ),
+        ReleaseSource::class => static function ($c) use ($settings) {
+            if ($settings['github']['stub']) {
+                return new FakeGitHubService();
+            }
+            return new GitHubApiReleaseSource(
+                $c->get(GitHubApiClientInterface::class),
+                $c->get(RepositoryExistenceCacheInterface::class),
+                $c->get(LatestReleaseCacheInterface::class),
+                $c->get(ReleaseFactoryInterface::class),
+                $c->get(LoggerInterface::class)
+            );
+        },
+
+        // Releases context CQRS handlers (B3)
+        FetchLatestReleaseHandler::class => static fn($c) => new FetchLatestReleaseHandler(
+            $c->get(ReleaseSource::class)
+        ),
+        RepositoryExistsHandler::class => static fn($c) => new RepositoryExistsHandler(
+            $c->get(ReleaseSource::class)
+        ),
 
         // Domain factories — injected for testability.
-        ReleaseFactoryInterface::class => static fn() => new ReleaseFactory(),
+
         SubscriptionFactoryInterface::class => static fn() => new SubscriptionFactory(),
         SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
         RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
@@ -194,7 +234,7 @@ return static function (array $settings): Container {
         // Subscription context — CQRS handlers (B1)
         SubscribeCommandHandler::class => static fn($c) => new SubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
-            $c->get(GitHubServiceInterface::class),
+            $c->get(ReleaseSource::class),
             $c->get(TrackedRepositoryRegistrar::class),
             $c->get(SubscriptionValidator::class),
             $c->get(EventDispatcherInterface::class),
@@ -245,6 +285,8 @@ return static function (array $settings): Container {
                 $c->get(FindSubscriptionByEmailAndRepositoryHandler::class),
             ListSubscriptionsQuery::class => $c->get(ListSubscriptionsHandler::class),
             GetDueForScanQuery::class => $c->get(GetDueForScanHandler::class),
+            FetchLatestReleaseQuery::class => $c->get(FetchLatestReleaseHandler::class),
+            RepositoryExistsQuery::class => $c->get(RepositoryExistsHandler::class),
         ]),
 
         // Notifier
@@ -260,34 +302,6 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class)
         ),
 
-        // GitHub
-        GitHubApiClientInterface::class => static fn($c) => new GitHubApiClient(
-            $c->get(GuzzleClient::class),
-            $settings['github']['token']
-        ),
-        RepositoryExistenceCacheInterface::class => static fn($c) => new GitHubRepositoryCache(
-            $c->get(GitHubCacheInterface::class),
-            $settings['redis']['cache_ttl']
-        ),
-        LatestReleaseCacheInterface::class => static fn($c) => new GitHubReleaseCache(
-            $c->get(GitHubCacheInterface::class),
-            $c->get(ReleaseFactoryInterface::class),
-            $settings['redis']['cache_ttl']
-        ),
-        GitHubServiceInterface::class => static function ($c) use ($settings) {
-            if ($settings['github']['stub']) {
-                return new FakeGitHubService();
-            }
-
-            return new GitHubService(
-                $c->get(GitHubApiClientInterface::class),
-                $c->get(RepositoryExistenceCacheInterface::class),
-                $c->get(LatestReleaseCacheInterface::class),
-                $c->get(ReleaseFactoryInterface::class),
-                $c->get(LoggerInterface::class)
-            );
-        },
-
         // Metrics
         PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
@@ -297,7 +311,7 @@ return static function (array $settings): Container {
 
         // Application services
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
-            $c->get(GitHubServiceInterface::class),
+            $c->get(ReleaseSource::class),
             $c->get(RepositoryStatusReader::class),
             $c->get(LoggerInterface::class)
         ),
