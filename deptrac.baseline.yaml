@@ -1,11 +1,2 @@
 deptrac:
-  skip_violations:
-    App\Service\MetricsService:
-      - App\Metrics\Gauge
-      - App\Metrics\PrometheusFormatter
-      - App\Repository\MetricsRepositoryInterface
-    App\Service\NotificationDispatcher:
-      - App\Repository\NotificationLedgerInterface
-    App\Service\NotifierService:
-      - App\Notifier\MailerInterface
-      - App\Notifier\ReleaseEmailRenderer
+  skip_violations: {  }

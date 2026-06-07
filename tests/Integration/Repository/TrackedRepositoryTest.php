@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Repository;
 
+use App\RepositoryTracking\Repositories\Domain\RepositoryCountPort;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
@@ -16,6 +17,7 @@ final class TrackedRepositoryTest extends IntegrationTestCase
     private ScanProgressWriter $progress;
     private RepositoryStatusReader $statusReader;
     private ScanCandidateSource $candidates;
+    private RepositoryCountPort $counts;
 
     protected function setUp(): void
     {
@@ -24,6 +26,7 @@ final class TrackedRepositoryTest extends IntegrationTestCase
         $this->progress = $this->c->get(ScanProgressWriter::class);
         $this->statusReader = $this->c->get(RepositoryStatusReader::class);
         $this->candidates = $this->c->get(ScanCandidateSource::class);
+        $this->counts = $this->c->get(RepositoryCountPort::class);
     }
 
     public function testEnsureExistsIsIdempotent(): void
@@ -94,6 +97,21 @@ final class TrackedRepositoryTest extends IntegrationTestCase
         $this->registrar->ensureExists($this->repoName());
 
         $this->assertCount(2, $this->candidates->getDueForScan(2));
+    }
+
+    public function testCountAllAndCountWithReleasesReflectTableState(): void
+    {
+        $beforeAll = $this->counts->countAll();
+        $beforeWithReleases = $this->counts->countWithReleases();
+
+        $repoWithRelease = $this->repoName();
+        $repoWithoutRelease = $this->repoName();
+        $this->registrar->ensureExists($repoWithRelease);
+        $this->registrar->ensureExists($repoWithoutRelease);
+        $this->progress->markReleaseSeen($repoWithRelease, 'v1.0.0');
+
+        $this->assertSame($beforeAll + 2, $this->counts->countAll());
+        $this->assertSame($beforeWithReleases + 1, $this->counts->countWithReleases());
     }
 
     private function repoName(): string

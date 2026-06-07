@@ -9,8 +9,8 @@ namespace App\Shared\Domain\Bus\Query;
  *
  * \LogicException because an unbound query is a wiring/programming error — the
  * handler map was assembled incompletely in the composition root — not a runtime
- * input error. Shared-owned with zero coupling to App\Exception\*, keeping the Bus
- * Domain free of outer-layer dependencies. The message names the offending query
+ * input error. Shared-owned with zero coupling to Shared\Infrastructure\Error\*,
+ * keeping the Bus Domain free of outer-layer dependencies. The message names the offending query
  * class to make the failure clear.
  *
  * @psalm-api

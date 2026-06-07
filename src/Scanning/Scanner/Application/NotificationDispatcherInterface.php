@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Scanning\Scanner\Application;
+
+use App\Releases\Sourcing\Domain\Release;
+
+interface NotificationDispatcherInterface
+{
+    /**
+     * Dispatches release notifications to pending subscribers.
+     * Returns true when every attempted delivery succeeded.
+     */
+    public function dispatch(string $repoName, Release $release): bool;
+}

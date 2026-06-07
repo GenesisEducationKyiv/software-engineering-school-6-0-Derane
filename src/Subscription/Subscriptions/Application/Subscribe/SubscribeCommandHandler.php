@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Subscription\Subscriptions\Application\Subscribe;
 
-use App\Exception\RepositoryNotFoundException;
+use App\Shared\Domain\Exception\RepositoryNotFoundException;
 use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\Shared\Domain\Bus\Command\Command;

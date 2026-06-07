@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Subscription\Subscriptions\Infrastructure\Http;
 
-use App\Exception\ValidationException;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\Query;
 use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Shared\Domain\Exception\ValidationException;
 use App\Shared\Domain\ValueObject\Pagination;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;

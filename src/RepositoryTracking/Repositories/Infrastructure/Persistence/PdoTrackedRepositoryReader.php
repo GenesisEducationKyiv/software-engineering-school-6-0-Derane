@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\RepositoryTracking\Repositories\Infrastructure\Persistence;
 
+use App\RepositoryTracking\Repositories\Domain\RepositoryCountPort;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatus;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
@@ -17,7 +18,10 @@ use PDO;
  *
  * @psalm-api
  */
-final readonly class PdoTrackedRepositoryReader implements RepositoryStatusReader, ScanCandidateSource
+final readonly class PdoTrackedRepositoryReader implements
+    RepositoryStatusReader,
+    ScanCandidateSource,
+    RepositoryCountPort
 {
     public function __construct(
         private PDO $pdo,
@@ -34,6 +38,22 @@ final readonly class PdoTrackedRepositoryReader implements RepositoryStatusReade
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row !== false ? $this->statusFactory->fromRow($row) : null;
+    }
+
+    #[\Override]
+    public function countAll(): int
+    {
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM repositories');
+        return $stmt !== false ? (int) $stmt->fetchColumn() : 0;
+    }
+
+    #[\Override]
+    public function countWithReleases(): int
+    {
+        $stmt = $this->pdo->query(
+            "SELECT COUNT(*) FROM repositories WHERE last_seen_tag IS NOT NULL AND last_seen_tag != ''"
+        );
+        return $stmt !== false ? (int) $stmt->fetchColumn() : 0;
     }
 
     #[\Override]

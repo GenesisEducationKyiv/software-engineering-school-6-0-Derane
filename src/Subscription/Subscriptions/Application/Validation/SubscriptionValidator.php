@@ -9,8 +9,8 @@ use App\Validation\RepositoryNameValidator;
 
 /**
  * Injected validation collaborator invoked by SubscribeCommandHandler before the
- * aggregate is built. It throws App\Exception\ValidationException (via the legacy
- * Email/RepositoryName validators) so the 400 / INVALID_ARGUMENT mapping in
+ * aggregate is built. It throws Shared\Domain\Exception\ValidationException (via
+ * the legacy Email/RepositoryName validators) so the 400 / INVALID_ARGUMENT mapping in
  * ExceptionStatusMap is preserved exactly.
  *
  * Lives in the Application layer (it is a use-case input concern), so the handler

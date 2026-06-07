@@ -8,6 +8,7 @@ use App\Shared\Domain\ValueObject\Pagination;
 use App\Subscription\Subscriptions\Domain\SubscriberCollection;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\Subscription;
+use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
 use App\Subscription\Subscriptions\Domain\SubscriptionPage;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactoryInterface;
@@ -21,7 +22,10 @@ use PDO;
  *
  * @psalm-api
  */
-final readonly class PdoSubscriptionRepository implements SubscriptionRepository, SubscriberFinder
+final readonly class PdoSubscriptionRepository implements
+    SubscriptionRepository,
+    SubscriberFinder,
+    SubscriptionCountPort
 {
     public function __construct(
         private PDO $pdo,
@@ -157,6 +161,13 @@ final readonly class PdoSubscriptionRepository implements SubscriptionRepository
             fn(array $row) => $this->subscriberRefFactory->fromRow($row),
             $rows
         ));
+    }
+
+    #[\Override]
+    public function countAll(): int
+    {
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM subscriptions');
+        return $stmt !== false ? (int) $stmt->fetchColumn() : 0;
     }
 
     /**

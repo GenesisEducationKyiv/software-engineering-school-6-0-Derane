@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Grpc;
 
-use App\Exception\ExceptionStatusMap;
-use App\Exception\RepositoryNotFoundException;
-use App\Exception\ValidationException;
 use App\Grpc\ReleaseNotifierService;
-use App\Health\HealthCheckInterface;
+use App\Shared\Domain\Exception\RepositoryNotFoundException;
+use App\Shared\Domain\Exception\ValidationException;
+use App\Shared\Infrastructure\Error\ExceptionStatusMap;
+use App\Shared\Infrastructure\Health\HealthCheckInterface;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandBus;

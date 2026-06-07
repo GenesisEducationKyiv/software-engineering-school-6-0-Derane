@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Grpc;
 
-use App\Exception\ExceptionStatusMap;
-use App\Health\HealthCheckInterface;
+use App\Shared\Infrastructure\Error\ExceptionStatusMap;
+use App\Shared\Infrastructure\Health\HealthCheckInterface;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;

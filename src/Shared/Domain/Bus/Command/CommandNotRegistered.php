@@ -9,10 +9,10 @@ namespace App\Shared\Domain\Bus\Command;
  *
  * \LogicException because an unbound command is a wiring/programming error — the
  * handler map was assembled incompletely in the composition root — not a runtime
- * input error. Shared-owned with zero coupling to App\Exception\* (the
- * transport/HTTP-mapping namespace), keeping the Bus Domain free of outer-layer
- * dependencies. The message names the offending command class to make the failure
- * clear.
+ * input error. Shared-owned with zero coupling to Shared\Infrastructure\Error\*
+ * (the transport/HTTP-mapping namespace), keeping the Bus Domain free of
+ * outer-layer dependencies. The message names the offending command class to make
+ * the failure clear.
  *
  * @psalm-api
  */

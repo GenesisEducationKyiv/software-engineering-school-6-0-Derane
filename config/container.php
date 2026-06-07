@@ -7,7 +7,6 @@ use App\Config\Factory\SmtpConfigFactoryInterface;
 use App\Config\SmtpConfig;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
-use App\Exception\ExceptionStatusMap;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
 use App\Grpc\ReleaseNotifierService;
@@ -28,22 +27,6 @@ use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactoryInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
-use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
-use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
-use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
-use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
-use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
-use App\Health\DatabaseHealthCheck;
-use App\Health\HealthCheckInterface;
-use App\Metrics\PrometheusFormatter;
-use App\Middleware\ApiKeyMiddleware;
-use App\Middleware\ErrorHandlerMiddleware;
-use App\Migration\Migrator;
-use App\Notifier\MailerInterface;
-use App\Notifier\ReleaseEmailRenderer;
-use App\Notifier\SmtpMailer;
-use App\Repository\MetricsRepository;
-use App\Repository\MetricsRepositoryInterface;
 use App\Repository\NotificationLedger;
 use App\Repository\NotificationLedgerInterface;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
@@ -54,28 +37,42 @@ use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseS
 use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseSeenCommandHandler;
 use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommand;
 use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommandHandler;
+use App\RepositoryTracking\Repositories\Domain\RepositoryCountPort;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactory;
+use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryReader;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryWriter;
-use Tests\Support\FakeGitHubService;
-use App\Service\MetricsService;
-use App\Service\MetricsServiceInterface;
-use App\Service\NotificationDispatcher;
-use App\Service\NotificationDispatcherInterface;
-use App\Service\NotifierInterface;
-use App\Service\NotifierService;
-use App\Service\ReleaseDetector;
+use App\Scanning\Scanner\Application\NotificationDispatcher;
+use App\Scanning\Scanner\Application\NotificationDispatcherInterface;
+use App\Scanning\Scanner\Application\NotifierInterface;
+use App\Scanning\Scanner\Application\ReleaseDetector;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
+use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
+use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
+use App\Scanning\Scanner\Infrastructure\Mail\MailerInterface;
+use App\Scanning\Scanner\Infrastructure\Mail\ReleaseEmailRenderer;
+use App\Scanning\Scanner\Infrastructure\Mail\SmtpMailer;
+use App\Scanning\Scanner\Infrastructure\Mail\NotifierService;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;
 use App\Shared\Infrastructure\Bus\InMemoryCommandBus;
 use App\Shared\Infrastructure\Bus\InMemoryQueryBus;
+use App\Shared\Infrastructure\Error\ExceptionStatusMap;
 use App\Shared\Infrastructure\Event\InMemoryEventDispatcher;
 use App\Shared\Infrastructure\Event\ListenerProvider;
+use App\Shared\Infrastructure\Health\DatabaseHealthCheck;
+use App\Shared\Infrastructure\Health\HealthCheckInterface;
+use App\Shared\Infrastructure\Http\ApiKeyMiddleware;
+use App\Shared\Infrastructure\Http\ErrorHandlerMiddleware;
+use App\Shared\Infrastructure\Metrics\MetricsService;
+use App\Shared\Infrastructure\Metrics\MetricsServiceInterface;
+use App\Shared\Infrastructure\Metrics\PrometheusFormatter;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryHandler;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdHandler;
@@ -86,7 +83,9 @@ use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommandHandler;
+use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
+use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactory;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactoryInterface;
@@ -94,7 +93,7 @@ use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactory;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactoryInterface;
 use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
 use App\Subscription\Subscriptions\Infrastructure\Persistence\PdoSubscriptionRepository;
-use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
+use App\Migration\Migrator;
 use App\Validation\EmailValidator;
 use App\Validation\RepositoryNameValidator;
 use DI\Container;
@@ -108,6 +107,7 @@ use Psr\EventDispatcher\ListenerProviderInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
+use Tests\Support\FakeGitHubService;
 
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
@@ -115,6 +115,7 @@ return static function (array $settings): Container {
     $containerBuilder->addDefinitions([
         'settings' => $settings,
 
+        // === Infrastructure: logging, PDO, Redis, HTTP ===
         LoggerInterface::class => static function () {
             $logger = new Logger('app');
             $logger->pushHandler(new StreamHandler('php://stderr'));
@@ -146,7 +147,7 @@ return static function (array $settings): Container {
         GuzzleClient::class => static fn() => new GuzzleClient(),
         MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
 
-        // Releases context (B3) — cache + factory + client + service
+        // === Releases context (B3) — cache + factory + client + service ===
         GitHubCacheInterface::class => static fn($c) => new SafeGitHubCacheDecorator(
             new RedisGitHubCache($c->get(RedisClient::class)),
             $c->get(LoggerInterface::class)
@@ -186,8 +187,7 @@ return static function (array $settings): Container {
             $c->get(ReleaseSource::class)
         ),
 
-        // Domain factories — injected for testability.
-
+        // === Domain factories — injected for testability ===
         SubscriptionFactoryInterface::class => static fn() => new SubscriptionFactory(),
         SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
         RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
@@ -196,7 +196,7 @@ return static function (array $settings): Container {
         SmtpConfigFactoryInterface::class => static fn() => new SmtpConfigFactory(),
         PaginationFactoryInterface::class => static fn() => new PaginationFactory(),
 
-        // Validation
+        // === Legacy.Application: Validation ===
         EmailValidator::class => static fn() => new EmailValidator(),
         RepositoryNameValidator::class => static fn() => new RepositoryNameValidator(),
         SubscriptionValidator::class => static fn($c) => new SubscriptionValidator(
@@ -204,36 +204,41 @@ return static function (array $settings): Container {
             $c->get(RepositoryNameValidator::class)
         ),
 
-        // Repositories
+        // === Repositories / persistence ports ===
         SubscriptionRepository::class => static fn($c) => new PdoSubscriptionRepository(
             $c->get(PDO::class),
             $c->get(SubscriptionFactoryInterface::class),
             $c->get(SubscriberRefFactoryInterface::class)
         ),
         SubscriberFinder::class => static fn($c) => $c->get(SubscriptionRepository::class),
+        // B5: count port aliased to the same PdoSubscriptionRepository instance
+        SubscriptionCountPort::class => static fn($c) => $c->get(SubscriptionRepository::class),
+
         RepositoryStatusReader::class => static fn($c) => new PdoTrackedRepositoryReader(
             $c->get(PDO::class),
             $c->get(RepositoryStatusFactoryInterface::class)
         ),
         ScanCandidateSource::class => static fn($c) => $c->get(RepositoryStatusReader::class),
+        // B5: count port aliased to the same PdoTrackedRepositoryReader instance
+        RepositoryCountPort::class => static fn($c) => $c->get(RepositoryStatusReader::class),
+
         TrackedRepositoryRegistrar::class => static fn($c) => new PdoTrackedRepositoryWriter(
             $c->get(PDO::class)
         ),
         ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
         NotificationLedgerInterface::class => static fn($c) => new NotificationLedger($c->get(PDO::class)),
-        MetricsRepositoryInterface::class => static fn($c) => new MetricsRepository($c->get(PDO::class)),
 
-        // Health + exception mapping
+        // === Shared kernel: health + exception mapping ===
         HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
 
-        // In-process PSR-14 event plane (empty listener map until flows wire in P2–P5)
+        // === In-process PSR-14 event plane ===
         ListenerProviderInterface::class => static fn() => new ListenerProvider([]),
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
             $c->get(ListenerProviderInterface::class)
         ),
 
-        // Subscription context — CQRS handlers (B1)
+        // === Subscription context — CQRS handlers (B1) ===
         SubscribeCommandHandler::class => static fn($c) => new SubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
             $c->get(ReleaseSource::class),
@@ -257,7 +262,7 @@ return static function (array $settings): Container {
             $c->get(SubscriptionRepository::class)
         ),
 
-        // RepositoryTracking context — CQRS handlers (B2)
+        // === RepositoryTracking context — CQRS handlers (B2) ===
         RegisterRepositoryCommandHandler::class => static fn($c) => new RegisterRepositoryCommandHandler(
             $c->get(TrackedRepositoryRegistrar::class)
         ),
@@ -273,7 +278,7 @@ return static function (array $settings): Container {
             $c->get(ScanCandidateSource::class)
         ),
 
-        // In-house CQRS buses (handler maps filled per context across Epic B)
+        // === In-house CQRS buses ===
         CommandBus::class => static fn($c) => new InMemoryCommandBus([
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
@@ -292,7 +297,7 @@ return static function (array $settings): Container {
             RepositoryExistsQuery::class => $c->get(RepositoryExistsHandler::class),
         ]),
 
-        // Notifier
+        // === Scanning context — mail infrastructure (B5) ===
         SmtpConfig::class => static fn($c) => $c->get(SmtpConfigFactoryInterface::class)->fromArray($settings['smtp']),
         ReleaseEmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
         MailerInterface::class => static fn($c) => new SmtpMailer(
@@ -305,14 +310,15 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class)
         ),
 
-        // Metrics
+        // === Shared kernel — metrics (B5 FR2 count-port fix) ===
         PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
-            $c->get(MetricsRepositoryInterface::class),
+            $c->get(SubscriptionCountPort::class),
+            $c->get(RepositoryCountPort::class),
             $c->get(PrometheusFormatter::class)
         ),
 
-        // Application services
+        // === Scanning context — application services (B5) ===
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
             $c->get(ReleaseSource::class),
             $c->get(RepositoryStatusReader::class),
@@ -324,7 +330,7 @@ return static function (array $settings): Container {
             $c->get(NotifierInterface::class)
         ),
 
-        // Scanning context — CQRS handler + CLI runner (B4)
+        // === Scanning context — CQRS handler + CLI runner (B4) ===
         ScanReleasesHandler::class => static fn($c) => new ScanReleasesHandler(
             $c->get(ScanCandidateSource::class),
             $c->get(ScanProgressWriter::class),
@@ -339,7 +345,7 @@ return static function (array $settings): Container {
             $settings['github']['scan_interval']
         ),
 
-        // Boundaries
+        // === HTTP + gRPC boundaries ===
         SubscriptionController::class => static fn($c) => new SubscriptionController(
             $c->get(CommandBus::class),
             $c->get(QueryBus::class),

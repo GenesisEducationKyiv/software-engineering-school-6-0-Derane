@@ -8,17 +8,20 @@ use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\Pagination;
 use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Domain\Subscription;
+use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use Tests\Integration\IntegrationTestCase;
 
 final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
 {
     private SubscriptionRepository $repo;
+    private SubscriptionCountPort $counts;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->repo = $this->c->get(SubscriptionRepository::class);
+        $this->counts = $this->c->get(SubscriptionCountPort::class);
     }
 
     public function testCreatePersistsRow(): void
@@ -151,6 +154,16 @@ final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
         $expected = [(int) $first->id(), (int) $second->id()];
         sort($expected);
         $this->assertSame($expected, $ids);
+    }
+
+    public function testCountAllReturnsTotalSubscriptions(): void
+    {
+        $before = $this->counts->countAll();
+
+        $this->subscribe($this->faker->safeEmail(), $this->repoName());
+        $this->subscribe($this->faker->safeEmail(), $this->repoName());
+
+        $this->assertSame($before + 2, $this->counts->countAll());
     }
 
     private function subscribe(string $email, string $repository): Subscription

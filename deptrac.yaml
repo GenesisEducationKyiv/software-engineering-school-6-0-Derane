@@ -168,6 +168,11 @@ deptrac:
     # ---------------------------------------------------------------------
     - name: Legacy.Domain
       collectors:
+        # B5 drained both src/Domain/ and src/Exception/ (now deleted) — these
+        # collectors match nothing. Kept because deptrac requires >= 1 collector
+        # per layer and Legacy.{Application,Infrastructure} rulesets still grant
+        # this layer; a follow-up can drop Legacy.Domain entirely once nothing
+        # references it.
         - type: directory
           value: src/Domain/.*
         - type: directory
@@ -175,25 +180,15 @@ deptrac:
     - name: Legacy.Application
       collectors:
         - type: directory
-          value: src/Service/.*
-        - type: directory
           value: src/Validation/.*
     - name: Legacy.Infrastructure
       collectors:
         - type: directory
           value: src/Controller/.*
         - type: directory
-          value: src/Middleware/.*
-        - type: directory
           value: src/Grpc/.*
         - type: directory
           value: src/Repository/.*
-        - type: directory
-          value: src/Notifier/.*
-        - type: directory
-          value: src/Metrics/.*
-        - type: directory
-          value: src/Health/.*
         - type: directory
           value: src/Migration/.*
         - type: directory
@@ -209,6 +204,9 @@ deptrac:
     Shared.Infrastructure:
       - Shared.Domain
       - Shared.Application
+      - Subscription.Domain         # B5: ExceptionStatusMap references SubscriptionNotFoundException; MetricsService uses SubscriptionCountPort
+      - Releases.Domain             # B5: ExceptionStatusMap references RateLimitException
+      - RepositoryTracking.Domain   # B5: MetricsService uses RepositoryCountPort
 
     # ===== Subscription
     Subscription.Domain:
@@ -219,15 +217,13 @@ deptrac:
       - Shared.Application
       - Releases.Domain               # B1 grant: repositoryExists() port (GitHubServiceInterface)
       - RepositoryTracking.Domain     # B1 grant: ensureExists() port (TrackedRepositoryRegistrar)
-      - Legacy.Domain                 # B1 transitional: ValidationException/RepositoryNotFoundException (B5 moves them)
-      - Legacy.Application            # B1 transitional: SubscriptionValidator -> App\Validation\* (B5 removes)
+      - Legacy.Application            # B1 transitional: SubscriptionValidator -> App\Validation\* (B5 removes when validators move)
     Subscription.Infrastructure:
       - Subscription.Domain
       - Subscription.Application
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
-      - Legacy.Domain                 # B1 transitional: SubscriptionController throws App\Exception\ValidationException (B5 moves it)
 
     # ===== RepositoryTracking
     RepositoryTracking.Domain:
@@ -263,14 +259,17 @@ deptrac:
     Scanning.Application:
       - Shared.Domain
       - Shared.Application
-      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException; future C2 uses Release
+      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException; NotificationDispatcher uses Release
       - RepositoryTracking.Domain     # B4: ScanReleasesHandler uses ScanCandidateSource + ScanProgressWriter ports
-      - Legacy.Application            # B4 transitional: ReleaseDetector + NotificationDispatcherInterface (B5 moves them into Scanning)
+      - Subscription.Domain           # B5: NotificationDispatcher uses SubscriberFinder (Subscription.Domain port)
+      - Legacy.Infrastructure         # B5 transitional: NotificationLedgerInterface in src/Repository/ until Epic E deletes it
     Scanning.Infrastructure:
       - Scanning.Application          # B4: ScannerCliRunner dispatches ScanReleasesCommand
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
+      - Releases.Domain               # B5: ReleaseEmailRenderer uses Release VO from Releases.Domain
+      - Legacy.Infrastructure         # B5 transitional: SmtpMailer uses SmtpConfig + PHPMailerFactory (src/Config/, src/Factory/)
 
     # ===== Notification\Publishing. In Epic B the listener gains edges to
     # Subscription.Domain (SubscriberFinder) + Releases.Domain (Release); GRANT then.
@@ -339,15 +338,10 @@ deptrac:
     # Domain->Infra and Application->Infra leaks are absorbed by the baseline.
     Legacy.Domain:
       - Shared.Domain
-      - Subscription.Domain           # B1: ExceptionStatusMap (src/Exception) references SubscriptionNotFoundException (B5 moves the map)
-      - Releases.Domain               # B3: ExceptionStatusMap references RateLimitException which moved to Releases.Domain (B5 moves the map)
     Legacy.Application:
       - Legacy.Domain
       - Shared.Domain
       - Shared.Application
-      - Subscription.Domain           # B1: NotificationDispatcher uses SubscriberFinder/SubscriberRef/SubscriberCollection
-      - Releases.Domain               # B3+: ReleaseDetector uses ReleaseSource port (B4 moves ReleaseDetector into Scanning)
-      - RepositoryTracking.Domain     # B2: ReleaseDetector uses RepositoryStatusReader; ScannerService uses ScanCandidateSource/ScanProgressWriter
     Legacy.Infrastructure:
       - Legacy.Domain
       - Legacy.Application
@@ -355,5 +349,3 @@ deptrac:
       - Shared.Application
       - Shared.Infrastructure
       - Subscription.Application       # B1: ReleaseNotifierService news the commands/queries/responses
-      - Subscription.Domain           # B1: ExceptionStatusMap references SubscriptionNotFoundException
-      - Releases.Domain               # B3: ReleaseEmailRenderer/SmtpMailer in src/Notifier/ use Release VO (B5 moves them)

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Validation;
 
-use App\Exception\ValidationException;
+use App\Shared\Domain\Exception\ValidationException;
 use App\Validation\EmailValidator;
 use PHPUnit\Framework\TestCase;
 

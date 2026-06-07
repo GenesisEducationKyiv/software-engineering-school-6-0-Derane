@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Subscription\Subscriptions\Infrastructure\Http;
 
-use App\Exception\ValidationException;
+use App\Shared\Domain\Exception\ValidationException;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;

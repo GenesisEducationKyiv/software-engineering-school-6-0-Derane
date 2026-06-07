@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Subscription\Subscriptions\Application\Subscribe;
 
-use App\Exception\RepositoryNotFoundException;
-use App\Exception\ValidationException;
 use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
+use App\Shared\Domain\Exception\RepositoryNotFoundException;
+use App\Shared\Domain\Exception\ValidationException;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
 use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
