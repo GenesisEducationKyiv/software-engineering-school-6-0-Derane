@@ -6,7 +6,7 @@
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
         tests ci c4-up c4-down c4-logs c4-validate \
         logs-rabbitmq logs-notification-db logs-notification-svc \
-        migrate-notification notification-smoke
+        migrate-notification notification-smoke scanner-smoke
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -59,6 +59,9 @@ migrate-notification: ensure-env ## Run notification-service migrations inside D
 
 notification-smoke: ensure-env ## Publish a notification smoke message and wait for MailHog delivery
 	$(COMPOSE) run --rm --no-deps notification-svc php bin/smoke.php
+
+scanner-smoke: ensure-env ## Seed a smoke release, run one scan cycle, and wait for MailHog delivery
+	$(COMPOSE) run --rm --no-deps app php bin/scanner-smoke.php
 
 test: install ## Run PHPUnit Unit suite inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Unit --testdox

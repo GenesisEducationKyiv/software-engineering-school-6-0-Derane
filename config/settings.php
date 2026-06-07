@@ -27,6 +27,12 @@ return [
         'scan_interval' => (int) ($_ENV['GITHUB_SCAN_INTERVAL'] ?? 300),
         'scan_batch_size' => (int) ($_ENV['GITHUB_SCAN_BATCH_SIZE'] ?? 100),
         'stub' => filter_var($_ENV['GITHUB_STUB'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        'smoke' => filter_var($_ENV['GITHUB_SMOKE'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        'smoke_repository' => $_ENV['GITHUB_SMOKE_REPOSITORY'] ?? 'smoke/repo',
+        'smoke_tag_name' => $_ENV['GITHUB_SMOKE_TAG_NAME'] ?? 'v0-smoke',
+        'smoke_name' => $_ENV['GITHUB_SMOKE_NAME'] ?? 'Smoke Release',
+        'smoke_html_url' => $_ENV['GITHUB_SMOKE_HTML_URL'] ?? 'https://example.test/releases/smoke',
+        'smoke_body' => $_ENV['GITHUB_SMOKE_BODY'] ?? 'Smoke release body',
     ],
     'smtp' => [
         'host' => $_ENV['SMTP_HOST'] ?? 'localhost',

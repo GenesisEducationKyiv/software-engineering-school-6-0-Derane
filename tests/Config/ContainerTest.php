@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Config;
 
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
-use App\Notification\Publishing\Infrastructure\InProcessNullReleaseNotificationPublisher;
+use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublisher;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
@@ -31,24 +31,27 @@ final class ContainerTest extends TestCase
     }
 
     /**
-     * C2: guards the binding-graph wiring PHP-DI errors are runtime-only about
-     * (neither Psalm nor PHPCS catch a "doesn't actually resolve" mistake).
-     * ReleaseNotificationPublisher is — for now — bound to the temporary stub
-     * (InProcessNullReleaseNotificationPublisher), since C1's port has zero
-     * production implementation and C5 hasn't introduced the RabbitMQ adapter
-     * yet (see the stub's docblock). Resolved directly here — rather than via
-     * WhenNewReleaseDetectedThenPublishReleaseEmails::class, whose dependency
-     * chain reaches PdoSubscriptionRepository -> PDO and therefore needs the
-     * docker stack — to keep this assertion in the env-independent Unit suite.
+     * E1: cutover — verifies the application has correctly abandoned the temporary
+     * stub adapter and bound the RabbitMQ publisher as the real notification path.
      */
-    public function testReleaseNotificationPublisherResolvesToTheTemporaryStubAdapter(): void
+    public function testReleaseNotificationPublisherResolvesToTheRabbitAdapter(): void
     {
         $settings = require dirname(__DIR__, 2) . '/config/settings.php';
         $containerFactory = require dirname(__DIR__, 2) . '/config/container.php';
         $container = $containerFactory($settings);
 
+        // We stub the RabbitConnection here because instantiating it through DI
+        // triggers the real AMQPStreamConnection which would break this unit test.
+        $channel = $this->createMock(\PhpAmqpLib\Channel\AMQPChannel::class);
+        $channel->method('exchange_declare')->willReturn(null);
+        $channel->method('queue_declare')->willReturn(null);
+        $channel->method('queue_bind')->willReturn(null);
+
+        $connection = new \App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection($channel);
+        $container->set(\App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection::class, $connection);
+
         $publisher = $container->get(ReleaseNotificationPublisher::class);
 
-        self::assertInstanceOf(InProcessNullReleaseNotificationPublisher::class, $publisher);
+        self::assertInstanceOf(RabbitReleaseNotificationPublisher::class, $publisher);
     }
 }

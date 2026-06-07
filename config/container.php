@@ -14,7 +14,6 @@ use App\Notification\Publishing\Domain\NewReleaseDetected;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactoryInterface;
-use App\Notification\Publishing\Infrastructure\InProcessNullReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
 use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
@@ -36,6 +35,7 @@ use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactoryInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
+use App\Releases\Sourcing\Infrastructure\SmokeGitHubReleaseSource;
 use App\Repository\NotificationLedger;
 use App\Repository\NotificationLedgerInterface;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
@@ -55,8 +55,6 @@ use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusF
 use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryReader;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryWriter;
-use App\Scanning\Scanner\Application\NotificationDispatcher;
-use App\Scanning\Scanner\Application\NotificationDispatcherInterface;
 use App\Scanning\Scanner\Application\NotifierInterface;
 use App\Scanning\Scanner\Application\ReleaseDetector;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
@@ -208,6 +206,20 @@ return static function (array $settings): Container {
             $settings['redis']['cache_ttl']
         ),
         ReleaseSource::class => static function ($c) use ($settings) {
+            if ($settings['github']['smoke']) {
+                $publishedAt = $_ENV['GITHUB_SMOKE_PUBLISHED_AT']
+                    ?? (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339);
+
+                return new SmokeGitHubReleaseSource([
+                    'repository' => $settings['github']['smoke_repository'],
+                    'tag_name' => $settings['github']['smoke_tag_name'],
+                    'name' => $settings['github']['smoke_name'],
+                    'html_url' => $settings['github']['smoke_html_url'],
+                    'published_at' => $publishedAt,
+                    'body' => $settings['github']['smoke_body'],
+                ]);
+            }
+
             if ($settings['github']['stub']) {
                 return new FakeGitHubService();
             }
@@ -372,14 +384,7 @@ return static function (array $settings): Container {
         // — pure UUID-generation + VO assembly — follows the *FactoryInterface
         // -> *Factory aliasing convention used for Subscription/RepositoryTracking.
         SendReleaseEmailFactoryInterface::class => static fn() => new SendReleaseEmailFactory(),
-        // TEMPORARY: stub adapter — see InProcessNullReleaseNotificationPublisher's
-        // docblock. C5 replaces this binding with RabbitReleaseNotificationPublisher
-        // and deletes the stub; the in-process adapter stays the DI default until
-        // then so runtime behaviour is preserved (sprint-plan.md "Epic C: Seam +
-        // infra only").
-        ReleaseNotificationPublisher::class => static fn($c) => new InProcessNullReleaseNotificationPublisher(
-            $c->get(LoggerInterface::class)
-        ),
+        ReleaseNotificationPublisher::class => static fn($c) => $c->get(RabbitReleaseNotificationPublisher::class),
         WhenNewReleaseDetectedThenPublishReleaseEmails::class =>
             static fn($c) => new WhenNewReleaseDetectedThenPublishReleaseEmails(
                 $c->get(SubscriberFinder::class),
@@ -393,18 +398,12 @@ return static function (array $settings): Container {
             $c->get(RepositoryStatusReader::class),
             $c->get(LoggerInterface::class)
         ),
-        NotificationDispatcherInterface::class => static fn($c) => new NotificationDispatcher(
-            $c->get(SubscriberFinder::class),
-            $c->get(NotificationLedgerInterface::class),
-            $c->get(NotifierInterface::class)
-        ),
 
         // === Scanning context — CQRS handler + CLI runner (B4) ===
         ScanReleasesHandler::class => static fn($c) => new ScanReleasesHandler(
             $c->get(ScanCandidateSource::class),
             $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
-            $c->get(NotificationDispatcherInterface::class),
             $c->get(EventDispatcherInterface::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
