@@ -1,0 +1,27 @@
+deptrac:
+  paths:
+    - ./src
+
+  layers:
+    - name: Notification.Domain
+      collectors:
+        - type: directory
+          value: src/Sending/Domain/.*
+
+    - name: Notification.Application
+      collectors:
+        - type: directory
+          value: src/Sending/Application/.*
+
+    - name: Notification.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Sending/Infrastructure/.*
+
+  ruleset:
+    Notification.Domain: []
+    Notification.Application:
+      - Notification.Domain
+    Notification.Infrastructure:
+      - Notification.Domain
+      - Notification.Application
