@@ -16,6 +16,9 @@ use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactoryInterface;
 use App\Notification\Publishing\Infrastructure\InProcessNullReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
+use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublisher;
+use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublisher;
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseHandler;
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseQuery;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsHandler;
@@ -172,6 +175,14 @@ return static function (array $settings): Container {
             );
             return new RabbitConnection($connection->channel());
         },
+        RabbitPublisher::class => static fn($c) => new RabbitPublisher(
+            $c->get(RabbitConnection::class),
+        ),
+        SendReleaseEmailSerializer::class => static fn() => new SendReleaseEmailSerializer(),
+        RabbitReleaseNotificationPublisher::class => static fn($c) => new RabbitReleaseNotificationPublisher(
+            $c->get(RabbitPublisher::class),
+            $c->get(SendReleaseEmailSerializer::class),
+        ),
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
