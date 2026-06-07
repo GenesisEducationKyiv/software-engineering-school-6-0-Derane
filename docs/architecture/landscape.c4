@@ -17,25 +17,16 @@ model {
         }
     }
 
-    smtp = externalSystem "SMTP Server" {
-        description "
-            Outbound email gateway used to deliver
-            release notifications to subscribers.
-            In production: external SMTP relay.
-            In dev/staging: Mailpit/MailHog.
-        "
-    }
-
     notifier = system "GitHub Release Notifier" {
         description "
-            Lets users subscribe to GitHub repositories
-            and emails them whenever a new release is published.
-            Exposes HTTP and gRPC APIs.
+            Monolith HTTP/gRPC/scanner plus a separate
+            notification-delivery service. Subscriptions are
+            managed in the monolith; delivery happens
+            asynchronously through RabbitMQ.
         "
     }
 
     user -> notifier "Subscribes to repositories, manages subscriptions" "HTTPS / gRPC"
-    notifier -> github "Polls release metadata" "HTTPS / REST"
-    notifier -> smtp "Sends notification emails" "SMTP"
+    notifier -> github "Validates repositories and polls releases" "HTTPS / REST"
     notifier -> user "Delivers release notifications" "Email"
 }
