@@ -1,0 +1,132 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Shared\Infrastructure\Messaging\Rabbit;
+
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublishFailedException;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublisher;
+use PhpAmqpLib\Channel\AMQPChannel;
+use PhpAmqpLib\Exception\AMQPTimeoutException;
+use PhpAmqpLib\Message\AMQPMessage;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * AC3: `RabbitPublisher` puts the channel into confirm mode before any
+ * publish, returns normally only on a broker ack, and raises
+ * {@see RabbitPublishFailedException} on a broker nack or confirm-wait
+ * timeout — proven against a mocked `AMQPChannel` (no live broker).
+ */
+final class RabbitPublisherTest extends TestCase
+{
+    public function testEnablesConfirmModeAndRegistersAckNackHandlersOnConstruction(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $channel->expects(self::once())->method('confirm_select');
+        $channel->expects(self::once())->method('set_ack_handler');
+        $channel->expects(self::once())->method('set_nack_handler');
+
+        new RabbitPublisher($this->connectionWrapping($channel));
+    }
+
+    public function testReturnsNormallyWhenTheBrokerAcksTheMessage(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $ackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(function (callable $cb) use (&$ackHandler): void {
+            $ackHandler = $cb;
+        });
+        $channel->method('set_nack_handler')->willReturnCallback(static fn () => null);
+
+        $publishedMessage = null;
+        $channel->expects(self::once())
+            ->method('basic_publish')
+            ->willReturnCallback(function (AMQPMessage $message) use (&$publishedMessage): void {
+                $publishedMessage = $message;
+            });
+
+        // Simulate the broker resolving the pending confirm with an ack —
+        // wait_for_pending_acks invokes our registered ack handler synchronously.
+        $channel->expects(self::once())
+            ->method('wait_for_pending_acks')
+            ->willReturnCallback(function () use (&$ackHandler, &$publishedMessage): void {
+                self::assertNotNull($ackHandler);
+                self::assertNotNull($publishedMessage);
+                ($ackHandler)($publishedMessage);
+            });
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        // Returns normally — no exception.
+        $publisher->publish('notifications', 'release.email', '{"v":1}');
+
+        self::assertNotNull($publishedMessage);
+        self::assertSame('{"v":1}', $publishedMessage->getBody());
+    }
+
+    public function testRaisesRabbitPublishFailedExceptionWhenTheBrokerNacksTheMessage(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $nackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(static fn () => null);
+        $channel->method('set_nack_handler')->willReturnCallback(function (callable $cb) use (&$nackHandler): void {
+            $nackHandler = $cb;
+        });
+
+        $publishedMessage = null;
+        $channel->method('basic_publish')->willReturnCallback(
+            function (AMQPMessage $message) use (&$publishedMessage): void {
+                $publishedMessage = $message;
+            }
+        );
+
+        $channel->method('wait_for_pending_acks')->willReturnCallback(
+            function () use (&$nackHandler, &$publishedMessage): void {
+                ($nackHandler)($publishedMessage);
+            }
+        );
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        $this->expectException(RabbitPublishFailedException::class);
+        $this->expectExceptionMessage('negatively acknowledged (nack)');
+
+        $publisher->publish('notifications', 'release.email', '{"v":1}');
+    }
+
+    public function testRaisesRabbitPublishFailedExceptionOnConfirmWaitTimeout(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $channel->method('set_ack_handler')->willReturnCallback(static fn () => null);
+        $channel->method('set_nack_handler')->willReturnCallback(static fn () => null);
+        $channel->method('basic_publish')->willReturnCallback(static fn () => null);
+        $channel->method('wait_for_pending_acks')->willThrowException(new AMQPTimeoutException('timed out'));
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel), 2.5);
+
+        $this->expectException(RabbitPublishFailedException::class);
+        $this->expectExceptionMessage('Timed out after 2.5s');
+
+        $publisher->publish('notifications', 'release.email', '{"v":1}');
+    }
+
+    /**
+     * Builds a `RabbitConnection` wrapping `$channel` without exercising the
+     * full topology assertion's exact arguments (covered by
+     * `RabbitConnectionTest`) — here it just needs to hand `$channel` back
+     * via `channel()`.
+     */
+    private function connectionWrapping(AMQPChannel $channel): RabbitConnection
+    {
+        $channel->method('exchange_declare')->willReturn(null);
+        $channel->method('queue_declare')->willReturn(null);
+        $channel->method('queue_bind')->willReturn(null);
+
+        return new RabbitConnection($channel);
+    }
+}

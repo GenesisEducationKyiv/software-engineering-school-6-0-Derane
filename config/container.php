@@ -76,6 +76,7 @@ use App\Shared\Infrastructure\Health\DatabaseHealthCheck;
 use App\Shared\Infrastructure\Health\HealthCheckInterface;
 use App\Shared\Infrastructure\Http\ApiKeyMiddleware;
 use App\Shared\Infrastructure\Http\ErrorHandlerMiddleware;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Metrics\MetricsService;
 use App\Shared\Infrastructure\Metrics\MetricsServiceInterface;
 use App\Shared\Infrastructure\Metrics\PrometheusFormatter;
@@ -107,6 +108,7 @@ use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
+use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Predis\Client as RedisClient;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\EventDispatcher\ListenerProviderInterface;
@@ -147,6 +149,28 @@ return static function (array $settings): Container {
                 'host' => $settings['redis']['host'],
                 'port' => $settings['redis']['port'],
             ]);
+        },
+
+        // === Messaging: RabbitMQ (C4 — shared transport seam, no callers yet) ===
+        // Concrete-class DI key (Decision 4): there is no *Interface to bind to —
+        // RabbitConnection/RabbitPublisher/RabbitConsumer ARE the lowest-level
+        // adapters, mirroring the PDO::class/RedisClient::class precedent for
+        // "infrastructure connection objects" above. The AMQPStreamConnection is
+        // built here (the only place that opens a real socket) from the
+        // 'rabbitmq' settings group, using its dedicated host/port/user/password/
+        // vhost constructor arguments — never an assembled connection-URI string,
+        // which is what avoids any RABBITMQ_VHOST=/ URL-encoding concern. Its
+        // channel is then handed to RabbitConnection, which idempotently asserts
+        // the full AR-MQ1 topology exactly once per process.
+        RabbitConnection::class => static function () use ($settings) {
+            $connection = new AMQPStreamConnection(
+                $settings['rabbitmq']['host'],
+                $settings['rabbitmq']['port'],
+                $settings['rabbitmq']['user'],
+                $settings['rabbitmq']['password'],
+                $settings['rabbitmq']['vhost']
+            );
+            return new RabbitConnection($connection->channel());
         },
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),

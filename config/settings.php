@@ -15,6 +15,13 @@ return [
         'port' => (int) ($_ENV['REDIS_PORT'] ?? 6379),
         'cache_ttl' => (int) ($_ENV['REDIS_CACHE_TTL'] ?? 600),
     ],
+    'rabbitmq' => [
+        'host' => $_ENV['RABBITMQ_HOST'] ?? 'rabbitmq',
+        'port' => (int) ($_ENV['RABBITMQ_PORT'] ?? 5672),
+        'user' => $_ENV['RABBITMQ_USER'] ?? 'guest',
+        'password' => $_ENV['RABBITMQ_PASSWORD'] ?? 'guest',
+        'vhost' => $_ENV['RABBITMQ_VHOST'] ?? '/',
+    ],
     'github' => [
         'token' => $_ENV['GITHUB_TOKEN'] ?? '',
         'scan_interval' => (int) ($_ENV['GITHUB_SCAN_INTERVAL'] ?? 300),
