@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Scanning\Scanner\Application\ScanReleases;
 
+use App\Notification\Publishing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\RateLimitException;
 use App\Releases\Sourcing\Domain\Release;
 use App\Releases\Sourcing\Domain\ReleaseSource;
@@ -17,11 +18,13 @@ use App\Scanning\Scanner\Application\NotifierInterface;
 use App\Scanning\Scanner\Application\ReleaseDetector;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Domain\SubscriberCollection;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\SubscriberRef;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\NullLogger;
 
 final class ScanReleasesHandlerTest extends TestCase
@@ -33,6 +36,11 @@ final class ScanReleasesHandlerTest extends TestCase
     private NotificationLedgerInterface&MockObject $ledger;
     private ReleaseSource&MockObject $gitHub;
     private NotifierInterface&MockObject $notifier;
+    /** @var list<object> */
+    private array $sequence = [];
+    /** @var list<NewReleaseDetected> */
+    private array $dispatchedEvents = [];
+    private EventDispatcherInterface $eventDispatcher;
     private ScanReleasesHandler $handler;
 
     protected function setUp(): void
@@ -44,12 +52,52 @@ final class ScanReleasesHandlerTest extends TestCase
         $this->ledger = $this->createMock(NotificationLedgerInterface::class);
         $this->gitHub = $this->createMock(ReleaseSource::class);
         $this->notifier = $this->createMock(NotifierInterface::class);
+        $this->sequence = [];
+        $this->dispatchedEvents = [];
 
-        $this->handler = new ScanReleasesHandler(
+        $this->eventDispatcher = $this->recordingEventDispatcher();
+
+        $this->handler = $this->buildHandler($this->eventDispatcher);
+    }
+
+    /**
+     * Recording test double mirroring SubscribeCommandHandlerTest's anonymous
+     * EventDispatcherInterface (appends dispatched events to $this->dispatchedEvents)
+     * — extended here to also push a sequence marker into $this->sequence each
+     * time dispatch() runs, so call-ordering relative to markReleaseSeen (which
+     * pushes its own marker via willReturnCallback on $this->progress, see
+     * below) can be asserted without introducing a new ordering idiom.
+     */
+    private function recordingEventDispatcher(): EventDispatcherInterface
+    {
+        return new class ($this->dispatchedEvents, $this->sequence) implements EventDispatcherInterface {
+            /**
+             * @param list<object> $eventSink
+             * @param list<object> $sequenceSink
+             */
+            public function __construct(private array &$eventSink, private array &$sequenceSink)
+            {
+            }
+
+            #[\Override]
+            public function dispatch(object $event): object
+            {
+                $this->eventSink[] = $event;
+                $this->sequenceSink[] = $event;
+
+                return $event;
+            }
+        };
+    }
+
+    private function buildHandler(EventDispatcherInterface $eventDispatcher): ScanReleasesHandler
+    {
+        return new ScanReleasesHandler(
             $this->candidates,
             $this->progress,
             new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
             new NotificationDispatcher($this->subscribers, $this->ledger, $this->notifier),
+            $eventDispatcher,
             new NullLogger()
         );
     }
@@ -331,5 +379,104 @@ final class ScanReleasesHandlerTest extends TestCase
             ->with('golang/go', 'v3.0.0');
 
         $this->handler->__invoke(new ScanReleasesCommand());
+    }
+
+    public function testDispatchesNewReleaseDetectedExactlyOnceBeforeMarkingTheReleaseSeen(): void
+    {
+        $release = $this->release('v1.22.0', 'Go 1.22');
+
+        $this->candidates->expects($this->once())
+            ->method('getDueForScan')
+            ->with(100)
+            ->willReturn(['golang/go']);
+
+        $this->gitHub->expects($this->once())
+            ->method('getLatestRelease')
+            ->with('golang/go')
+            ->willReturn($release);
+
+        $this->statusReader->expects($this->once())
+            ->method('getStatus')
+            ->with('golang/go')
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.21.0', null));
+
+        $this->subscribers->expects($this->once())
+            ->method('findSubscribersByRepository')
+            ->willReturn(new SubscriberCollection([new SubscriberRef(10, 'user@example.com')]));
+
+        $this->ledger->method('hasSuccessfulNotification')->willReturn(false);
+        $this->notifier->method('notifyReleaseAvailable')->willReturn(true);
+
+        // Record a sequence marker each time markReleaseSeen runs, into the
+        // SAME $sequence array the recording event-dispatcher pushes into —
+        // the relative order of the two markers proves NewReleaseDetected was
+        // dispatched strictly BEFORE the marker advanced (AC2/AR-FLOW2).
+        $this->progress->expects($this->once())
+            ->method('markReleaseSeen')
+            ->with('golang/go', 'v1.22.0')
+            ->willReturnCallback(function () {
+                $this->sequence[] = new \stdClass();
+            });
+
+        $this->handler->__invoke(new ScanReleasesCommand());
+
+        self::assertCount(1, $this->dispatchedEvents);
+        $event = $this->dispatchedEvents[0];
+        self::assertInstanceOf(NewReleaseDetected::class, $event);
+        self::assertTrue($event->repository->equals(new RepositoryName('golang/go')));
+        self::assertSame($release, $event->release);
+
+        self::assertCount(2, $this->sequence, 'expected one NewReleaseDetected dispatch and one markReleaseSeen call');
+        self::assertInstanceOf(NewReleaseDetected::class, $this->sequence[0]);
+        self::assertInstanceOf(\stdClass::class, $this->sequence[1]);
+    }
+
+    public function testDoesNotMarkTheReleaseSeenWhenTheNewReleaseDetectedDispatchThrows(): void
+    {
+        $release = $this->release('v1.22.0', 'Go 1.22');
+
+        $this->candidates->expects($this->once())
+            ->method('getDueForScan')
+            ->with(100)
+            ->willReturn(['golang/go']);
+
+        $this->gitHub->expects($this->once())
+            ->method('getLatestRelease')
+            ->with('golang/go')
+            ->willReturn($release);
+
+        $this->statusReader->expects($this->once())
+            ->method('getStatus')
+            ->with('golang/go')
+            ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.21.0', null));
+
+        // A throwing dispatcher mirrors WhenNewReleaseDetectedThenPublishReleaseEmails
+        // letting a publish() failure propagate uncaught — the load-bearing
+        // outbox-free guarantee (AC4): the exception must reach __invoke()'s
+        // per-repository catch (\Exception $e) (logged as "Scan error", loop
+        // continues) WITHOUT markReleaseSeen ever being called.
+        $throwingDispatcher = new class implements EventDispatcherInterface {
+            #[\Override]
+            public function dispatch(object $event): object
+            {
+                throw new \RuntimeException('publish failed (simulated)');
+            }
+        };
+
+        $handler = $this->buildHandler($throwingDispatcher);
+
+        // The legacy SMTP path (NotificationDispatcher -> SubscriberFinder ->
+        // ... -> markReleaseSeen gating) must never even be reached: the new
+        // event dispatch — which now runs FIRST — already aborted the repo's
+        // checkRepository() call via the propagated exception.
+        $this->subscribers->expects($this->never())->method('findSubscribersByRepository');
+        $this->notifier->expects($this->never())->method('notifyReleaseAvailable');
+        $this->progress->expects($this->never())->method('markReleaseSeen');
+        $this->progress->expects($this->never())->method('markChecked');
+
+        // __invoke()'s existing per-repo catch (\Exception $e) swallows the
+        // exception (logs "Scan error", continue) — so the handler completes
+        // normally rather than throwing out of __invoke().
+        $handler->__invoke(new ScanReleasesCommand());
     }
 }

@@ -10,6 +10,12 @@ use App\Controller\MetricsController;
 use App\Factory\MailerFactoryInterface;
 use App\Factory\PHPMailerFactory;
 use App\Grpc\ReleaseNotifierService;
+use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
+use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
+use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactoryInterface;
+use App\Notification\Publishing\Infrastructure\InProcessNullReleaseNotificationPublisher;
+use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseHandler;
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseQuery;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsHandler;
@@ -233,7 +239,14 @@ return static function (array $settings): Container {
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
 
         // === In-process PSR-14 event plane ===
-        ListenerProviderInterface::class => static fn() => new ListenerProvider([]),
+        // NewReleaseDetected (C2): the first concrete listener registration —
+        // map built as a plain array literal, mirroring the bus handler-map
+        // convention below (InMemoryCommandBus/InMemoryQueryBus).
+        ListenerProviderInterface::class => static fn($c) => new ListenerProvider([
+            NewReleaseDetected::class => [
+                $c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class),
+            ],
+        ]),
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
             $c->get(ListenerProviderInterface::class)
         ),
@@ -318,6 +331,27 @@ return static function (array $settings): Container {
             $c->get(PrometheusFormatter::class)
         ),
 
+        // === Notification\Publishing context — NewReleaseDetected wiring (C2) ===
+        // SendReleaseEmailFactoryInterface: C1 deliberately left it unbound
+        // ("nothing calls it yet"); C2 is its first caller. No constructor deps
+        // — pure UUID-generation + VO assembly — follows the *FactoryInterface
+        // -> *Factory aliasing convention used for Subscription/RepositoryTracking.
+        SendReleaseEmailFactoryInterface::class => static fn() => new SendReleaseEmailFactory(),
+        // TEMPORARY: stub adapter — see InProcessNullReleaseNotificationPublisher's
+        // docblock. C5 replaces this binding with RabbitReleaseNotificationPublisher
+        // and deletes the stub; the in-process adapter stays the DI default until
+        // then so runtime behaviour is preserved (sprint-plan.md "Epic C: Seam +
+        // infra only").
+        ReleaseNotificationPublisher::class => static fn($c) => new InProcessNullReleaseNotificationPublisher(
+            $c->get(LoggerInterface::class)
+        ),
+        WhenNewReleaseDetectedThenPublishReleaseEmails::class =>
+            static fn($c) => new WhenNewReleaseDetectedThenPublishReleaseEmails(
+                $c->get(SubscriberFinder::class),
+                $c->get(SendReleaseEmailFactoryInterface::class),
+                $c->get(ReleaseNotificationPublisher::class)
+            ),
+
         // === Scanning context — application services (B5) ===
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
             $c->get(ReleaseSource::class),
@@ -336,6 +370,7 @@ return static function (array $settings): Container {
             $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
             $c->get(NotificationDispatcherInterface::class),
+            $c->get(EventDispatcherInterface::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
         ),
