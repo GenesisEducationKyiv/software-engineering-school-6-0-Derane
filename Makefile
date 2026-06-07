@@ -6,7 +6,7 @@
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
         tests ci c4-up c4-down c4-logs c4-validate \
         logs-rabbitmq logs-notification-db logs-notification-svc \
-        migrate-notification notification-smoke scanner-smoke \
+        migrate-notification notification-smoke scanner-smoke resilience-proof \
         notification-integration-up notification-integration-run notification-integration-down notification-integration
 
 HOST_UID := $(shell id -u)
@@ -63,6 +63,23 @@ notification-smoke: ensure-env ## Publish a notification smoke message and wait 
 
 scanner-smoke: ensure-env ## Seed a smoke release, run one scan cycle, and wait for MailHog delivery
 	$(COMPOSE) run --rm --no-deps app php bin/scanner-smoke.php
+
+# E3 (AC5): a live, host-orchestrated proof that the monolith's REST/gRPC
+# subscription surface keeps serving while RabbitMQ and/or notification-svc
+# are really stopped, that a broker-down scan fails its publish + leaves the
+# marker un-advanced (AR-FLOW2 — re-detected next cycle) without aborting the
+# cycle or touching REST/gRPC, and that a service-down scan still buffers its
+# messages durably in the broker and gets them delivered once the service
+# restarts (bounded, deterministic MailHog poll). This MUST run on the host
+# (not inside a container) because it needs `docker compose stop`/`up -d`
+# against sibling containers mid-proof — something an in-container PHPUnit
+# process cannot safely do to its own host's compose stack (see
+# bin/resilience-proof.sh's header docblock / the story's finding §6). It
+# brings up whichever parts of the full stack (app/scanner/grpc/postgres/redis
+# alongside notification-svc/notification-db/rabbitmq/mailhog) are not already
+# running, and restores the stack to its pre-existing state on exit.
+resilience-proof: ensure-env ## Run the live resilience proof (REST/gRPC liveness + durable buffering) against rabbitmq/notification-svc outages
+	./bin/resilience-proof.sh
 
 # E2 (AC-4): the notification service's first tests/Integration suite needs real
 # notification-db + rabbitmq + mailhog, but NOT the persistent notification-svc

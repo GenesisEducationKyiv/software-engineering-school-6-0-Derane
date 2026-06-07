@@ -9,6 +9,7 @@ use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublishe
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\ListenerProviderInterface;
 use Psr\Log\LoggerInterface;
 
 final class ContainerTest extends TestCase
@@ -53,5 +54,18 @@ final class ContainerTest extends TestCase
         $publisher = $container->get(ReleaseNotificationPublisher::class);
 
         self::assertInstanceOf(RabbitReleaseNotificationPublisher::class, $publisher);
+    }
+
+    public function testListenerProviderResolutionDoesNotTouchRabbitUntilAnEventIsDispatched(): void
+    {
+        $settings = require dirname(__DIR__, 2) . '/config/settings.php';
+        $settings['rabbitmq']['host'] = 'nonexistent.invalid';
+
+        $containerFactory = require dirname(__DIR__, 2) . '/config/container.php';
+        $container = $containerFactory($settings);
+
+        $provider = $container->get(ListenerProviderInterface::class);
+
+        self::assertInstanceOf(ListenerProviderInterface::class, $provider);
     }
 }

@@ -286,12 +286,17 @@ return static function (array $settings): Container {
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
 
         // === In-process PSR-14 event plane ===
-        // NewReleaseDetected (C2): the first concrete listener registration —
-        // map built as a plain array literal, mirroring the bus handler-map
-        // convention below (InMemoryCommandBus/InMemoryQueryBus).
+        // NewReleaseDetected (C2/E3): keep the listener callable LAZY. The
+        // Rabbit publisher must not be resolved while wiring unrelated
+        // HTTP/gRPC command paths such as subscription management; it should be
+        // touched only when NewReleaseDetected is actually dispatched during a
+        // scan cycle.
         ListenerProviderInterface::class => static fn($c) => new ListenerProvider([
             NewReleaseDetected::class => [
-                $c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class),
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class);
+                    $listener($event);
+                },
             ],
         ]),
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(

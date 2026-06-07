@@ -1,0 +1,15 @@
+name: Resilience Proof
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  resilience-proof:
+    name: Live resilience proof (monolith serves while RabbitMQ / notification-svc are down)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the live resilience proof (E3/AC5)
+        run: make resilience-proof

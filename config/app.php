@@ -5,9 +5,9 @@ declare(strict_types=1);
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Migration\Migrator;
+use App\Shared\Infrastructure\Http\ApiKeyMiddleware;
+use App\Shared\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
-use App\Middleware\ApiKeyMiddleware;
-use App\Middleware\ErrorHandlerMiddleware;
 use Slim\Factory\AppFactory;
 
 require_once __DIR__ . '/../vendor/autoload.php';
