@@ -104,6 +104,28 @@ services:
       timeout: 5s
       retries: 5
 
+  notification-svc:
+    build:
+      context: ./apps/notification
+      target: base
+    env_file:
+      - .env
+    environment:
+      NOTIFICATION_DB_HOST: notification-db
+      NOTIFICATION_DB_PORT: 5432
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      notification-db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   pgdata:
   rabbitmq_data:
