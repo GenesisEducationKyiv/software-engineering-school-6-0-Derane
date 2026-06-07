@@ -48,10 +48,15 @@ final class MigratorTest extends IntegrationTestCase
     public function testExpectedTablesExist(): void
     {
         $pdo = $this->c->get(PDO::class);
-        foreach (['subscriptions', 'repositories', 'release_notifications'] as $table) {
+        foreach (['subscriptions', 'repositories'] as $table) {
             $exists = $pdo->query("SELECT to_regclass('public.{$table}') IS NOT NULL")->fetchColumn();
             $this->assertTrue((bool) $exists, "Table {$table} should exist");
         }
+
+        $legacyTableExists = $pdo->query(
+            "SELECT to_regclass('public.release_notifications') IS NOT NULL"
+        )->fetchColumn();
+        $this->assertFalse((bool) $legacyTableExists, 'Legacy release_notifications table should be absent');
     }
 
     /**
@@ -62,9 +67,6 @@ final class MigratorTest extends IntegrationTestCase
         return [
             'subscriptions(email, repository)' => [
                 ['table' => 'subscriptions', 'columns' => ['email', 'repository']],
-            ],
-            'release_notifications(subscription_id, repository, tag_name)' => [
-                ['table' => 'release_notifications', 'columns' => ['subscription_id', 'repository', 'tag_name']],
             ],
         ];
     }
@@ -99,30 +101,6 @@ final class MigratorTest extends IntegrationTestCase
                 $spec['table'],
                 implode(', ', $spec['columns'])
             )
-        );
-    }
-
-    public function testReleaseNotificationsCascadeOnSubscriptionDelete(): void
-    {
-        $pdo = $this->c->get(PDO::class);
-
-        $stmt = $pdo->query(
-            "SELECT c.confdeltype
-               FROM pg_constraint c
-               JOIN pg_class t ON t.oid = c.conrelid
-               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
-               JOIN pg_class r ON r.oid = c.confrelid
-              WHERE c.contype = 'f'
-                AND t.relname = 'release_notifications'
-                AND a.attname = 'subscription_id'
-                AND r.relname = 'subscriptions'"
-        );
-        $action = $stmt !== false ? $stmt->fetchColumn() : false;
-
-        $this->assertSame(
-            'c',
-            $action,
-            'release_notifications.subscription_id FK should be ON DELETE CASCADE'
         );
     }
 }

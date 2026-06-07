@@ -2,13 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Config\Factory\SmtpConfigFactory;
-use App\Config\Factory\SmtpConfigFactoryInterface;
-use App\Config\SmtpConfig;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
-use App\Factory\MailerFactoryInterface;
-use App\Factory\PHPMailerFactory;
 use App\Grpc\ReleaseNotifierService;
 use App\Notification\Publishing\Domain\NewReleaseDetected;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
@@ -36,8 +31,6 @@ use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
 use App\Releases\Sourcing\Infrastructure\SmokeGitHubReleaseSource;
-use App\Repository\NotificationLedger;
-use App\Repository\NotificationLedgerInterface;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanQuery;
 use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommand;
@@ -55,15 +48,10 @@ use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusF
 use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryReader;
 use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRepositoryWriter;
-use App\Scanning\Scanner\Application\NotifierInterface;
 use App\Scanning\Scanner\Application\ReleaseDetector;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
 use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
-use App\Scanning\Scanner\Infrastructure\Mail\MailerInterface;
-use App\Scanning\Scanner\Infrastructure\Mail\ReleaseEmailRenderer;
-use App\Scanning\Scanner\Infrastructure\Mail\SmtpMailer;
-use App\Scanning\Scanner\Infrastructure\Mail\NotifierService;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
@@ -184,8 +172,6 @@ return static function (array $settings): Container {
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
-        MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
-
         // === Releases context (B3) — cache + factory + client + service ===
         GitHubCacheInterface::class => static fn($c) => new SafeGitHubCacheDecorator(
             new RedisGitHubCache($c->get(RedisClient::class)),
@@ -245,8 +231,6 @@ return static function (array $settings): Container {
         SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
         RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
 
-        // Config factories
-        SmtpConfigFactoryInterface::class => static fn() => new SmtpConfigFactory(),
         PaginationFactoryInterface::class => static fn() => new PaginationFactory(),
 
         // === Legacy.Application: Validation ===
@@ -279,8 +263,6 @@ return static function (array $settings): Container {
             $c->get(PDO::class)
         ),
         ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
-        NotificationLedgerInterface::class => static fn($c) => new NotificationLedger($c->get(PDO::class)),
-
         // === Shared kernel: health + exception mapping ===
         HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
@@ -361,19 +343,6 @@ return static function (array $settings): Container {
             FetchLatestReleaseQuery::class => $c->get(FetchLatestReleaseHandler::class),
             RepositoryExistsQuery::class => $c->get(RepositoryExistsHandler::class),
         ]),
-
-        // === Scanning context — mail infrastructure (B5) ===
-        SmtpConfig::class => static fn($c) => $c->get(SmtpConfigFactoryInterface::class)->fromArray($settings['smtp']),
-        ReleaseEmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
-        MailerInterface::class => static fn($c) => new SmtpMailer(
-            $c->get(SmtpConfig::class),
-            $c->get(MailerFactoryInterface::class)
-        ),
-        NotifierInterface::class => static fn($c) => new NotifierService(
-            $c->get(MailerInterface::class),
-            $c->get(ReleaseEmailRenderer::class),
-            $c->get(LoggerInterface::class)
-        ),
 
         // === Shared kernel — metrics (B5 FR2 count-port fix) ===
         PrometheusFormatter::class => static fn() => new PrometheusFormatter(),

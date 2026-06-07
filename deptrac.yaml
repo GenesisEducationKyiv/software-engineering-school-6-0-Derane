@@ -264,18 +264,15 @@ deptrac:
     Scanning.Application:
       - Shared.Domain
       - Shared.Application
-      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException; NotificationDispatcher uses Release
+      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException
       - RepositoryTracking.Domain     # B4: ScanReleasesHandler uses ScanCandidateSource + ScanProgressWriter ports
-      - Subscription.Domain           # B5: NotificationDispatcher uses SubscriberFinder (Subscription.Domain port)
+      - Subscription.Domain
       - NotificationPublishing.Domain # C2: ScanReleasesHandler constructs + dispatches NewReleaseDetected (owned by NotificationPublishing.Domain)
-      - Legacy.Infrastructure         # B5 transitional: NotificationLedgerInterface in src/Repository/ until Epic E deletes it
     Scanning.Infrastructure:
       - Scanning.Application          # B4: ScannerCliRunner dispatches ScanReleasesCommand
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
-      - Releases.Domain               # B5: ReleaseEmailRenderer uses Release VO from Releases.Domain
-      - Legacy.Infrastructure         # B5 transitional: SmtpMailer uses SmtpConfig + PHPMailerFactory (src/Config/, src/Factory/)
 
     # ===== Notification\Publishing. C2 grants two narrow, deliberate cross-context
     # edges (both documented at the point of use):

@@ -34,14 +34,6 @@ return [
         'smoke_html_url' => $_ENV['GITHUB_SMOKE_HTML_URL'] ?? 'https://example.test/releases/smoke',
         'smoke_body' => $_ENV['GITHUB_SMOKE_BODY'] ?? 'Smoke release body',
     ],
-    'smtp' => [
-        'host' => $_ENV['SMTP_HOST'] ?? 'localhost',
-        'port' => (int) ($_ENV['SMTP_PORT'] ?? 1025),
-        'user' => $_ENV['SMTP_USER'] ?? '',
-        'password' => $_ENV['SMTP_PASSWORD'] ?? '',
-        'from' => $_ENV['SMTP_FROM'] ?? 'noreply@release-notifier.local',
-        'encryption' => $_ENV['SMTP_ENCRYPTION'] ?? '',
-    ],
     'api_key' => $_ENV['API_KEY'] ?? '',
     'bootstrap' => [
         'run_migrations_on_boot' => filter_var(
