@@ -4,7 +4,8 @@
         integration-up integration-run integration-down integration \
         e2e-up e2e-run e2e-down e2e \
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
-        tests ci c4-up c4-down c4-logs c4-validate
+        tests ci c4-up c4-down c4-logs c4-validate \
+        logs-rabbitmq logs-notification-db
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -39,6 +40,12 @@ restart: ## Restart running application containers
 
 logs: ## Show Docker logs
 	$(COMPOSE) logs -f
+
+logs-rabbitmq: ## Tail RabbitMQ broker logs (management UI: http://localhost:15672)
+	$(COMPOSE) logs -f rabbitmq
+
+logs-notification-db: ## Tail notification-db (Postgres) logs
+	$(COMPOSE) logs -f notification-db
 
 migrate: ensure-env ## Run database migrations inside Docker
 	$(COMPOSE) exec -T app php bin/migrate.php
