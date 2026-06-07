@@ -3,15 +3,30 @@
 declare(strict_types=1);
 
 use App\Sending\Application\SendReleaseEmailHandler;
+use App\Sending\Domain\DeliveryOutcomeRecorder;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
+use App\Sending\Domain\MessageProcessingStatsRecorder;
 use App\Sending\Domain\NotificationLedger;
+use App\Sending\Domain\NotificationMetricsReader;
+use App\Sending\Infrastructure\Error\ExceptionStatusMap;
+use App\Sending\Infrastructure\Health\CompositeHealthCheck;
+use App\Sending\Infrastructure\Health\DatabaseHealthCheck;
+use App\Sending\Infrastructure\Health\HealthCheckInterface;
+use App\Sending\Infrastructure\Health\RabbitMqHealthCheck;
+use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
+use App\Sending\Infrastructure\Http\HealthController;
+use App\Sending\Infrastructure\Http\MetricsController;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
 use App\Sending\Infrastructure\Mail\PHPMailerFactory;
 use App\Sending\Infrastructure\Mail\ReleaseEmailRenderer;
 use App\Sending\Infrastructure\Mail\SmtpConfig;
+use App\Sending\Infrastructure\Metrics\MetricsService;
+use App\Sending\Infrastructure\Metrics\MetricsServiceInterface;
+use App\Sending\Infrastructure\Metrics\PrometheusFormatter;
 use App\Sending\Infrastructure\Persistence\PdoNotificationLedger;
+use App\Sending\Infrastructure\Persistence\PdoNotificationMetricsStore;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
@@ -19,6 +34,10 @@ use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use DI\Container;
 use DI\ContainerBuilder;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
+use Psr\Http\Message\ResponseFactoryInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Slim\Psr7\Factory\ResponseFactory;
 
 /**
  * Replaces D1's bare `$builder->build()` stub with the full DI wiring this
@@ -110,6 +129,10 @@ return static function (array $settings): Container {
 
         // === Notification\Sending — Domain ports → D4 adapters ===
         NotificationLedger::class => static fn($c) => new PdoNotificationLedger($c->get(PDO::class)),
+        PdoNotificationMetricsStore::class => static fn($c) => new PdoNotificationMetricsStore($c->get(PDO::class)),
+        DeliveryOutcomeRecorder::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
+        MessageProcessingStatsRecorder::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
+        NotificationMetricsReader::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
         EmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
         Mailer::class => static fn($c) => new PhpMailerMailer(
             $c->get(SmtpConfig::class),
@@ -122,12 +145,51 @@ return static function (array $settings): Container {
             $c->get(NotificationLedger::class),
             $c->get(EmailRenderer::class),
             $c->get(Mailer::class),
+            $c->get(DeliveryOutcomeRecorder::class),
         ),
 
         SendReleaseEmailConsumer::class => static fn($c) => new SendReleaseEmailConsumer(
             $c->get(RabbitConsumer::class),
             $c->get(SendReleaseEmailHandler::class),
             $c->get(SendReleaseEmailMessageMapper::class),
+            $c->get(MessageProcessingStatsRecorder::class),
+        ),
+
+        LoggerInterface::class => static fn() => new NullLogger(),
+        ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
+        ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
+        PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
+        MetricsServiceInterface::class => static fn($c) => new MetricsService(
+            $c->get(NotificationMetricsReader::class),
+            $c->get(PrometheusFormatter::class),
+        ),
+        HealthCheckInterface::class => static fn() => new CompositeHealthCheck([
+            new DatabaseHealthCheck(
+                $settings['notification_db']['host'],
+                $settings['notification_db']['port'],
+                $settings['notification_db']['name'],
+                $settings['notification_db']['user'],
+                $settings['notification_db']['password'],
+            ),
+            new RabbitMqHealthCheck(
+                $settings['rabbitmq']['host'],
+                $settings['rabbitmq']['port'],
+                $settings['rabbitmq']['user'],
+                $settings['rabbitmq']['password'],
+                $settings['rabbitmq']['vhost'],
+            ),
+        ]),
+        HealthController::class => static fn($c) => new HealthController(
+            $c->get(HealthCheckInterface::class),
+            $c->get(LoggerInterface::class),
+        ),
+        MetricsController::class => static fn($c) => new MetricsController(
+            $c->get(MetricsServiceInterface::class),
+        ),
+        ErrorHandlerMiddleware::class => static fn($c) => new ErrorHandlerMiddleware(
+            $c->get(LoggerInterface::class),
+            $c->get(ResponseFactoryInterface::class),
+            $c->get(ExceptionStatusMap::class),
         ),
     ]);
 

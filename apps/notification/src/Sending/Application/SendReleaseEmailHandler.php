@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sending\Application;
 
+use App\Sending\Domain\DeliveryOutcomeRecorder;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
 use App\Sending\Domain\NotificationLedger;
@@ -15,12 +16,14 @@ final readonly class SendReleaseEmailHandler
         private NotificationLedger $ledger,
         private EmailRenderer $renderer,
         private Mailer $mailer,
+        private DeliveryOutcomeRecorder $outcomes,
     ) {
     }
 
     public function handle(ReleaseEmail $email): void
     {
         if ($this->ledger->hasBeenSent($email->subscriptionId, $email->tagName, $email->repository)) {
+            $this->outcomes->recordDeduped();
             return;
         }
 
@@ -29,5 +32,6 @@ final readonly class SendReleaseEmailHandler
         $this->mailer->send($email->recipientEmail, $rendered);
 
         $this->ledger->markSent($email->subscriptionId, $email->tagName, $email->repository, $email->recipientEmail);
+        $this->outcomes->recordDelivered();
     }
 }

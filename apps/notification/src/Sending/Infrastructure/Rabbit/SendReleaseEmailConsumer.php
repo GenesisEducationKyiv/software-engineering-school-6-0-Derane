@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Sending\Infrastructure\Rabbit;
 
 use App\Sending\Application\SendReleaseEmailHandler;
+use App\Sending\Domain\MessageProcessingStatsRecorder;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use PhpAmqpLib\Message\AMQPMessage;
 
@@ -66,6 +67,7 @@ final readonly class SendReleaseEmailConsumer
         private RabbitConsumer $consumer,
         private SendReleaseEmailHandler $handler,
         private SendReleaseEmailMessageMapper $mapper,
+        private MessageProcessingStatsRecorder $stats,
     ) {
     }
 
@@ -81,11 +83,14 @@ final readonly class SendReleaseEmailConsumer
 
     public function handleDelivery(AMQPMessage $message): void
     {
+        $this->stats->recordConsumed();
+
         try {
             $releaseEmail = $this->mapper->fromJson($message->getBody());
         } catch (MalformedReleaseEmailMessageException) {
             // Poison message — fundamentally unprocessable. Straight to the
             // DLQ on first sighting; no bound check, ever (see class docblock).
+            $this->stats->recordDlq();
             $this->consumer->nack($message, requeue: false);
             return;
         }
@@ -96,7 +101,9 @@ final readonly class SendReleaseEmailConsumer
         } catch (\Throwable) {
             // Transient failure on a well-formed message — bounded retry via
             // the broker's x-death count, delegated to RabbitConsumer.
+            $this->stats->recordFailed();
             if ($this->consumer->shouldRouteToDlq($message, self::QUEUE, self::MAX_REDELIVERIES)) {
+                $this->stats->recordDlq();
                 $this->consumer->nack($message, requeue: false);
             } else {
                 $this->consumer->nack($message, requeue: true);

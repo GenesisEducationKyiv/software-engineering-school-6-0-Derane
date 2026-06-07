@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tests\Unit\Sending\Infrastructure\Rabbit;
 
 use App\Sending\Application\SendReleaseEmailHandler;
+use App\Sending\Domain\DeliveryOutcomeRecorder;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
+use App\Sending\Domain\MessageProcessingStatsRecorder;
 use App\Sending\Domain\NotificationLedger;
 use App\Sending\Domain\RenderedEmail;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
@@ -118,6 +120,10 @@ final class SendReleaseEmailConsumerTest extends TestCase
     private EmailRenderer $renderer;
     /** @var Mailer&MockObject */
     private Mailer $mailer;
+    /** @var DeliveryOutcomeRecorder&MockObject */
+    private DeliveryOutcomeRecorder $outcomes;
+    /** @var MessageProcessingStatsRecorder&MockObject */
+    private MessageProcessingStatsRecorder $stats;
 
     #[\Override]
     protected function setUp(): void
@@ -125,6 +131,8 @@ final class SendReleaseEmailConsumerTest extends TestCase
         $this->ledger = $this->createMock(NotificationLedger::class);
         $this->renderer = $this->createMock(EmailRenderer::class);
         $this->mailer = $this->createMock(Mailer::class);
+        $this->outcomes = $this->createMock(DeliveryOutcomeRecorder::class);
+        $this->stats = $this->createMock(MessageProcessingStatsRecorder::class);
     }
 
     public function testAcksOnSuccessfulHandling(): void
@@ -133,6 +141,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
         $channel = $this->ackingNackingChannelCapturing($captured);
         $message = $this->deliveredMessage($channel, deliveryTag: 1);
         $this->configureHandlerForSuccess();
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::never())->method('recordFailed');
+        $this->stats->expects(self::never())->method('recordDlq');
 
         $this->mailer->expects(self::once())
             ->method('send')
@@ -150,6 +161,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
         $captured = [];
         $channel = $this->ackingNackingChannelCapturing($captured);
         $message = $this->deliveredMessage($channel, deliveryTag: 2);
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::never())->method('recordFailed');
+        $this->stats->expects(self::never())->method('recordDlq');
 
         $this->ledger->method('hasBeenSent')->willReturn(true);
         $this->renderer->expects(self::never())->method('render');
@@ -176,6 +190,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
             body: self::INVALID_JSON,
             redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::never())->method('recordFailed');
+        $this->stats->expects(self::once())->method('recordDlq');
 
         $this->ledger->expects(self::never())->method('hasBeenSent');
         $this->mailer->expects(self::never())->method('send');
@@ -198,6 +215,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
             body: self::MISSING_FIELD_JSON,
             redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::never())->method('recordFailed');
+        $this->stats->expects(self::once())->method('recordDlq');
 
         $this->ledger->expects(self::never())->method('hasBeenSent');
         $this->mailer->expects(self::never())->method('send');
@@ -217,6 +237,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
             body: self::VALID_JSON,
             redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::once())->method('recordFailed');
+        $this->stats->expects(self::never())->method('recordDlq');
         $this->configureHandlerToThrowFromMailer(new \RuntimeException('SMTP timeout'));
 
         $this->consumerWith($channel)->handleDelivery($message);
@@ -234,6 +257,9 @@ final class SendReleaseEmailConsumerTest extends TestCase
             body: self::VALID_JSON,
             redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES + 1,
         );
+        $this->stats->expects(self::once())->method('recordConsumed');
+        $this->stats->expects(self::once())->method('recordFailed');
+        $this->stats->expects(self::once())->method('recordDlq');
         $this->configureHandlerToThrowFromMailer(new \RuntimeException('SMTP still down'));
 
         $this->consumerWith($channel)->handleDelivery($message);
@@ -266,10 +292,10 @@ final class SendReleaseEmailConsumerTest extends TestCase
     private function consumerWith(AMQPChannel $channel): SendReleaseEmailConsumer
     {
         $rabbitConsumer = new RabbitConsumer($this->connectionWrapping($channel));
-        $handler = new SendReleaseEmailHandler($this->ledger, $this->renderer, $this->mailer);
+        $handler = new SendReleaseEmailHandler($this->ledger, $this->renderer, $this->mailer, $this->outcomes);
         $mapper = new SendReleaseEmailMessageMapper();
 
-        return new SendReleaseEmailConsumer($rabbitConsumer, $handler, $mapper);
+        return new SendReleaseEmailConsumer($rabbitConsumer, $handler, $mapper, $this->stats);
     }
 
     /**
