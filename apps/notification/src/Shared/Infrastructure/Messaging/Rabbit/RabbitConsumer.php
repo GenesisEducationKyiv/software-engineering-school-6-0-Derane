@@ -100,16 +100,23 @@ final readonly class RabbitConsumer
      */
     public function requeueWithRetry(AMQPMessage $message): void
     {
+        $channel = $this->connection->channel();
+        $channel->confirm_select();
+
         $newCount = $this->retryCountFor($message) + 1;
         $newMessage = new AMQPMessage(
             $message->getBody(),
             ['application_headers' => new AMQPTable([self::RETRY_HEADER => $newCount]), 'delivery_mode' => 2],
         );
-        $this->connection->channel()->basic_publish(
+        $channel->basic_publish(
             $newMessage,
-            $message->getExchange(),
-            $message->getRoutingKey(),
+            $message->getExchange() ?? '',
+            $message->getRoutingKey() ?? '',
         );
+        // Wait for broker confirm before acking original — if the broker nacks or
+        // times out, wait_for_pending_acks throws and the original remains unacked
+        // (broker redelivers it), preventing silent message loss.
+        $channel->wait_for_pending_acks(5.0);
         $message->ack();
     }
 
@@ -136,8 +143,9 @@ final readonly class RabbitConsumer
 
         /** @var array<string, mixed> $data */
         $data = $headers->getNativeData();
-        $count = $data[self::RETRY_HEADER] ?? 0;
 
-        return is_int($count) ? $count : 0;
+        return isset($data[self::RETRY_HEADER]) && is_int($data[self::RETRY_HEADER])
+            ? $data[self::RETRY_HEADER]
+            : 0;
     }
 }

@@ -80,9 +80,11 @@ final readonly class SendReleaseEmailMessageMapper
 
         $schema = $this->requireString($payload, 'schema');
         if ($schema !== self::EXPECTED_SCHEMA) {
-            throw new MalformedReleaseEmailMessageException(
-                "SendReleaseEmail/v1 message has unknown schema \"{$schema}\"; expected \"" . self::EXPECTED_SCHEMA . '".'
-            );
+            throw new MalformedReleaseEmailMessageException(sprintf(
+                'SendReleaseEmail/v1 message has unknown schema "%s"; expected "%s".',
+                $schema,
+                self::EXPECTED_SCHEMA,
+            ));
         }
 
         $release = $this->requireObject($payload, 'release');
@@ -94,7 +96,7 @@ final readonly class SendReleaseEmailMessageMapper
             repository: $this->requireString($payload, 'repository'),
             tagName: $this->requireString($release, 'release.tagName', 'tagName'),
             releaseName: $this->requireString($release, 'release.name', 'name'),
-            releaseBody: $this->requireString($release, 'release.body', 'body'),
+            releaseBody: $this->optionalString($release, 'body'),
             releaseUrl: $this->requireString($release, 'release.htmlUrl', 'htmlUrl'),
             publishedAt: $this->requireString($release, 'release.publishedAt', 'publishedAt'),
         );
@@ -164,5 +166,17 @@ final readonly class SendReleaseEmailMessageMapper
         }
 
         return $value;
+    }
+
+    /**
+     * Reads an optional string field — returns `$default` (empty string) when
+     * the key is absent or not a string. Used for additive v1 fields like
+     * `release.body` that older publishers may omit.
+     *
+     * @param array<array-key, mixed> $payload
+     */
+    private function optionalString(array $payload, string $key, string $default = ''): string
+    {
+        return isset($payload[$key]) && is_string($payload[$key]) ? $payload[$key] : $default;
     }
 }
