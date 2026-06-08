@@ -102,6 +102,18 @@ final readonly class RabbitConsumer
     {
         $channel = $this->connection->channel();
         $channel->confirm_select();
+        // Register the nack handler BEFORE publishing. In php-amqplib, when the
+        // broker sends basic.nack, wait_for_pending_acks() removes the message
+        // from published_messages and calls this handler (if callable) — it does
+        // NOT throw on its own. Without the handler, a nack silently returns and
+        // the original is acked, losing the notification. The handler throws so
+        // wait_for_pending_acks() propagates the exception and the original
+        // remains unacked for broker redelivery.
+        $channel->set_nack_handler(static function (): void {
+            throw new \RuntimeException(
+                'Broker nacked retry publish — original message remains unacked for redelivery.',
+            );
+        });
 
         $newCount = $this->retryCountFor($message) + 1;
         $newMessage = new AMQPMessage(
@@ -113,9 +125,6 @@ final readonly class RabbitConsumer
             $message->getExchange() ?? '',
             $message->getRoutingKey() ?? '',
         );
-        // Wait for broker confirm before acking original — if the broker nacks or
-        // times out, wait_for_pending_acks throws and the original remains unacked
-        // (broker redelivers it), preventing silent message loss.
         $channel->wait_for_pending_acks(5.0);
         $message->ack();
     }
