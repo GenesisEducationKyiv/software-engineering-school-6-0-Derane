@@ -7,7 +7,9 @@ node_modules/
 tests/e2e/playwright-report/
 tests/e2e/test-results/
 
-# BMAD-METHOD (installed tooling — not committed)
+# BMAD-METHOD (installed tooling — not committed; planning specs ARE
+# committed, see /specs/. Per-story implementation/review logs stay here,
+# gitignored — too verbose to be worth tracking.)
 /_bmad/
 /_bmad-output/
 /.claude/skills/bmad-*/

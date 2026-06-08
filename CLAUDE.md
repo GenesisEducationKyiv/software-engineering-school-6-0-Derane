@@ -72,4 +72,4 @@ The full `./vendor/bin/phpunit` run also exercises the **Integration** suite, wh
 
 Triggered via the `php-refactor-workflow` skill — it owns the audit-first procedure, review checklist, and dependency-ordered execution pattern.
 
-The HW7 modular refactor is driven by **BMad-METHOD** (planning + per-story create-story → dev-story → code-review); its artifacts live under `_bmad-output/` (gitignored). Keep the LikeC4 model in sync via `likec4-architecture-sync` when changing components/wiring.
+The HW7 modular refactor is driven by **BMad-METHOD** (planning + per-story create-story → dev-story → code-review). Its planning specs (PRD, architecture, epics, project context) live under `specs/` and are committed as the durable record of *what* was planned and *why*; the verbose per-story dev/review logs and sprint status stay under `_bmad-output/` (gitignored — process notes, not specs). Keep the LikeC4 model in sync via `likec4-architecture-sync` when changing components/wiring.
