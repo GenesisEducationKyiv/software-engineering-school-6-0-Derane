@@ -7,13 +7,6 @@ namespace App\Sending\Infrastructure\Mail;
 use App\Sending\Domain\Mailer;
 use App\Sending\Domain\RenderedEmail;
 
-/**
- * Adapted from the monolith's `App\Scanning\Scanner\Infrastructure\Mail\SmtpMailer`
- * — copies its proven SMTP-wiring sequence verbatim (Technical Decisions §4),
- * adapted to D3's `Mailer` port shape (`send(string $toEmail, RenderedEmail $rendered): void`)
- * and consuming `App\Sending\Domain\RenderedEmail` (D3's Domain VO, not the
- * monolith's Infrastructure-layer one).
- */
 final readonly class PhpMailerMailer implements Mailer
 {
     public function __construct(

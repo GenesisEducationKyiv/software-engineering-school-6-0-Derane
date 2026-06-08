@@ -8,45 +8,26 @@ use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 
 /**
- * D4 cross-deployable copy of the monolith's `App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer`
- * (C4, `src/Shared/Infrastructure/Messaging/Rabbit/RabbitConsumer.php`).
- * `apps/notification` is a standalone deployable with its own composer
- * autoload root (`App\` → `apps/notification/src/`) — it cannot `use` a
- * monolith class across that boundary. Keep both in sync if the shared
- * ack/nack/DLQ contract changes.
+ * Generic, message-shape-agnostic consumer scaffolding over a RabbitMQ channel.
  *
- * Generic, **message-shape-agnostic** consumer scaffolding. Exposes the
- * primitives `SendReleaseEmailConsumer` needs:
- *
- * - {@see self::consume()} — registers a callback against a queue
- * - {@see self::ack()} / {@see self::nack()} — generic ack/nack
- * - {@see self::requeueWithRetry()} — publishes a new copy of the message
- *   with an incremented `x-retry-count` application header, then acks the
- *   original. This is the bounded-retry requeue primitive (AC4).
- * - {@see self::shouldRouteToDlq()} — the bounded-retry rule based on the
- *   `x-retry-count` header
- *
- * ## Why `nack(requeue: false)` routes to the DLQ
+ * ## Why nack(requeue: false) routes to the DLQ
  *
  * `notifications.send-email` is declared with
- * `x-dead-letter-exchange: notifications.dlx`. A `nack`/`reject` with
- * `requeue: false` dead-letters the message to `notifications.dlx`, which
- * (being a `fanout`) forwards it to `notifications.send-email.dlq`.
- * "Bounded retry → DLQ" is implemented through topology + this nack flag.
+ * `x-dead-letter-exchange: notifications.dlx`. A nack with `requeue: false`
+ * dead-letters the message to `notifications.dlx`, which (being a fanout)
+ * forwards it unconditionally to `notifications.send-email.dlq`.
  *
- * ## Why `requeueWithRetry` instead of `nack(requeue: true)`
+ * ## Why requeueWithRetry instead of nack(requeue: true)
  *
  * RabbitMQ only increments `x-death` records via dead-lettering (nack with
- * `requeue: false`, TTL expiry, or overflow). A plain `nack(requeue: true)`
- * puts the message back on the queue but does **not** add or increment
- * `x-death` — so reading `x-death` to bound retries is always 0 and the
- * check never fires, creating an infinite requeue loop.
+ * requeue: false, TTL expiry, or queue overflow). A plain nack(requeue: true)
+ * requeues the message but never increments `x-death`, so any retry bound
+ * that reads `x-death` would never fire — producing an infinite retry loop.
  *
- * The fix: track retries in a custom application header `x-retry-count`.
- * {@see self::requeueWithRetry()} publishes a fresh copy with an incremented
- * `x-retry-count` header and acks the original. {@see self::shouldRouteToDlq()}
- * reads that header — the count grows with every call, so the bound fires
- * correctly after `$maxRedeliveries` retries.
+ * The fix: track retry count in a custom `x-retry-count` application header.
+ * `requeueWithRetry()` publishes a new copy with an incremented count and
+ * acks the original. `shouldRouteToDlq()` reads that header — the count
+ * grows correctly with each retry.
  *
  * @psalm-api
  */
@@ -59,8 +40,6 @@ final readonly class RabbitConsumer
     }
 
     /**
-     * Registers `$callback` against `$queue`.
-     *
      * @param callable(AMQPMessage): void $callback
      */
     public function consume(string $queue, callable $callback): void
@@ -76,39 +55,25 @@ final readonly class RabbitConsumer
         );
     }
 
-    /** Acknowledges successful processing — the broker permanently removes the message. */
     public function ack(AMQPMessage $message): void
     {
         $message->ack();
     }
 
-    /**
-     * Negatively acknowledges processing.
-     *
-     * - `$requeue = false` → dead-letters the message via the queue's
-     *   `x-dead-letter-exchange` (poison messages, or retry-exhausted messages).
-     */
     public function nack(AMQPMessage $message, bool $requeue): void
     {
         $message->nack($requeue);
     }
 
-    /**
-     * Publishes a new copy of the message with an incremented `x-retry-count`
-     * application header to the same exchange/routing-key, then acks the
-     * original. This is how bounded retry is implemented — see class docblock.
-     */
     public function requeueWithRetry(AMQPMessage $message): void
     {
         $channel = $this->connection->channel();
         $channel->confirm_select();
-        // Register the nack handler BEFORE publishing. In php-amqplib, when the
-        // broker sends basic.nack, wait_for_pending_acks() removes the message
-        // from published_messages and calls this handler (if callable) — it does
-        // NOT throw on its own. Without the handler, a nack silently returns and
-        // the original is acked, losing the notification. The handler throws so
-        // wait_for_pending_acks() propagates the exception and the original
-        // remains unacked for broker redelivery.
+        // Must register the nack handler BEFORE publishing. In php-amqplib,
+        // wait_for_pending_acks() removes nacked messages from its tracking
+        // map and calls the nack_handler — it does NOT throw on its own.
+        // Without this handler, a broker nack silently completes the wait and
+        // the original is acked, dropping the notification permanently.
         $channel->set_nack_handler(static function (): void {
             throw new \RuntimeException(
                 'Broker nacked retry publish — original message remains unacked for redelivery.',
@@ -129,11 +94,6 @@ final readonly class RabbitConsumer
         $message->ack();
     }
 
-    /**
-     * Returns `true` once the message's `x-retry-count` header reaches or
-     * exceeds `$maxRedeliveries` — the caller should then route to the DLQ
-     * instead of retrying.
-     */
     public function shouldRouteToDlq(AMQPMessage $message, int $maxRedeliveries): bool
     {
         return $this->retryCountFor($message) >= $maxRedeliveries;

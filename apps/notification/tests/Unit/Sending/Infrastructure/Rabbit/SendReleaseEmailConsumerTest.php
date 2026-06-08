@@ -22,22 +22,13 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Tests SendReleaseEmailConsumer by wiring it with a real (mocked-channel)
- * RabbitConsumer and RabbitConnection — both are final readonly classes and
- * cannot be doubled by PHPUnit. The underlying AMQPChannel is mocked to
- * simulate broker ack/nack/publish acknowledgement without a live broker.
+ * RabbitConsumer and RabbitConnection are final readonly and cannot be doubled
+ * by PHPUnit — tests wire the real classes against a mocked AMQPChannel.
  *
- * ## Proving "malformed messages never consult the bound-check" without
- * mocking RabbitConsumer directly
- *
- * The malformed-message fixtures carry an `x-retry-count` header whose value
- * sits **below** `SendReleaseEmailConsumer::MAX_REDELIVERIES` — i.e.
- * `shouldRouteToDlq()` would return `false` if consulted (leading to
- * `requeueWithRetry`), which would produce `basic_publish` + `basic_ack`.
- * The test asserts the broker instead receives `basic_nack(..., requeue: false)`
- * — straight to the DLQ on first sighting — which is only possible if
- * `handleDelivery()` short-circuits to the poison-message branch *before* ever
- * calling `shouldRouteToDlq()`.
+ * Malformed-message fixtures carry an x-retry-count below MAX_REDELIVERIES so
+ * shouldRouteToDlq() would return false if consulted. Tests asserting
+ * basic_nack(requeue:false) prove handleDelivery() short-circuits to the
+ * poison-message branch before ever reaching the retry-bound check.
  */
 final class SendReleaseEmailConsumerTest extends TestCase
 {

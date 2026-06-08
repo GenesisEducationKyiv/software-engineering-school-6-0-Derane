@@ -9,69 +9,33 @@ use App\Sending\Domain\ReleaseEmail;
 /**
  * Maps a `SendReleaseEmail/v1` wire-format JSON message body to a `ReleaseEmail`.
  *
- * ## Why this is a plain mapper, not a `*FactoryInterface` (Technical Decisions §2)
+ * This is a plain mapper, not a `*FactoryInterface`, because it parses
+ * untrusted bytes where "malformed" is an expected outcome the caller must
+ * detect and route to the DLQ — not a Domain-construction concern. The
+ * dedicated {@see MalformedReleaseEmailMessageException} lets the consumer
+ * distinguish a poison message from an environmental failure without catching
+ * generic \JsonException or \TypeError, which could also leak from a mapper bug.
  *
- * The project convention is `*FactoryInterface` for anemic DTOs constructed
- * from external payloads (`SendReleaseEmailFactoryInterface`/`ReleaseFactoryInterface`).
- * Both of those, though, take **already-validated, already-typed inputs** —
- * `SendReleaseEmailFactory::fromRecipient()` assembles from Domain VOs
- * (`EmailAddress`, `RepositoryName`, …) plus side-effecting concerns (UUID,
- * timestamp); `ReleaseFactory` parses a GitHub API response in a context where
- * a malformed field is a genuine, loud integration error.
+ * Wire-format mapping (mirrors SendReleaseEmailSerializer::toArray()):
  *
- * What this class does is structurally different: it parses **untrusted bytes
- * off the wire**, where "malformed" is an *expected, routine, must-not-crash*
- * outcome the caller (the consumer) needs to detect and route to the DLQ —
- * not a Domain-construction concern with optional/default-able fields. Forcing
- * this into a `from*(...)`/`fromArray(array $payload): ReleaseEmail` factory
- * shape would either push the JSON-decode + validation into the consumer
- * (defeating the point of a separate collaborator) or produce a factory that
- * throws generic `\TypeError`/`\InvalidArgumentException` the consumer has no
- * narrow way to distinguish from "this factory has a bug".
+ * | ReleaseEmail property | wire JSON path        | required |
+ * |-----------------------|-----------------------|----------|
+ * | eventId               | eventId               | yes      |
+ * | subscriptionId        | subscriptionId        | yes      |
+ * | recipientEmail        | email                 | yes      |
+ * | repository            | repository            | yes      |
+ * | tagName               | release.tagName       | yes      |
+ * | releaseName           | release.name          | yes      |
+ * | releaseBody           | release.body          | no (defaults to '') |
+ * | releaseUrl            | release.htmlUrl       | yes      |
+ * | publishedAt           | release.publishedAt   | yes      |
  *
- * This is **not** a `*FactoryInterface`: it has no interface (nothing else
- * will ever implement "parse `SendReleaseEmail/v1` JSON" — it is the
- * anti-corruption layer's private concern, used by exactly one caller,
- * `SendReleaseEmailConsumer`), and its job — validate untrusted input, signal
- * poison vs. success via a single dedicated, narrowly-typed exception
- * ({@see MalformedReleaseEmailMessageException}) — is qualitatively different
- * from "construct a VO from already-valid Domain inputs". Do not "fix" this
- * into a `*FactoryInterface` out of convention-matching reflex.
- *
- * ## Wire-format mapping (Technical Decisions §6 — re-derived from
- * `SendReleaseEmailSerializer::toArray()`, byte-for-byte)
- *
- * | `ReleaseEmail` property | wire JSON path      | required type |
- * |-------------------------|---------------------|---------------|
- * | `eventId`               | `eventId`           | `string`      |
- * | `subscriptionId`        | `subscriptionId`    | `int`         |
- * | `recipientEmail`        | `email`             | `string`      |
- * | `repository`            | `repository`        | `string`      |
- * | `tagName`               | `release.tagName`   | `string`      |
- * | `releaseName`           | `release.name`      | `string`      |
- * | `releaseBody`           | `release.body`      | `string`      |
- * | `releaseUrl`            | `release.htmlUrl`   | `string`      |
- * | `publishedAt`           | `release.publishedAt` | `string`    |
- *
- * `schema` is validated to be exactly `'SendReleaseEmail/v1'`; a wrong or
- * missing value is treated as a malformed message and routed to the DLQ.
- * `occurredAt` is envelope metadata not relevant to the sending domain.
- *
- * Every one of the nine paths above is checked for BOTH presence AND type.
- * `json_decode($json, true)` produces untyped `mixed` values — a
- * `subscriptionId` that decodes as the JSON string `"42"`, a `null`
- * `release.tagName`, or a missing `release` object entirely are all malformed
- * and throw {@see MalformedReleaseEmailMessageException}. We never
- * coerce/cast-and-hope: a partially-bad message must never silently produce a
- * `ReleaseEmail` with wrong/empty data that gets emailed to a real subscriber.
+ * `schema` must equal `'SendReleaseEmail/v1'`; `occurredAt` is ignored.
+ * Every required field is checked for both presence and type — a field with
+ * the wrong type (e.g. subscriptionId as a JSON string) is treated as malformed.
  */
 final readonly class SendReleaseEmailMessageMapper
 {
-    /**
-     * @throws MalformedReleaseEmailMessageException when `$json` is not valid
-     *         JSON, is not a JSON object, or is missing/wrong-types any of the
-     *         seven required fields.
-     */
     private const EXPECTED_SCHEMA = 'SendReleaseEmail/v1';
 
     public function fromJson(string $json): ReleaseEmail
@@ -168,13 +132,7 @@ final readonly class SendReleaseEmailMessageMapper
         return $value;
     }
 
-    /**
-     * Reads an optional string field — returns `$default` (empty string) when
-     * the key is absent or not a string. Used for additive v1 fields like
-     * `release.body` that older publishers may omit.
-     *
-     * @param array<array-key, mixed> $payload
-     */
+    /** @param array<array-key, mixed> $payload */
     private function optionalString(array $payload, string $key, string $default = ''): string
     {
         return isset($payload[$key]) && is_string($payload[$key]) ? $payload[$key] : $default;

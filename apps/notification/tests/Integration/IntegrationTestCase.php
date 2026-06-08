@@ -10,29 +10,11 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 
 /**
- * E2's minimal real-infrastructure harness for `apps/notification` — the
- * service's FIRST `tests/Integration` suite (constraint §2: there was no
- * precedent to slot into). Mirrors the shape of the monolith's
- * `Tests\Integration\IntegrationTestCase` (container bootstrap, env
- * population, per-test data reset) but scoped to exactly what THIS proof
- * needs — a real `\PDO` to `notification-db` and a real, topology-asserted
- * `RabbitConnection` to `rabbitmq` — both already wired by
- * `config/container.php` (D1/D4); this harness does not reimplement any
- * connection/topology logic, it only resolves the existing bindings.
+ * Base class for notification service integration tests. Bootstraps the real
+ * DI container once per test class and resets ledger data between tests.
  *
- * Deliberately NOT a general-purpose service integration framework
- * (Implementation focus §2's "do not over-build" instruction): no Faker (the
- * service has no such dependency — D1 kept it lean), no Redis (this service
- * has none), no Migrator class (the service's `bin/migrate.php` applies
- * `migrations/*.sql` directly via `\PDO::exec()` — this harness mirrors that
- * exact mechanism for its one-time bootstrap).
- *
- * Must run inside the `notification-svc` `dev`-target container (or
- * equivalent — anything on the compose network with `pdo_pgsql`/`amqp`
- * extensions and DNS-reachable `notification-db`/`rabbitmq`/`mailhog`
- * hostnames): the host has neither (see Dev Agent Record, Task 1) — exactly
- * mirroring how the monolith's `Integration` suite only runs inside
- * `make integration-run`'s `app` container, never on host.
+ * Must run inside the notification-svc dev container where notification-db,
+ * rabbitmq, and mailhog are reachable by hostname.
  */
 abstract class IntegrationTestCase extends TestCase
 {
@@ -74,14 +56,6 @@ abstract class IntegrationTestCase extends TestCase
         return $container;
     }
 
-    /**
-     * Mirrors `bin/migrate.php`'s exact mechanism (glob + sort + PDO::exec) —
-     * the service has no `Migrator` class (that is a monolith-only
-     * abstraction; recreating one here for a single bootstrap call would be
-     * exactly the "over-build a general-purpose framework" this harness must
-     * avoid). All migrations are `CREATE TABLE IF NOT EXISTS` — idempotent,
-     * safe to re-run against an already-migrated `notification-db`.
-     */
     private static function migrate(PDO $pdo): void
     {
         $migrationFiles = glob(dirname(__DIR__, 2) . '/migrations/*.sql');
@@ -120,17 +94,6 @@ abstract class IntegrationTestCase extends TestCase
         }
     }
 
-    /**
-     * Per-test reset of THIS proof's two data surfaces — `release_notifications`
-     * (the ledger AC-1 counts rows in) and `notification_metrics` (written by
-     * `MessageProcessingStatsRecorder`/`DeliveryOutcomeRecorder` on every
-     * `handleDelivery()` — left untruncated it would accumulate counters
-     * across tests/runs without affecting THIS proof's assertions, but
-     * truncating keeps each test's `release_notifications` state — the one
-     * table AC-1 actually asserts against — deterministic and isolated,
-     * mirroring the monolith `IntegrationTestCase::truncateDataTables()`'s
-     * "reset what the suite asserts against" intent).
-     */
     private function resetLedger(): void
     {
         $this->c->get(PDO::class)->exec(
