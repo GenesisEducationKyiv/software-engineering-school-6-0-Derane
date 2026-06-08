@@ -8,6 +8,7 @@ use App\Shared\Domain\ValueObject\Pagination;
 use App\Subscription\Subscriptions\Application\List\ListSubscriptionsHandler;
 use App\Subscription\Subscriptions\Application\List\ListSubscriptionsQuery;
 use App\Subscription\Subscriptions\Application\SubscriptionPageResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
 use App\Subscription\Subscriptions\Domain\SubscriptionPage;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -22,7 +23,7 @@ final class ListSubscriptionsHandlerTest extends TestCase
     protected function setUp(): void
     {
         $this->repository = $this->createMock(SubscriptionRepository::class);
-        $this->handler = new ListSubscriptionsHandler($this->repository);
+        $this->handler = new ListSubscriptionsHandler($this->repository, new SubscriptionResponseFactory());
     }
 
     public function testListByEmailDelegatesToFindByEmail(): void

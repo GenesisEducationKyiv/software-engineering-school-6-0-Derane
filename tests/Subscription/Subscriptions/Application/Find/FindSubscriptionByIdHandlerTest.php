@@ -7,6 +7,7 @@ namespace Tests\Subscription\Subscriptions\Application\Find;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdHandler;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
 use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -21,7 +22,7 @@ final class FindSubscriptionByIdHandlerTest extends TestCase
     protected function setUp(): void
     {
         $this->repository = $this->createMock(SubscriptionRepository::class);
-        $this->handler = new FindSubscriptionByIdHandler($this->repository);
+        $this->handler = new FindSubscriptionByIdHandler($this->repository, new SubscriptionResponseFactory());
     }
 
     public function testReturnsResponseForExistingSubscription(): void

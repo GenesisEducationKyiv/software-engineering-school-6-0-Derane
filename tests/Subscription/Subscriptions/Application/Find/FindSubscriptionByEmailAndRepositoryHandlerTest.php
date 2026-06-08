@@ -7,6 +7,7 @@ namespace Tests\Subscription\Subscriptions\Application\Find;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryHandler;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +21,10 @@ final class FindSubscriptionByEmailAndRepositoryHandlerTest extends TestCase
     protected function setUp(): void
     {
         $this->repository = $this->createMock(SubscriptionRepository::class);
-        $this->handler = new FindSubscriptionByEmailAndRepositoryHandler($this->repository);
+        $this->handler = new FindSubscriptionByEmailAndRepositoryHandler(
+            $this->repository,
+            new SubscriptionResponseFactory(),
+        );
     }
 
     public function testReturnsResponseForExistingRow(): void

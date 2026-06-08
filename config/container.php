@@ -75,6 +75,8 @@ use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdHandler;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;
 use App\Subscription\Subscriptions\Application\List\ListSubscriptionsHandler;
 use App\Subscription\Subscriptions\Application\List\ListSubscriptionsQuery;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactoryInterface;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
@@ -298,15 +300,19 @@ return static function (array $settings): Container {
             $c->get(SubscriptionRepository::class),
             $c->get(LoggerInterface::class)
         ),
+        SubscriptionResponseFactoryInterface::class => static fn() => new SubscriptionResponseFactory(),
         FindSubscriptionByIdHandler::class => static fn($c) => new FindSubscriptionByIdHandler(
-            $c->get(SubscriptionRepository::class)
+            $c->get(SubscriptionRepository::class),
+            $c->get(SubscriptionResponseFactoryInterface::class),
         ),
         FindSubscriptionByEmailAndRepositoryHandler::class => static fn($c) =>
             new FindSubscriptionByEmailAndRepositoryHandler(
-                $c->get(SubscriptionRepository::class)
+                $c->get(SubscriptionRepository::class),
+                $c->get(SubscriptionResponseFactoryInterface::class),
             ),
         ListSubscriptionsHandler::class => static fn($c) => new ListSubscriptionsHandler(
-            $c->get(SubscriptionRepository::class)
+            $c->get(SubscriptionRepository::class),
+            $c->get(SubscriptionResponseFactoryInterface::class),
         ),
 
         // === RepositoryTracking context — CQRS handlers (B2) ===

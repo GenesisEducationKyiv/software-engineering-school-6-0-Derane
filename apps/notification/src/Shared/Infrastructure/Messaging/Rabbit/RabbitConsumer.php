@@ -74,7 +74,7 @@ final readonly class RabbitConsumer
         // map and calls the nack_handler — it does NOT throw on its own.
         // Without this handler, a broker nack silently completes the wait and
         // the original is acked, dropping the notification permanently.
-        $channel->set_nack_handler(static function (): void {
+        $channel->set_nack_handler(function (): void {
             throw new \RuntimeException(
                 'Broker nacked retry publish — original message remains unacked for redelivery.',
             );

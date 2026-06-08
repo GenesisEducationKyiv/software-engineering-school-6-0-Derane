@@ -9,6 +9,7 @@ use App\Shared\Domain\Bus\Query\QueryHandler;
 use App\Shared\Domain\Bus\Query\Response;
 use App\Subscription\Subscriptions\Application\SubscriptionPageResponse;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactoryInterface;
 use App\Subscription\Subscriptions\Domain\SubscriptionPage;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
@@ -23,8 +24,10 @@ use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
  */
 final readonly class ListSubscriptionsHandler implements QueryHandler
 {
-    public function __construct(private SubscriptionRepository $repository)
-    {
+    public function __construct(
+        private SubscriptionRepository $repository,
+        private SubscriptionResponseFactoryInterface $responseFactory,
+    ) {
     }
 
     #[\Override]
@@ -41,7 +44,7 @@ final readonly class ListSubscriptionsHandler implements QueryHandler
     private function mapItems(SubscriptionPage $page): array
     {
         return array_map(
-            static fn($subscription): SubscriptionResponse => SubscriptionResponse::fromAggregate($subscription),
+            fn($subscription): SubscriptionResponse => $this->responseFactory->fromAggregate($subscription),
             $page->items
         );
     }
