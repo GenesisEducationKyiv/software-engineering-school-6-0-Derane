@@ -16,13 +16,6 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * Orchestrates a scan cycle: pulls due repositories, detects new releases, and
- * publishes SendReleaseEmail messages via the domain event dispatch.
- *
- * E1 Cutover: The legacy SMTP NotificationDispatcher is no longer invoked here.
- * Marker advancement (markReleaseSeen) is now gated by the success of the RabbitMQ
- * publish batch via the synchronous NewReleaseDetected event plane.
- *
  * @implements CommandHandler<ScanReleasesCommand>
  * @psalm-api
  */
@@ -70,12 +63,8 @@ final readonly class ScanReleasesHandler implements CommandHandler
             return;
         }
 
-        // AR-FLOW2: pre-commit synchronous dispatch, no outbox — this MUST run
-        // before markReleaseSeen. Any exception here propagates untouched into
-        // __invoke()'s per-repo catch: the marker stays un-advanced and the
-        // release is re-detected next cycle.
-        // Do NOT wrap this in a try/catch — that would silently defeat the
-        // outbox-free guarantee (see InMemoryEventDispatcher's docblock).
+        // Must run before markReleaseSeen. Exceptions propagate to the per-repo
+        // catch so the marker stays un-advanced. Do NOT wrap in try/catch.
         $this->eventDispatcher->dispatch(new NewReleaseDetected(
             new RepositoryName($repoName),
             $release,

@@ -9,13 +9,7 @@ use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\RepositoryName;
 
-/**
- * Builds SendReleaseEmail messages: stamps the wire schema, generates a fresh
- * eventId (UUID v4 — cross-service correlation/idempotency per AR-MQ2) and
- * captures occurredAt at construction time.
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class SendReleaseEmailFactory implements SendReleaseEmailFactoryInterface
 {
     #[\Override]
@@ -36,13 +30,8 @@ final readonly class SendReleaseEmailFactory implements SendReleaseEmailFactoryI
         );
     }
 
-    /**
-     * Pure-PHP RFC 4122 §4.4 UUID v4 generator. No UUID library is an
-     * autoloadable direct dependency (verified — see story C1 Decision 3), so
-     * eventId is generated from cryptographically secure random bytes with the
-     * version/variant bits set per spec, formatted as
-     * xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx (y in [8901abAB]).
-     */
+    // RFC 4122 §4.4 UUID v4: set version bits (byte 6 → 0x4x) and variant
+    // bits (byte 8 → 0x8x/0x9x/0xax/0xbx) before hex-encoding.
     private function generateEventId(): string
     {
         $bytes = random_bytes(16);

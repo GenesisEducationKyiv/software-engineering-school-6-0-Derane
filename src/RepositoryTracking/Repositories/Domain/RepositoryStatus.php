@@ -7,20 +7,8 @@ namespace App\RepositoryTracking\Repositories\Domain;
 use App\Shared\Domain\Aggregate\AggregateRoot;
 
 /**
- * RepositoryStatus aggregate root — owns the scan-progress state for a single
- * tracked repository (`last_seen_tag`, `last_checked_at`).
- *
- * `final` (leaf entity) but NOT `readonly`: extends the non-readonly AggregateRoot
- * (PHP forbids readonly child classes of non-readonly parents) and holds mutable
- * scan-state that the domain operations update in-memory before persistence.
- *
- * Two factory paths:
- *   - `reconstitute()` — rebuilds from a DB row; records no event (the state
- *     already happened). Used by the PDO factory ACL mapper.
- *   - `existing()` — creates a transient instance for command handlers that only
- *     need to record domain events without loading state (avoids a redundant
- *     SELECT when the caller already knows the operation will succeed, e.g.
- *     MarkChecked / MarkReleaseSeen after ensureExists has run).
+ * Not readonly: PHP forbids readonly child classes of non-readonly parents;
+ * AggregateRoot is non-readonly.
  *
  * @psalm-api
  */
@@ -41,10 +29,6 @@ final class RepositoryStatus extends AggregateRoot
         return new self($fullName, $lastSeenTag, $lastCheckedAt);
     }
 
-    /**
-     * Creates a transient aggregate for command handlers that drive a domain
-     * operation without needing the full persisted state.
-     */
     public static function existing(string $fullName): self
     {
         return new self($fullName, null, null);

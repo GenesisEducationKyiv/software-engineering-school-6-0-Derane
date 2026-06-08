@@ -5,14 +5,9 @@ declare(strict_types=1);
 namespace App\Shared\Infrastructure\Messaging\Rabbit;
 
 /**
- * Raised by {@see RabbitPublisher::publish()} when the broker does not
- * positively confirm a published message — i.e. on a negative confirm
- * (`basic.nack`) or a confirm-wait timeout (AC3).
- *
- * This is the "callers can react" signal epics.md's AC mandates: a publish
- * that returns normally is guaranteed broker-acked; a publish that throws
- * this exception is guaranteed NOT delivered (or its fate unknown after a
- * timeout) and the caller must decide how to recover (retry, log, alert).
+ * Raised by RabbitPublisher::publish() on broker nack or confirm-wait timeout.
+ * A publish that returns normally is guaranteed broker-acked; a throw means
+ * the message was NOT confirmed and the caller must decide how to recover.
  */
 final class RabbitPublishFailedException extends \RuntimeException
 {

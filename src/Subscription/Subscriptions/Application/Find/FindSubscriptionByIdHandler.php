@@ -13,11 +13,7 @@ use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
 /**
- * Read-side: fetch a subscription by id. Throws SubscriptionNotFoundException
- * (404 / NOT_FOUND) when absent, preserving the legacy getSubscription behavior.
- *
  * @implements QueryHandler<FindSubscriptionByIdQuery, SubscriptionResponse>
- *
  * @psalm-api
  */
 final readonly class FindSubscriptionByIdHandler implements QueryHandler

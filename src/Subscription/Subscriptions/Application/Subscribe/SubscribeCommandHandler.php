@@ -18,16 +18,7 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * Write-side use-case: subscribe an email to a repository. Ports the legacy
- * SubscriptionService::subscribe logic. Validates (preserving the
- * ValidationException -> 400 path), checks repo existence (Releases port) and
- * ensures it is tracked (RepositoryTracking port), builds + persists the
- * aggregate, then pulls and dispatches its recorded domain events on the PSR-14
- * plane (A3). Returns void (CommandBus contract); the id/created_at are read back
- * via a query.
- *
  * @implements CommandHandler<SubscribeCommand>
- *
  * @psalm-api
  */
 final readonly class SubscribeCommandHandler implements CommandHandler

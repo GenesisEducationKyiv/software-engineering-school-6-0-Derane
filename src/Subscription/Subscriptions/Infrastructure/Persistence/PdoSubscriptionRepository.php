@@ -15,13 +15,7 @@ use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactoryIn
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactoryInterface;
 use PDO;
 
-/**
- * PDO adapter owning the `subscriptions` table. Implements both Domain ports
- * (SubscriptionRepository + SubscriberFinder) — per-consumer ISP, one impl. SQL
- * is preserved byte-for-byte from the legacy repository.
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class PdoSubscriptionRepository implements
     SubscriptionRepository,
     SubscriberFinder,

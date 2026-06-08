@@ -8,12 +8,7 @@ use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Domain\Subscription;
 
-/**
- * ACL mapper: DB row -> Subscription aggregate via the reconstitution path (no
- * domain event is recorded — the row already existed).
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class SubscriptionFactory implements SubscriptionFactoryInterface
 {
     #[\Override]

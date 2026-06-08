@@ -19,10 +19,6 @@ final readonly class ReleaseDetector
     ) {
     }
 
-    /**
-     * Returns the latest release if it differs from the last seen tag for the
-     * given repository, otherwise null.
-     */
     public function detect(string $repoName): ?Release
     {
         $release = $this->gitHubService->getLatestRelease($repoName);

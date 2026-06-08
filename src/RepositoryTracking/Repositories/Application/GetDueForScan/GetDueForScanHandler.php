@@ -10,11 +10,7 @@ use App\Shared\Domain\Bus\Query\QueryHandler;
 use App\Shared\Domain\Bus\Query\Response;
 
 /**
- * Read-side: returns the batch of repository full-names due for the next scan
- * cycle (NULLs-first, ascending last_checked_at, up to `limit` entries).
- *
  * @implements QueryHandler<GetDueForScanQuery, DueRepositoriesResponse>
- *
  * @psalm-api
  */
 final readonly class GetDueForScanHandler implements QueryHandler

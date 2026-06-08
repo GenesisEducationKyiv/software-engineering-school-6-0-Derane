@@ -9,13 +9,8 @@ use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\RepositoryName;
 
 /**
- * Subscription aggregate root.
- *
- * `final` (a leaf entity) but NOT `readonly`: it extends AggregateRoot, which
- * owns a mutable event buffer (a PHP child of a non-readonly class cannot be
- * readonly). It holds EmailAddress + RepositoryName VOs internally and exposes
- * primitive accessors that reproduce the frozen JSON values; JSON shaping itself
- * lives in the Infrastructure response mapper, not here.
+ * Not readonly: PHP forbids readonly child classes of non-readonly parents;
+ * AggregateRoot is non-readonly.
  *
  * @psalm-api
  */
@@ -29,10 +24,6 @@ final class Subscription extends AggregateRoot
     ) {
     }
 
-    /**
-     * Create path: builds a new subscription and records exactly one
-     * SubscriptionCreated. The id is null — the database assigns it on persist.
-     */
     public static function subscribe(EmailAddress $email, RepositoryName $repository, string $createdAt): self
     {
         $subscription = new self(null, $email, $repository, $createdAt);
@@ -45,10 +36,6 @@ final class Subscription extends AggregateRoot
         return $subscription;
     }
 
-    /**
-     * Reconstitution path: rebuilds an aggregate from a persisted row. Records
-     * nothing — the event already happened. Called only by the ACL factory.
-     */
     public static function reconstitute(
         int $id,
         EmailAddress $email,

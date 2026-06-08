@@ -11,13 +11,7 @@ use App\Shared\Domain\Bus\Command\CommandHandler;
 use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
- * Write-side: records a scan-cycle heartbeat (no new release found). Creates a
- * transient RepositoryStatus aggregate to record the RepositoryChecked event,
- * persists via ScanProgressWriter, then dispatches the recorded events on the
- * PSR-14 plane for future listeners (metrics, observability).
- *
  * @implements CommandHandler<MarkCheckedCommand>
- *
  * @psalm-api
  */
 final readonly class MarkCheckedCommandHandler implements CommandHandler

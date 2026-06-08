@@ -7,15 +7,9 @@ namespace App\Notification\Publishing\Infrastructure\Serialization;
 use App\Notification\Publishing\Domain\SendReleaseEmail;
 
 /**
- * Maps SendReleaseEmail to the wire-format JSON described by architecture §7
- * (schema "SendReleaseEmail/v1"). This is the wire-format mapper C5's
- * RabbitReleaseNotificationPublisher will use to produce the message body —
- * the contract pinned by SendReleaseEmailSerializerTest must stay byte-stable
- * (additive-only) across C1→C5→D3→D4.
- *
- * Datetimes are formatted as RFC3339 (\DateTimeInterface::RFC3339 — the same
- * format string as ::ATOM, no fractional seconds), matching §7's "RFC3339"
- * placeholder, e.g. "2026-06-07T12:00:00+00:00".
+ * Datetimes are formatted as RFC3339 (= ::ATOM, no fractional seconds),
+ * e.g. "2026-06-07T12:00:00+00:00". Changing this would break the
+ * consumer's schema contract.
  *
  * @psalm-api
  */

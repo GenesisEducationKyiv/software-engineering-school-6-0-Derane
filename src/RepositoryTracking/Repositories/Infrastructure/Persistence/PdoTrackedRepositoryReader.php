@@ -11,13 +11,7 @@ use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Infrastructure\Factory\RepositoryStatusFactoryInterface;
 use PDO;
 
-/**
- * PDO read adapter for the `repositories` table. Implements both read-side ports
- * (RepositoryStatusReader + ScanCandidateSource) — per-consumer ISP, one impl.
- * SQL is byte-identical to the legacy TrackedRepositoryReader.
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class PdoTrackedRepositoryReader implements
     RepositoryStatusReader,
     ScanCandidateSource,

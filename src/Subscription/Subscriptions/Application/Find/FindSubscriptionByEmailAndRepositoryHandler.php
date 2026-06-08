@@ -13,13 +13,7 @@ use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
 /**
- * Read-side: the create read-back. After SubscribeCommand persists the row (incl.
- * the idempotent re-subscribe branch), the driver asks this to obtain the
- * canonical id + created_at for the 201 body. The row always exists at this
- * point; the not-found guard is defensive.
- *
  * @implements QueryHandler<FindSubscriptionByEmailAndRepositoryQuery, SubscriptionResponse>
- *
  * @psalm-api
  */
 final readonly class FindSubscriptionByEmailAndRepositoryHandler implements QueryHandler
