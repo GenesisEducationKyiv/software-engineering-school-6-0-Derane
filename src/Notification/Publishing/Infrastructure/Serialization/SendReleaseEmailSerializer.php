@@ -21,7 +21,7 @@ use App\Notification\Publishing\Domain\SendReleaseEmail;
  */
 final readonly class SendReleaseEmailSerializer
 {
-    /** @return array{schema: string, eventId: string, occurredAt: string, subscriptionId: int, email: string, repository: string, release: array{tagName: string, name: string, htmlUrl: string, publishedAt: string}} */
+    /** @return array{schema: string, eventId: string, occurredAt: string, subscriptionId: int, email: string, repository: string, release: array{tagName: string, name: string, htmlUrl: string, publishedAt: string, body: string}} */
     public function toArray(SendReleaseEmail $message): array
     {
         return [
@@ -36,6 +36,7 @@ final readonly class SendReleaseEmailSerializer
                 'name' => $message->release->name,
                 'htmlUrl' => $message->release->htmlUrl,
                 'publishedAt' => $message->release->publishedAt,
+                'body' => $message->release->body,
             ],
         ];
     }

@@ -177,6 +177,7 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
                 'Release v1.2.3',
                 'https://github.com/owner/repo/releases/tag/v1.2.3',
                 (new \DateTimeImmutable('2026-06-07T11:00:00+00:00'))->format(\DateTimeInterface::RFC3339),
+                'release notes body',
             ),
         );
     }

@@ -32,13 +32,14 @@ use PhpAmqpLib\Message\AMQPMessage;
  *    violation of "rejected straight to the DLQ" for malformed messages.
  *
  * 2. Invoke `$handler->handle($releaseEmail)` on a *well-formed* message. A
- *    `\Throwable` here (e.g. `Mailer::send()`'s SMTP exception, propagating
- *    uncaught through D3's no-try/catch handler) means the failure is
- *    *environmental* — the message might succeed on a later attempt. We
- *    delegate the bound-check entirely to `RabbitConsumer::shouldRouteToDlq()`
- *    (never reimplementing `x-death` counting here): below the bound →
- *    `nack(requeue: true)` (redeliver, bounded retry continues); bound
- *    exceeded → `nack(requeue: false)` (DLQ).
+ *    `\Throwable` here (e.g. `Mailer::send()`'s SMTP exception) means the
+ *    failure is *environmental* — the message might succeed on a later attempt.
+ *    We delegate the bound-check to `RabbitConsumer::shouldRouteToDlq()` (reads
+ *    `x-retry-count`): below the bound → `requeueWithRetry()` (publishes a new
+ *    copy with incremented `x-retry-count`, acks original); bound exceeded →
+ *    `nack(requeue: false)` (DLQ). Using `requeueWithRetry` instead of
+ *    `nack(requeue: true)` is essential — plain requeue does NOT increment
+ *    `x-death`, so reading `x-death` for retry counting never fires.
  *
  * Catching `\Throwable` (not `\Exception`) around the handler invocation
  * mirrors this consumer's job as the worker's outermost safety net — nothing
@@ -102,11 +103,11 @@ final readonly class SendReleaseEmailConsumer
             // Transient failure on a well-formed message — bounded retry via
             // the broker's x-death count, delegated to RabbitConsumer.
             $this->stats->recordFailed();
-            if ($this->consumer->shouldRouteToDlq($message, self::QUEUE, self::MAX_REDELIVERIES)) {
+            if ($this->consumer->shouldRouteToDlq($message, self::MAX_REDELIVERIES)) {
                 $this->stats->recordDlq();
                 $this->consumer->nack($message, requeue: false);
             } else {
-                $this->consumer->nack($message, requeue: true);
+                $this->consumer->requeueWithRetry($message);
             }
         }
     }

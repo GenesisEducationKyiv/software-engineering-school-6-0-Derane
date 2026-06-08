@@ -263,6 +263,7 @@ final class IdempotencyProofTest extends IntegrationTestCase
             'release' => [
                 'tagName' => 'v0-' . $token,
                 'name' => 'Idempotency Proof Release ' . $token,
+                'body' => 'Idempotency proof release body for ' . $token,
                 'htmlUrl' => 'https://example.test/releases/' . $token,
                 'publishedAt' => (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339),
             ],

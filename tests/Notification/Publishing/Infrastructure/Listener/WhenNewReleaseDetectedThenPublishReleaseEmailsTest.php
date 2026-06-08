@@ -73,7 +73,8 @@ final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
                 new ReleaseTag('v1.2.3'),
                 'Release name',
                 'https://github.com/owner/repo/releases/tag/v1.2.3',
-                '2026-06-07T11:00:00+00:00'
+                '2026-06-07T11:00:00+00:00',
+                'release notes body',
             )
         );
     }
@@ -136,6 +137,7 @@ final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
         self::assertSame('Release name', $factoryCalls[0][3]->name);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $factoryCalls[0][3]->htmlUrl);
         self::assertSame('2026-06-07T11:00:00+00:00', $factoryCalls[0][3]->publishedAt);
+        self::assertSame('release notes body', $factoryCalls[0][3]->body);
 
         self::assertCount(3, $published);
         self::assertSame([1, 2, 3], array_map(static fn(SendReleaseEmail $m): int => $m->subscriptionId, $published));

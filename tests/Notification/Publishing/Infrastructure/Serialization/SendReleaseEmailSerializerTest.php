@@ -37,7 +37,8 @@ final class SendReleaseEmailSerializerTest extends TestCase
                 new ReleaseTag('v1.2.3'),
                 'Release v1.2.3',
                 'https://github.com/owner/repo/releases/tag/v1.2.3',
-                new \DateTimeImmutable('2026-06-07T11:00:00+00:00')->format(\DateTimeInterface::RFC3339)
+                new \DateTimeImmutable('2026-06-07T11:00:00+00:00')->format(\DateTimeInterface::RFC3339),
+                'Release body text.',
             )
         );
 
@@ -53,7 +54,8 @@ final class SendReleaseEmailSerializerTest extends TestCase
                     "tagName": "v1.2.3",
                     "name": "Release v1.2.3",
                     "htmlUrl": "https://github.com/owner/repo/releases/tag/v1.2.3",
-                    "publishedAt": "2026-06-07T11:00:00+00:00"
+                    "publishedAt": "2026-06-07T11:00:00+00:00",
+                    "body": "Release body text."
                 }
             }
             JSON;
@@ -72,7 +74,7 @@ final class SendReleaseEmailSerializerTest extends TestCase
             array_keys($array)
         );
         $this->assertSame(
-            ['tagName', 'name', 'htmlUrl', 'publishedAt'],
+            ['tagName', 'name', 'htmlUrl', 'publishedAt', 'body'],
             array_keys($array['release'])
         );
     }
@@ -130,7 +132,8 @@ final class SendReleaseEmailSerializerTest extends TestCase
                 new ReleaseTag('v1.2.3'),
                 'Release v1.2.3',
                 'https://github.com/owner/repo/releases/tag/v1.2.3',
-                '2026-06-07T11:00:00+00:00'
+                '2026-06-07T11:00:00+00:00',
+                'Release body text.',
             )
         );
     }

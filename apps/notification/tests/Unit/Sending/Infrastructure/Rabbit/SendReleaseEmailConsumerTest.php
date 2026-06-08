@@ -25,69 +25,19 @@ use PHPUnit\Framework\TestCase;
  * Tests SendReleaseEmailConsumer by wiring it with a real (mocked-channel)
  * RabbitConsumer and RabbitConnection — both are final readonly classes and
  * cannot be doubled by PHPUnit. The underlying AMQPChannel is mocked to
- * simulate broker ack/nack acknowledgement without a live broker, and real
- * AMQPMessage fixtures (optionally carrying crafted `application_headers`/
- * `x-death` records) stand in for delivered messages — mirroring
- * RabbitConsumerTest's (C4) `connectionWrapping()`/`deliveredMessage()`/
- * `messageWithXDeath()` pattern and RabbitReleaseNotificationPublisherTest's
- * (C5) "real final-readonly collaborator + mocked AMQPChannel" approach.
- *
- * The most important test in story D4 — independently proves all branches of
- * the malformed-vs-transient design (Technical Decisions §1): ack-on-success,
- * ack-on-idempotent-skip, two distinct poison-message-straight-to-DLQ
- * scenarios (undecodable JSON, missing required field), transient-failure
- * bounded-retry, and transient-failure-exhausted-to-DLQ.
+ * simulate broker ack/nack/publish acknowledgement without a live broker.
  *
  * ## Proving "malformed messages never consult the bound-check" without
  * mocking RabbitConsumer directly
  *
- * The original draft of this test mocked `RabbitConsumer` and asserted
- * `expects(self::never())->method('shouldRouteToDlq')` on the malformed-message
- * path. With the REAL `RabbitConsumer` wired in, that call is no longer an
- * interceptable collaborator method — `shouldRouteToDlq()` only ever reads
- * the message's own `application_headers`, so "never consulted" cannot be
- * observed by spying on it directly.
- *
- * Instead, {@see self::testRoutesMalformedJsonStraightToDlqWithoutCheckingRedeliveries()}
- * and {@see self::testRoutesMessageWithMissingRequiredFieldStraightToDlq()} prove
- * the same claim *behaviourally*: each malformed fixture carries an `x-death`
- * header whose redelivery count for `notifications.send-email` sits **below**
- * `SendReleaseEmailConsumer::MAX_REDELIVERIES` — i.e. `shouldRouteToDlq()`
- * would return `false` if it were consulted, which (per the transient-failure
- * branch) would produce `nack(requeue: true)`. The test asserts the broker
- * instead receives `basic_nack(..., requeue: false)` — straight to the DLQ on
- * first sighting, regardless of what the bound-check would have said. This is
- * only possible if `handleDelivery()` short-circuits to the poison-message
- * branch *before* ever calling `shouldRouteToDlq()` — exactly the contract
- * the class docblock describes ("no bound check, ever, for this path").
- *
- * ## Two test-double design notes worth documenting
- *
- * 1. `RabbitConsumer`/`RabbitConnection` are wired for real over a mocked
- *    `AMQPChannel` (see above) — needed to prove the ack/nack/DLQ-routing
- *    outcomes, the very crux of this story's branching contract, against the
- *    real bounded-retry implementation rather than a stand-in for it.
- *
- * 2. `SendReleaseEmailMessageMapper` and `SendReleaseEmailHandler` are NOT
- *    mocked — both are `final readonly class` (the mapper by this story's own
- *    design choice; the handler is D3's shipped, reviewed deliverable this
- *    story must not touch), and PHPUnit 10's native MockObject unconditionally
- *    refuses to double `final`/`readonly` classes (`ClassIsFinalException`/
- *    `ClassIsReadonlyException` — no opt-out in this version). Using REAL
- *    instances is not a compromise here, though — it is arguably the stronger
- *    design:
- *    - the REAL mapper, fed crafted JSON bodies (valid / undecodable / missing
- *      a required field), proves the consumer's poison-detection branch
- *      against the actual deserialization contract `SendReleaseEmailMessageMapperTest`
- *      pins exhaustively elsewhere — exactly what AC4 cares about end-to-end;
- *    - the REAL handler, wired with mocked `NotificationLedger`/`EmailRenderer`/`Mailer`
- *      port doubles (all interfaces — freely mockable), lets this test drive
- *      "handler succeeds" / "handler throws" through `Mailer::send()` — the
- *      natural place to simulate a transient SMTP failure, exactly as the
- *      Technical Decisions narrative frames it ("e.g. Mailer::send() throws an
- *      SMTP exception — propagates uncaught through SendReleaseEmailHandler::handle()
- *      per D3's no-try/catch contract") — proving the consumer's branching
- *      against the handler's REAL propagation behavior.
+ * The malformed-message fixtures carry an `x-retry-count` header whose value
+ * sits **below** `SendReleaseEmailConsumer::MAX_REDELIVERIES` — i.e.
+ * `shouldRouteToDlq()` would return `false` if consulted (leading to
+ * `requeueWithRetry`), which would produce `basic_publish` + `basic_ack`.
+ * The test asserts the broker instead receives `basic_nack(..., requeue: false)`
+ * — straight to the DLQ on first sighting — which is only possible if
+ * `handleDelivery()` short-circuits to the poison-message branch *before* ever
+ * calling `shouldRouteToDlq()`.
  */
 final class SendReleaseEmailConsumerTest extends TestCase
 {
@@ -104,6 +54,7 @@ final class SendReleaseEmailConsumerTest extends TestCase
       "release": {
         "tagName": "v1.2.3",
         "name": "Release name",
+        "body": "Release body text.",
         "htmlUrl": "https://github.com/owner/repo/releases/tag/v1.2.3",
         "publishedAt": "2026-06-07T11:00:00+00:00"
       }
@@ -179,16 +130,15 @@ final class SendReleaseEmailConsumerTest extends TestCase
     {
         $captured = [];
         $channel = $this->ackingNackingChannelCapturing($captured);
-        // Carries an x-death count BELOW MAX_REDELIVERIES: were the bound-check
-        // ever consulted for this path, shouldRouteToDlq() would return false,
-        // and the transient-failure branch would requeue (nack ..., true).
-        // Observing nack(..., false) instead proves the poison branch never
-        // asks — it routes to the DLQ unconditionally, on first sighting.
-        $message = $this->deliveredMessageWithXDeath(
+        // Carries an x-retry-count BELOW MAX_REDELIVERIES: were the bound-check
+        // consulted for this path, shouldRouteToDlq() would return false, and
+        // requeueWithRetry() would fire (basic_publish + basic_ack). Observing
+        // nack(..., false) proves the poison branch never asks.
+        $message = $this->deliveredMessageWithRetryCount(
             $channel,
             deliveryTag: 3,
             body: self::INVALID_JSON,
-            redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
+            retryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
         $this->stats->expects(self::once())->method('recordConsumed');
         $this->stats->expects(self::never())->method('recordFailed');
@@ -206,14 +156,13 @@ final class SendReleaseEmailConsumerTest extends TestCase
     {
         $captured = [];
         $channel = $this->ackingNackingChannelCapturing($captured);
-        // Same below-the-bound x-death fixture as the undecodable-JSON case —
-        // see that test's comment for why this proves the bound-check is
-        // never consulted on the poison-message path.
-        $message = $this->deliveredMessageWithXDeath(
+        // Same below-the-bound fixture as the undecodable-JSON case — see that
+        // test's comment for why this proves the bound-check is never consulted.
+        $message = $this->deliveredMessageWithRetryCount(
             $channel,
             deliveryTag: 4,
             body: self::MISSING_FIELD_JSON,
-            redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
+            retryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
         $this->stats->expects(self::once())->method('recordConsumed');
         $this->stats->expects(self::never())->method('recordFailed');
@@ -231,11 +180,11 @@ final class SendReleaseEmailConsumerTest extends TestCase
     {
         $captured = [];
         $channel = $this->ackingNackingChannelCapturing($captured);
-        $message = $this->deliveredMessageWithXDeath(
+        $message = $this->deliveredMessageWithRetryCount(
             $channel,
             deliveryTag: 5,
             body: self::VALID_JSON,
-            redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
+            retryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES - 1,
         );
         $this->stats->expects(self::once())->method('recordConsumed');
         $this->stats->expects(self::once())->method('recordFailed');
@@ -244,18 +193,19 @@ final class SendReleaseEmailConsumerTest extends TestCase
 
         $this->consumerWith($channel)->handleDelivery($message);
 
-        self::assertSame(['nack' => [5, true]], $captured);
+        // requeueWithRetry: basic_publish fires first, then basic_ack
+        self::assertSame(['published' => true, 'ack' => 5], $captured);
     }
 
     public function testRoutesToDlqWhenRedeliveryBoundExceeded(): void
     {
         $captured = [];
         $channel = $this->ackingNackingChannelCapturing($captured);
-        $message = $this->deliveredMessageWithXDeath(
+        $message = $this->deliveredMessageWithRetryCount(
             $channel,
             deliveryTag: 6,
             body: self::VALID_JSON,
-            redeliveryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES + 1,
+            retryCount: SendReleaseEmailConsumer::MAX_REDELIVERIES,
         );
         $this->stats->expects(self::once())->method('recordConsumed');
         $this->stats->expects(self::once())->method('recordFailed');
@@ -286,6 +236,7 @@ final class SendReleaseEmailConsumerTest extends TestCase
         $this->ledger->method('hasBeenSent')->willReturn(false);
         $this->renderer->method('render')->willReturn(new RenderedEmail('Subject', '<p>html</p>', 'text'));
         $this->mailer->method('send')->willThrowException($exception);
+        $this->ledger->method('recordFailedAttempt');
     }
 
     /** Builds the consumer-under-test wired with the REAL RabbitConsumer/RabbitConnection chain. */
@@ -299,13 +250,15 @@ final class SendReleaseEmailConsumerTest extends TestCase
     }
 
     /**
-     * Returns an AMQPChannel mock that records exactly which acknowledgement
-     * the broker received — `['ack' => $deliveryTag]` or
-     * `['nack' => [$deliveryTag, $requeue]]` — into $captured by reference.
-     * `AMQPMessage::ack()`/`nack()` delegate to `basic_ack`/`basic_nack` on
-     * the message's bound channel (set via `setChannel`/`setDeliveryInfo` —
-     * see {@see self::deliveredMessage()}), exactly like the real broker
-     * round-trip `RabbitConsumerTest` exercises.
+     * Returns an AMQPChannel mock that records ack/nack/publish outcomes into
+     * $captured by reference.
+     *
+     * - `basic_publish`: sets `$captured['published'] = true` (additive)
+     * - `basic_ack`: sets `$captured['ack'] = $deliveryTag` (additive)
+     * - `basic_nack`: sets `$captured = ['nack' => [$deliveryTag, $requeue]]` (overwrites)
+     *
+     * For `requeueWithRetry()`, publish fires before ack, so the final map is
+     * `['published' => true, 'ack' => $deliveryTag]`.
      *
      * @param array<string, mixed> $captured passed by reference
      * @return AMQPChannel&MockObject
@@ -314,9 +267,14 @@ final class SendReleaseEmailConsumerTest extends TestCase
     {
         $channel = $this->channelBase();
 
+        $channel->method('basic_publish')->willReturnCallback(
+            function () use (&$captured): void {
+                $captured['published'] = true;
+            }
+        );
         $channel->method('basic_ack')->willReturnCallback(
             function (int $deliveryTag) use (&$captured): void {
-                $captured = ['ack' => $deliveryTag];
+                $captured['ack'] = $deliveryTag;
             }
         );
         $channel->method('basic_nack')->willReturnCallback(
@@ -344,7 +302,7 @@ final class SendReleaseEmailConsumerTest extends TestCase
         return new RabbitConnection($channel);
     }
 
-    /** A freshly-delivered message — no `x-death` header (first delivery). */
+    /** A freshly-delivered message — no `x-retry-count` header (first delivery). */
     private function deliveredMessage(AMQPChannel $channel, int $deliveryTag): AMQPMessage
     {
         $message = new AMQPMessage(self::VALID_JSON);
@@ -354,23 +312,17 @@ final class SendReleaseEmailConsumerTest extends TestCase
     }
 
     /**
-     * A redelivered message carrying an `x-death` record for
-     * `notifications.send-email` with the given total `count` — drives
-     * `RabbitConsumer::shouldRouteToDlq()`'s real bounded-retry arithmetic,
-     * mirroring `RabbitConsumerTest::messageWithXDeath()`.
+     * A message carrying an `x-retry-count` application header — drives
+     * `RabbitConsumer::shouldRouteToDlq()`'s real bounded-retry arithmetic.
      */
-    private function deliveredMessageWithXDeath(
+    private function deliveredMessageWithRetryCount(
         AMQPChannel $channel,
         int $deliveryTag,
         string $body,
-        int $redeliveryCount,
+        int $retryCount,
     ): AMQPMessage {
         $message = new AMQPMessage($body, [
-            'application_headers' => new AMQPTable([
-                'x-death' => [
-                    ['queue' => self::QUEUE, 'reason' => 'rejected', 'count' => $redeliveryCount],
-                ],
-            ]),
+            'application_headers' => new AMQPTable(['x-retry-count' => $retryCount]),
         ]);
         $message->setChannel($channel)->setDeliveryInfo($deliveryTag, true, 'notifications', 'release.email');
 

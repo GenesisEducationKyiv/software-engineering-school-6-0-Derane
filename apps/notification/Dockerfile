@@ -24,7 +24,9 @@ COPY config/ config/
 COPY migrations/ migrations/
 COPY http/ http/
 
-CMD ["php", "bin/consumer.php"]
+EXPOSE 8081
+
+CMD ["sh", "bin/start.sh"]
 
 FROM base AS dev
 

@@ -117,6 +117,8 @@ services:
       RABBITMQ_PORT: 5672
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
+    ports:
+      - "8081:8081"
     depends_on:
       rabbitmq:
         condition: service_healthy

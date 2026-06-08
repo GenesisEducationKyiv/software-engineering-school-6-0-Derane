@@ -43,20 +43,21 @@ use App\Sending\Domain\ReleaseEmail;
  *
  * | `ReleaseEmail` property | wire JSON path      | required type |
  * |-------------------------|---------------------|---------------|
+ * | `eventId`               | `eventId`           | `string`      |
  * | `subscriptionId`        | `subscriptionId`    | `int`         |
  * | `recipientEmail`        | `email`             | `string`      |
  * | `repository`            | `repository`        | `string`      |
  * | `tagName`               | `release.tagName`   | `string`      |
  * | `releaseName`           | `release.name`      | `string`      |
+ * | `releaseBody`           | `release.body`      | `string`      |
  * | `releaseUrl`            | `release.htmlUrl`   | `string`      |
  * | `publishedAt`           | `release.publishedAt` | `string`    |
  *
- * `schema`/`eventId`/`occurredAt` are envelope/correlation fields — D3
- * deliberately excluded them from `ReleaseEmail`; this mapper does not read
- * them into the VO (a future logging/correlation hook MAY read `eventId`
- * directly off the decoded payload without involving `ReleaseEmail`).
+ * `schema` is validated to be exactly `'SendReleaseEmail/v1'`; a wrong or
+ * missing value is treated as a malformed message and routed to the DLQ.
+ * `occurredAt` is envelope metadata not relevant to the sending domain.
  *
- * Every one of the seven paths above is checked for BOTH presence AND type.
+ * Every one of the nine paths above is checked for BOTH presence AND type.
  * `json_decode($json, true)` produces untyped `mixed` values — a
  * `subscriptionId` that decodes as the JSON string `"42"`, a `null`
  * `release.tagName`, or a missing `release` object entirely are all malformed
@@ -71,18 +72,29 @@ final readonly class SendReleaseEmailMessageMapper
      *         JSON, is not a JSON object, or is missing/wrong-types any of the
      *         seven required fields.
      */
+    private const EXPECTED_SCHEMA = 'SendReleaseEmail/v1';
+
     public function fromJson(string $json): ReleaseEmail
     {
         $payload = $this->decode($json);
 
+        $schema = $this->requireString($payload, 'schema');
+        if ($schema !== self::EXPECTED_SCHEMA) {
+            throw new MalformedReleaseEmailMessageException(
+                "SendReleaseEmail/v1 message has unknown schema \"{$schema}\"; expected \"" . self::EXPECTED_SCHEMA . '".'
+            );
+        }
+
         $release = $this->requireObject($payload, 'release');
 
         return new ReleaseEmail(
+            eventId: $this->requireString($payload, 'eventId'),
             subscriptionId: $this->requireInt($payload, 'subscriptionId'),
             recipientEmail: $this->requireString($payload, 'email'),
             repository: $this->requireString($payload, 'repository'),
             tagName: $this->requireString($release, 'release.tagName', 'tagName'),
             releaseName: $this->requireString($release, 'release.name', 'name'),
+            releaseBody: $this->requireString($release, 'release.body', 'body'),
             releaseUrl: $this->requireString($release, 'release.htmlUrl', 'htmlUrl'),
             publishedAt: $this->requireString($release, 'release.publishedAt', 'publishedAt'),
         );

@@ -29,6 +29,7 @@ $payload = [
     'release' => [
         'tagName' => 'v0-' . $token,
         'name' => 'Smoke Release ' . $token,
+        'body' => 'Smoke release body',
         'htmlUrl' => 'https://example.test/releases/' . $token,
         'publishedAt' => (new DateTimeImmutable())->format(DateTimeInterface::RFC3339),
     ],

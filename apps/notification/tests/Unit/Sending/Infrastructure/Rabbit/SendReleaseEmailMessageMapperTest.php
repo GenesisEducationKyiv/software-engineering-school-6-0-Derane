@@ -21,6 +21,7 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
       "release": {
         "tagName": "v1.2.3",
         "name": "Release name",
+        "body": "Release body text.",
         "htmlUrl": "https://github.com/owner/repo/releases/tag/v1.2.3",
         "publishedAt": "2026-06-07T11:00:00+00:00"
       }
@@ -39,13 +40,33 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
     {
         $email = $this->mapper->fromJson(self::VALID_JSON);
 
+        self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
         self::assertSame(42, $email->subscriptionId);
         self::assertSame('subscriber@example.com', $email->recipientEmail);
         self::assertSame('owner/repo', $email->repository);
         self::assertSame('v1.2.3', $email->tagName);
         self::assertSame('Release name', $email->releaseName);
+        self::assertSame('Release body text.', $email->releaseBody);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
         self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);
+    }
+
+    public function testThrowsOnWrongSchema(): void
+    {
+        $json = self::jsonWith(['schema' => 'SendReleaseEmail/v2']);
+
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    public function testThrowsOnMissingSchema(): void
+    {
+        $json = self::jsonWithout('schema');
+
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
     }
 
     public function testThrowsOnInvalidJson(): void
@@ -69,7 +90,7 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
             yield "missing {$field}" => [self::jsonWithout($field)];
         }
 
-        foreach (['tagName', 'name', 'htmlUrl', 'publishedAt'] as $releaseField) {
+        foreach (['tagName', 'name', 'body', 'htmlUrl', 'publishedAt'] as $releaseField) {
             yield "missing release.{$releaseField}" => [self::jsonWithoutReleaseField($releaseField)];
         }
     }
@@ -91,6 +112,7 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
         yield 'release as string' => [self::jsonWith(['release' => 'not-an-object'])];
         yield 'release.tagName as null' => [self::jsonWithReleaseField('tagName', null)];
         yield 'release.name as number' => [self::jsonWithReleaseField('name', 1)];
+        yield 'release.body as number' => [self::jsonWithReleaseField('body', 1)];
         yield 'release.htmlUrl as number' => [self::jsonWithReleaseField('htmlUrl', 1)];
         yield 'release.publishedAt as number' => [self::jsonWithReleaseField('publishedAt', 1)];
     }

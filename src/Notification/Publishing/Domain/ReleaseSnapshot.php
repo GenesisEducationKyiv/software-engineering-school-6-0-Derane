@@ -26,7 +26,8 @@ final readonly class ReleaseSnapshot
         public ReleaseTag $tagName,
         public string $name,
         public string $htmlUrl,
-        public string $publishedAt
+        public string $publishedAt,
+        public string $body,
     ) {
     }
 }

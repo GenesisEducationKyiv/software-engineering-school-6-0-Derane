@@ -42,6 +42,18 @@ final class PdoNotificationLedgerTest extends TestCase
         self::assertTrue($this->ledger->hasBeenSent(1, 'v1.0.0', 'owner/repo'));
     }
 
+    public function testHasBeenSentRequiresSentAtToBeNonNull(): void
+    {
+        $this->pdo->expects(self::once())
+            ->method('prepare')
+            ->with(self::stringContains('sent_at IS NOT NULL'))
+            ->willReturn($this->stmt);
+        $this->stmt->method('execute')->willReturn(true);
+        $this->stmt->method('fetchColumn')->willReturn('0');
+
+        $this->ledger->hasBeenSent(1, 'v1.0.0', 'owner/repo');
+    }
+
     public function testMarkSentExecutesInsertWithCorrectParameters(): void
     {
         $this->pdo->method('prepare')->willReturn($this->stmt);
@@ -62,5 +74,41 @@ final class PdoNotificationLedgerTest extends TestCase
         $this->stmt->method('execute')->willReturn(true);
 
         $this->ledger->markSent(1, 'v1.0.0', 'owner/repo', 'user@example.com');
+    }
+
+    public function testRecordFailedAttemptExecutesUpsertWithError(): void
+    {
+        $this->pdo->expects(self::once())
+            ->method('prepare')
+            ->with(self::stringContains('ON CONFLICT'))
+            ->willReturn($this->stmt);
+        $this->stmt->expects(self::once())
+            ->method('execute')
+            ->with([
+                ':sub'   => 42,
+                ':tag'   => 'v1.0.0',
+                ':repo'  => 'owner/repo',
+                ':email' => 'user@example.com',
+                ':error' => 'SMTP timeout',
+            ])
+            ->willReturn(true);
+
+        $this->ledger->recordFailedAttempt(42, 'v1.0.0', 'owner/repo', 'user@example.com', 'SMTP timeout');
+    }
+
+    public function testRecordFailedAttemptDoesNotSetSentAt(): void
+    {
+        $capturedSql = '';
+        $this->pdo->expects(self::once())
+            ->method('prepare')
+            ->willReturnCallback(function (string $sql) use (&$capturedSql): \PDOStatement {
+                $capturedSql = $sql;
+                return $this->stmt;
+            });
+        $this->stmt->method('execute')->willReturn(true);
+
+        $this->ledger->recordFailedAttempt(1, 'v1.0.0', 'owner/repo', 'user@example.com', 'connection refused');
+
+        self::assertStringNotContainsString('sent_at', $capturedSql);
     }
 }

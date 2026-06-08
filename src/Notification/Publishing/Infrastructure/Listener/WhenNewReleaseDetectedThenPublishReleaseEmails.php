@@ -78,7 +78,8 @@ final readonly class WhenNewReleaseDetectedThenPublishReleaseEmails
             new ReleaseTag($tag),
             $event->release->name,
             $event->release->htmlUrl,
-            $event->release->publishedAt
+            $event->release->publishedAt,
+            $event->release->body,
         );
 
         foreach ($recipients as $subscriber) {

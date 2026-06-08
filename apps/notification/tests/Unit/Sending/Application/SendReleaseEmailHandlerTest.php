@@ -35,11 +35,13 @@ final class SendReleaseEmailHandlerTest extends TestCase
     private function email(): ReleaseEmail
     {
         return new ReleaseEmail(
+            eventId: '11111111-1111-4111-8111-111111111111',
             subscriptionId: 42,
             recipientEmail: 'subscriber@example.com',
             repository: 'owner/repo',
             tagName: 'v1.2.3',
             releaseName: 'Release name',
+            releaseBody: 'Release description text.',
             releaseUrl: 'https://github.com/owner/repo/releases/tag/v1.2.3',
             publishedAt: '2026-06-07T11:00:00+00:00',
         );
@@ -91,6 +93,32 @@ final class SendReleaseEmailHandlerTest extends TestCase
         $this->handler->handle($email);
     }
 
+    public function testRecordsFailedAttemptAndRethrowsWhenMailerThrows(): void
+    {
+        $email = $this->email();
+        $rendered = new RenderedEmail('New Release: owner/repo v1.2.3', '<p>html</p>', 'text');
+
+        $this->ledger->method('hasBeenSent')->willReturn(false);
+        $this->renderer->method('render')->willReturn($rendered);
+
+        $this->mailer->expects(self::once())
+            ->method('send')
+            ->willThrowException(new \RuntimeException('SMTP timeout'));
+
+        $this->ledger->expects(self::once())
+            ->method('recordFailedAttempt')
+            ->with(42, 'v1.2.3', 'owner/repo', 'subscriber@example.com', 'SMTP timeout');
+
+        $this->ledger->expects(self::never())->method('markSent');
+        $this->outcomes->expects(self::never())->method('recordDelivered');
+        $this->outcomes->expects(self::never())->method('recordDeduped');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('SMTP timeout');
+
+        $this->handler->handle($email);
+    }
+
     public function testDoesNotMarkSentWhenMailerThrows(): void
     {
         $email = $this->email();
@@ -108,7 +136,6 @@ final class SendReleaseEmailHandlerTest extends TestCase
         $this->outcomes->expects(self::never())->method('recordDeduped');
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('SMTP timeout');
 
         $this->handler->handle($email);
     }

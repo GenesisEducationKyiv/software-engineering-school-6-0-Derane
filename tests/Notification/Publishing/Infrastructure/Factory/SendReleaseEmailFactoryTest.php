@@ -26,7 +26,8 @@ final class SendReleaseEmailFactoryTest extends TestCase
             new ReleaseTag('v1.2.3'),
             'Release name',
             'https://github.com/owner/repo/releases/tag/v1.2.3',
-            '2026-06-07T11:00:00+00:00'
+            '2026-06-07T11:00:00+00:00',
+            'release notes body',
         );
 
         $message = $factory->fromRecipient(123, $email, $repository, $release);
@@ -85,7 +86,8 @@ final class SendReleaseEmailFactoryTest extends TestCase
             new ReleaseTag('v1.0.0'),
             'name',
             'https://example.com',
-            '2026-06-07T11:00:00+00:00'
+            '2026-06-07T11:00:00+00:00',
+            'release notes body',
         );
     }
 }

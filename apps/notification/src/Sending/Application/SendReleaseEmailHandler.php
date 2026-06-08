@@ -29,7 +29,18 @@ final readonly class SendReleaseEmailHandler
 
         $rendered = $this->renderer->render($email);
 
-        $this->mailer->send($email->recipientEmail, $rendered);
+        try {
+            $this->mailer->send($email->recipientEmail, $rendered);
+        } catch (\Throwable $e) {
+            $this->ledger->recordFailedAttempt(
+                $email->subscriptionId,
+                $email->tagName,
+                $email->repository,
+                $email->recipientEmail,
+                $e->getMessage(),
+            );
+            throw $e;
+        }
 
         $this->ledger->markSent($email->subscriptionId, $email->tagName, $email->repository, $email->recipientEmail);
         $this->outcomes->recordDelivered();
