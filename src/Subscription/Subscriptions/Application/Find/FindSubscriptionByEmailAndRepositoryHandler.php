@@ -29,9 +29,7 @@ final readonly class FindSubscriptionByEmailAndRepositoryHandler implements Quer
     {
         $subscription = $this->repository->findByEmailAndRepository($query->email, $query->repository);
         if ($subscription === null) {
-            throw new \RuntimeException(
-                "Subscription not found after insert for {$query->email}"
-            );
+            throw SubscriptionNotFoundException::forEmailAndRepository($query->email, $query->repository);
         }
 
         return $this->responseFactory->fromAggregate($subscription);

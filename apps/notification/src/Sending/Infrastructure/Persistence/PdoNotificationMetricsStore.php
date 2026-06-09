@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Sending\Infrastructure\Persistence;
 
-use App\Sending\Domain\DeliveryOutcomeRecorder;
-use App\Sending\Domain\MessageProcessingStatsRecorder;
-use App\Sending\Domain\NotificationMetricsReader;
+use App\Sending\Application\DeliveryOutcomeRecorder;
+use App\Sending\Application\MessageProcessingStatsRecorder;
+use App\Sending\Application\NotificationMetricsReader;
 
 final readonly class PdoNotificationMetricsStore implements
     DeliveryOutcomeRecorder,
@@ -27,6 +27,12 @@ final readonly class PdoNotificationMetricsStore implements
     public function recordFailed(): void
     {
         $this->increment('failed_total');
+    }
+
+    #[\Override]
+    public function recordContention(): void
+    {
+        $this->increment('contention_total');
     }
 
     #[\Override]
@@ -69,6 +75,12 @@ final readonly class PdoNotificationMetricsStore implements
     public function failedCount(): int
     {
         return $this->count('failed_total');
+    }
+
+    #[\Override]
+    public function contentionCount(): int
+    {
+        return $this->count('contention_total');
     }
 
     #[\Override]

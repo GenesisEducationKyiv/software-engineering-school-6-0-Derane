@@ -102,20 +102,11 @@ deptrac:
           value: src/Notification/Publishing/Infrastructure/.*
 
     # ---------------------------------------------------------------------
-    # Notification\Sending context (the EXTRACTED service's context)
+    # Notification\Sending (the extracted service) lives entirely under
+    # apps/notification/src — collected by Apps.Notification below and
+    # additionally governed by apps/notification/deptrac.yaml's own
+    # Domain/Application/Infrastructure ruleset.
     # ---------------------------------------------------------------------
-    - name: NotificationSending.Domain
-      collectors:
-        - type: directory
-          value: src/Notification/Sending/Domain/.*
-    - name: NotificationSending.Application
-      collectors:
-        - type: directory
-          value: src/Notification/Sending/Application/.*
-    - name: NotificationSending.Infrastructure
-      collectors:
-        - type: directory
-          value: src/Notification/Sending/Infrastructure/.*
 
     # ---------------------------------------------------------------------
     # apps/* deployables (composition roots / thin entrypoints)
@@ -131,22 +122,11 @@ deptrac:
 
     # ---------------------------------------------------------------------
     # Legacy flat code (transitional; drains over Epic B). Layer-only, no context.
+    # Legacy.Domain (src/Domain, src/Exception) drained in B5 and
+    # Legacy.Application (src/Validation) drained when the validators were
+    # absorbed into the Shared VOs — both layers are gone, only
+    # Legacy.Infrastructure remains.
     # ---------------------------------------------------------------------
-    - name: Legacy.Domain
-      collectors:
-        # B5 drained both src/Domain/ and src/Exception/ (now deleted) — these
-        # collectors match nothing. Kept because deptrac requires >= 1 collector
-        # per layer and Legacy.{Application,Infrastructure} rulesets still grant
-        # this layer; a follow-up can drop Legacy.Domain entirely once nothing
-        # references it.
-        - type: directory
-          value: src/Domain/.*
-        - type: directory
-          value: src/Exception/.*
-    - name: Legacy.Application
-      collectors:
-        - type: directory
-          value: src/Validation/.*
     - name: Legacy.Infrastructure
       collectors:
         - type: directory
@@ -183,7 +163,6 @@ deptrac:
       - Shared.Application
       - Releases.Domain               # B1 grant: repositoryExists() port (GitHubServiceInterface)
       - RepositoryTracking.Domain     # B1 grant: ensureExists() port (TrackedRepositoryRegistrar)
-      - Legacy.Application            # B1 transitional: SubscriptionValidator -> App\Validation\* (B5 removes when validators move)
     Subscription.Infrastructure:
       - Subscription.Domain
       - Subscription.Application
@@ -237,44 +216,29 @@ deptrac:
 
     # ===== Notification\Publishing. Its Domain stays free of cross-context edges:
     # SendReleaseEmail/ReleaseSnapshot are deliberately decoupled from Releases so the
-    # wire message can cross the queue boundary. The one cross-context edge it needs is
-    # at the Infrastructure layer:
-    #  - NotificationPublishing.Infrastructure -> Subscription.Domain + Releases.Domain:
-    #    WhenNewReleaseDetectedThenPublishReleaseEmails (Infrastructure\Listener — see
-    #    its docblock for why it lives here, not in .Application: it depends on
-    #    SendReleaseEmailFactoryInterface, an Infrastructure\Factory port, and an
-    #    Application placement would invert the dependency rule) consumes the
-    #    Releases-owned NewReleaseDetected, resolves recipients via
-    #    SubscriberFinder/SubscriberCollection/SubscriberRef (Subscription.Domain) and
-    #    maps the event's Release into this context's own ReleaseSnapshot (Releases.Domain).
+    # wire message can cross the queue boundary. Cross-context *port* edges:
+    #  - NotificationPublishing.Application -> Subscription.Domain:
+    #    PublishReleaseEmailsForRelease (the use-case) resolves recipients via
+    #    SubscriberFinder/SubscriberCollection/SubscriberRef.
+    #  - NotificationPublishing.Infrastructure -> Releases.Domain:
+    #    WhenNewReleaseDetectedThenPublishReleaseEmails (thin Infrastructure\Listener
+    #    adapter) consumes the Releases-owned NewReleaseDetected and maps the event's
+    #    Release into this context's own ReleaseSnapshot before delegating — keeping
+    #    the Application layer free of any Releases.Domain dependency.
     NotificationPublishing.Domain:
       - Shared.Domain
     NotificationPublishing.Application:
       - NotificationPublishing.Domain
       - Shared.Domain
       - Shared.Application
+      - Subscription.Domain           # C2: PublishReleaseEmailsForRelease uses SubscriberFinder/SubscriberCollection/SubscriberRef
     NotificationPublishing.Infrastructure:
       - NotificationPublishing.Domain
       - NotificationPublishing.Application
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
-      - Subscription.Domain           # C2: WhenNewReleaseDetectedThenPublishReleaseEmails uses SubscriberFinder/SubscriberCollection/SubscriberRef
-      - Releases.Domain               # C2: maps the event's Releases\Sourcing\Domain\Release into this context's ReleaseSnapshot
-
-    # ===== Notification\Sending (extracted service)
-    NotificationSending.Domain:
-      - Shared.Domain
-    NotificationSending.Application:
-      - NotificationSending.Domain
-      - Shared.Domain
-      - Shared.Application
-    NotificationSending.Infrastructure:
-      - NotificationSending.Domain
-      - NotificationSending.Application
-      - Shared.Domain
-      - Shared.Application
-      - Shared.Infrastructure
+      - Releases.Domain               # C2: listener maps the event's Releases\Sourcing\Domain\Release into this context's ReleaseSnapshot
 
     # ===== apps/monolith: the monolith composition root — wires every monolith
     # context's layers + Shared + Legacy (during the transition).
@@ -296,31 +260,21 @@ deptrac:
       - NotificationPublishing.Domain
       - NotificationPublishing.Application
       - NotificationPublishing.Infrastructure
-      - Legacy.Domain
-      - Legacy.Application
       - Legacy.Infrastructure
 
     # ===== apps/notification (extracted service): MUST NOT reach monolith-only
-    # contexts. Allowed: Shared + NotificationSending only. Fully bites in Epic D.
+    # contexts. The Shared.* grants exist because the service's own
+    # src/Shared/** reuses the App\Shared\… FQCNs of the monolith's shared
+    # kernel (independent code, no composer dependency) — deptrac resolves
+    # those names to the monolith layers. Internal layering is enforced by
+    # apps/notification/deptrac.yaml.
     Apps.Notification:
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
-      - NotificationSending.Domain
-      - NotificationSending.Application
-      - NotificationSending.Infrastructure
 
-    # ===== Legacy transitional code (drains over Epic B). Its current
-    # Domain->Infra and Application->Infra leaks are absorbed by the baseline.
-    Legacy.Domain:
-      - Shared.Domain
-    Legacy.Application:
-      - Legacy.Domain
-      - Shared.Domain
-      - Shared.Application
+    # ===== Legacy transitional code (drains over Epic B).
     Legacy.Infrastructure:
-      - Legacy.Domain
-      - Legacy.Application
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sending\Infrastructure\Metrics;
 
-use App\Sending\Domain\NotificationMetricsReader;
+use App\Sending\Application\NotificationMetricsReader;
 
 final readonly class MetricsService implements MetricsServiceInterface
 {
@@ -41,6 +41,12 @@ final readonly class MetricsService implements MetricsServiceInterface
                 'Transient processing failures',
                 'counter',
                 $this->reader->failedCount()
+            ),
+            new Metric(
+                'notification_contention_total',
+                'Messages parked while another worker held the ledger claim',
+                'counter',
+                $this->reader->contentionCount()
             ),
             new Metric(
                 'notification_dlq_total',

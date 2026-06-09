@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Sending\Infrastructure\Metrics;
 
-use App\Sending\Domain\NotificationMetricsReader;
+use App\Sending\Application\NotificationMetricsReader;
 use App\Sending\Infrastructure\Metrics\MetricsService;
 use App\Sending\Infrastructure\Metrics\PrometheusFormatter;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -27,6 +27,7 @@ final class MetricsServiceTest extends TestCase
         $this->reader->method('deliveredCount')->willReturn(7);
         $this->reader->method('dedupedCount')->willReturn(3);
         $this->reader->method('failedCount')->willReturn(2);
+        $this->reader->method('contentionCount')->willReturn(5);
         $this->reader->method('dlqCount')->willReturn(1);
 
         $service = new MetricsService($this->reader, new PrometheusFormatter());
@@ -36,6 +37,7 @@ final class MetricsServiceTest extends TestCase
         self::assertStringContainsString('notification_delivered_total 7', $output);
         self::assertStringContainsString('notification_deduped_total 3', $output);
         self::assertStringContainsString('notification_failed_total 2', $output);
+        self::assertStringContainsString('notification_contention_total 5', $output);
         self::assertStringContainsString('notification_dlq_total 1', $output);
     }
 }

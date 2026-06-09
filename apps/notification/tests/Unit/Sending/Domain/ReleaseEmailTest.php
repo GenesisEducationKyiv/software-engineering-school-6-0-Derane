@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Sending\Domain;
 
+use App\Sending\Domain\NotificationKey;
 use App\Sending\Domain\ReleaseEmail;
 use PHPUnit\Framework\TestCase;
 
@@ -32,5 +33,22 @@ final class ReleaseEmailTest extends TestCase
         self::assertSame('Release description text.', $email->releaseBody);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
         self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);
+    }
+
+    public function testKeyExposesTheBusinessIdentityTripleWithoutTheEventId(): void
+    {
+        $email = new ReleaseEmail(
+            eventId: '11111111-1111-4111-8111-111111111111',
+            subscriptionId: 42,
+            recipientEmail: 'subscriber@example.com',
+            repository: 'owner/repo',
+            tagName: 'v1.2.3',
+            releaseName: 'Release name',
+            releaseBody: 'Release description text.',
+            releaseUrl: 'https://github.com/owner/repo/releases/tag/v1.2.3',
+            publishedAt: '2026-06-07T11:00:00+00:00',
+        );
+
+        self::assertEquals(new NotificationKey(42, 'v1.2.3', 'owner/repo'), $email->key());
     }
 }

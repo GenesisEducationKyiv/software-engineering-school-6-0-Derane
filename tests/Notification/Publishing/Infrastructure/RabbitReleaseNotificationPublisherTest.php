@@ -33,10 +33,10 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         $captured = [];
         $channel = $this->ackingChannelCapturingPublish($captured);
 
-        $this->adapterWith($channel)->publish($this->makeMessage());
+        $this->adapterWith($channel)->publishAll([$this->makeMessage()]);
 
-        self::assertSame('notifications', $captured['exchange']);
-        self::assertSame('release.email', $captured['routingKey']);
+        self::assertSame('notifications', $captured[0]['exchange']);
+        self::assertSame('release.email', $captured[0]['routingKey']);
     }
 
     public function testPublishesWithPersistentDeliveryMode(): void
@@ -44,9 +44,9 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         $captured = [];
         $channel = $this->ackingChannelCapturingPublish($captured);
 
-        $this->adapterWith($channel)->publish($this->makeMessage());
+        $this->adapterWith($channel)->publishAll([$this->makeMessage()]);
 
-        self::assertSame(2, $captured['properties']['delivery_mode']);
+        self::assertSame(2, $captured[0]['properties']['delivery_mode']);
     }
 
     public function testPublishesWithApplicationJsonContentType(): void
@@ -54,9 +54,9 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         $captured = [];
         $channel = $this->ackingChannelCapturingPublish($captured);
 
-        $this->adapterWith($channel)->publish($this->makeMessage());
+        $this->adapterWith($channel)->publishAll([$this->makeMessage()]);
 
-        self::assertSame('application/json', $captured['properties']['content_type']);
+        self::assertSame('application/json', $captured[0]['properties']['content_type']);
     }
 
     public function testPublishesSerializedJsonBody(): void
@@ -67,9 +67,27 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         $captured = [];
         $channel = $this->ackingChannelCapturingPublish($captured);
 
-        $this->adapterWith($channel)->publish($message);
+        $this->adapterWith($channel)->publishAll([$message]);
 
-        self::assertSame($expectedBody, $captured['body']);
+        self::assertSame($expectedBody, $captured[0]['body']);
+    }
+
+    public function testBatchPublishesOneSerializedMessagePerRecipientWithASingleConfirmWait(): void
+    {
+        $messages = [$this->makeMessage(1), $this->makeMessage(2), $this->makeMessage(3)];
+
+        $captured = [];
+        $channel = $this->ackingChannelCapturingPublish($captured, expectedConfirmWaits: 1);
+
+        $this->adapterWith($channel)->publishAll($messages);
+
+        self::assertCount(3, $captured);
+        $serializer = new SendReleaseEmailSerializer();
+        foreach ($messages as $i => $message) {
+            self::assertSame('notifications', $captured[$i]['exchange']);
+            self::assertSame('release.email', $captured[$i]['routingKey']);
+            self::assertSame($serializer->toJson($message), $captured[$i]['body']);
+        }
     }
 
     public function testPublisherExceptionPropagatesUncaught(): void
@@ -98,7 +116,7 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
 
         $this->expectException(RabbitPublishFailedException::class);
 
-        $this->adapterWith($channel)->publish($this->makeMessage());
+        $this->adapterWith($channel)->publishAll([$this->makeMessage()]);
     }
 
     /** @return AMQPChannel&MockObject */
@@ -112,14 +130,22 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
     }
 
     /**
-     * Returns an AMQPChannel mock that captures basic_publish arguments into
-     * $captured and simulates a broker ack on wait_for_pending_acks.
+     * Returns an AMQPChannel mock that captures every basic_publish call into
+     * $captured (one entry per publish) and simulates a broker ack for each
+     * published message on wait_for_pending_acks.
      *
-     * @param array<string, mixed> $captured passed by reference
+     * @param list<array{
+     *     exchange: string,
+     *     routingKey: string,
+     *     body: string,
+     *     properties: array<string, mixed>
+     * }> $captured by reference
      * @return AMQPChannel&MockObject
      */
-    private function ackingChannelCapturingPublish(array &$captured): AMQPChannel&MockObject
-    {
+    private function ackingChannelCapturingPublish(
+        array &$captured,
+        ?int $expectedConfirmWaits = null
+    ): AMQPChannel&MockObject {
         $channel = $this->channelBase();
 
         $ackHandler = null;
@@ -130,11 +156,12 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         );
         $channel->method('set_nack_handler')->willReturnCallback(static fn() => null);
 
-        $publishedMessage = null;
+        /** @var list<AMQPMessage> $publishedMessages */
+        $publishedMessages = [];
         $channel->method('basic_publish')->willReturnCallback(
-            function (AMQPMessage $msg, string $ex, string $rk) use (&$publishedMessage, &$captured): void {
-                $publishedMessage = $msg;
-                $captured = [
+            function (AMQPMessage $msg, string $ex, string $rk) use (&$publishedMessages, &$captured): void {
+                $publishedMessages[] = $msg;
+                $captured[] = [
                     'exchange' => $ex,
                     'routingKey' => $rk,
                     'body' => $msg->getBody(),
@@ -142,11 +169,16 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
                 ];
             }
         );
-        $channel->method('wait_for_pending_acks')->willReturnCallback(
-            function () use (&$ackHandler, &$publishedMessage): void {
-                ($ackHandler)($publishedMessage);
-            }
-        );
+        $channel->expects($expectedConfirmWaits === null ? self::any() : self::exactly($expectedConfirmWaits))
+            ->method('wait_for_pending_acks')
+            ->willReturnCallback(
+                function () use (&$ackHandler, &$publishedMessages): void {
+                    self::assertNotNull($ackHandler);
+                    foreach ($publishedMessages as $message) {
+                        ($ackHandler)($message);
+                    }
+                }
+            );
 
         return $channel;
     }
@@ -159,14 +191,14 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         );
     }
 
-    private function makeMessage(): SendReleaseEmail
+    private function makeMessage(int $subscriptionId = 123): SendReleaseEmail
     {
         return new SendReleaseEmail(
             SendReleaseEmail::SCHEMA,
-            '11111111-2222-4333-8444-555555555555',
+            sprintf('11111111-2222-4333-8444-%012d', $subscriptionId),
             new \DateTimeImmutable('2026-06-07T12:00:00+00:00'),
-            123,
-            new EmailAddress('user@example.com'),
+            $subscriptionId,
+            new EmailAddress('user' . $subscriptionId . '@example.com'),
             new RepositoryName('owner/repo'),
             new ReleaseSnapshot(
                 new ReleaseTag('v1.2.3'),

@@ -4,25 +4,35 @@ declare(strict_types=1);
 
 namespace App\Sending\Infrastructure\Rabbit;
 
+use App\Sending\Application\MessageProcessingStatsRecorder;
+use App\Sending\Application\NotificationInFlightException;
 use App\Sending\Application\SendReleaseEmailHandler;
-use App\Sending\Domain\MessageProcessingStatsRecorder;
+use App\Sending\Domain\NotificationLedger;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use PhpAmqpLib\Message\AMQPMessage;
+use Psr\Log\LoggerInterface;
 
 /**
  * Anti-corruption layer between the `notifications.send-email` queue and
  * SendReleaseEmailHandler. Deserializes message bodies, invokes the handler,
  * and translates its outcome into ack/nack/DLQ.
  *
- * Two separate, sequential try/catch blocks — deliberately not merged:
+ * Three distinct failure paths — deliberately not merged:
  *
  * 1. Deserialization: a MalformedReleaseEmailMessageException means the message
  *    is fundamentally unprocessable and will fail identically on every retry.
  *    Route straight to the DLQ without consulting the retry bound.
  *
- * 2. Handler invocation: a Throwable here is environmental (e.g. an SMTP
- *    failure) — the message may succeed on a later attempt. Delegate the
- *    retry/DLQ decision to RabbitConsumer::shouldRouteToDlq().
+ * 2. Claim contention: NotificationInFlightException means another worker
+ *    holds a live ledger claim. Contention is not failure — the message is
+ *    parked for the full claim lease WITHOUT consuming retry budget (the
+ *    retry schedule (~35s) is far shorter than the lease (300s); burning
+ *    retries against a claim that was always going to expire would DLQ a
+ *    perfectly deliverable notification).
+ *
+ * 3. Anything else is environmental (e.g. an SMTP failure) — the message may
+ *    succeed on a later attempt. Delegate the retry/DLQ decision to
+ *    RabbitConsumer::shouldRouteToDlq().
  *
  * Catching Throwable (not Exception) ensures no error from the handler's ports
  * can crash the long-lived consume loop; every failure resolves to ack or nack.
@@ -30,6 +40,9 @@ use PhpAmqpLib\Message\AMQPMessage;
 final readonly class SendReleaseEmailConsumer
 {
     public const QUEUE = 'notifications.send-email';
+
+    /** TTL parking queue retries pass through — see RabbitConnection topology. */
+    public const RETRY_QUEUE = 'notifications.send-email.retry';
 
     /** Messages are retried up to this many times before being routed to the DLQ. */
     public const MAX_REDELIVERIES = 3;
@@ -39,6 +52,7 @@ final readonly class SendReleaseEmailConsumer
         private SendReleaseEmailHandler $handler,
         private SendReleaseEmailMessageMapper $mapper,
         private MessageProcessingStatsRecorder $stats,
+        private LoggerInterface $logger,
     ) {
     }
 
@@ -53,22 +67,44 @@ final readonly class SendReleaseEmailConsumer
 
         try {
             $releaseEmail = $this->mapper->fromJson($message->getBody());
-        } catch (MalformedReleaseEmailMessageException) {
+        } catch (MalformedReleaseEmailMessageException $e) {
+            $this->logger->error('Malformed release email message routed to DLQ', ['error' => $e->getMessage()]);
             $this->stats->recordDlq();
             $this->consumer->nack($message, requeue: false);
             return;
         }
 
+        $context = [
+            'event_id' => $releaseEmail->eventId,
+            'subscription_id' => $releaseEmail->subscriptionId,
+            'repository' => $releaseEmail->repository,
+            'tag' => $releaseEmail->tagName,
+        ];
+
         try {
             $this->handler->handle($releaseEmail);
             $this->consumer->ack($message);
-        } catch (\Throwable) {
+        } catch (NotificationInFlightException) {
+            $this->logger->info(
+                'Release email claim held by another worker — parked for the lease window',
+                $context,
+            );
+            $this->stats->recordContention();
+            $this->consumer->requeueWithoutRetryIncrement(
+                $message,
+                self::RETRY_QUEUE,
+                NotificationLedger::CLAIM_LEASE_SECONDS,
+            );
+        } catch (\Throwable $e) {
             $this->stats->recordFailed();
+            $context['error'] = $e->getMessage();
             if ($this->consumer->shouldRouteToDlq($message, self::MAX_REDELIVERIES)) {
+                $this->logger->error('Release email failed after final retry — routed to DLQ', $context);
                 $this->stats->recordDlq();
                 $this->consumer->nack($message, requeue: false);
             } else {
-                $this->consumer->requeueWithRetry($message);
+                $this->logger->warning('Release email failed — requeued for delayed retry', $context);
+                $this->consumer->requeueWithRetry($message, self::RETRY_QUEUE);
             }
         }
     }

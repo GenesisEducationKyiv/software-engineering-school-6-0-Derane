@@ -6,20 +6,18 @@ namespace Tests\Subscription\Subscriptions\Application\Subscribe;
 
 use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
+use App\Shared\Domain\Exception\InvalidArgumentException;
 use App\Shared\Domain\Exception\RepositoryNotFoundException;
-use App\Shared\Domain\Exception\ValidationException;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
-use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
 use App\Subscription\Subscriptions\Domain\Subscription;
 use App\Subscription\Subscriptions\Domain\SubscriptionCreated;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
-use App\Validation\EmailValidator;
-use App\Validation\RepositoryNameValidator;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Psr\Log\NullLogger;
+use Tests\Support\FrozenClock;
 
 final class SubscribeCommandHandlerTest extends TestCase
 {
@@ -56,9 +54,8 @@ final class SubscribeCommandHandlerTest extends TestCase
             $this->repository,
             $this->gitHub,
             $this->trackedRepositories,
-            new SubscriptionValidator(new EmailValidator(), new RepositoryNameValidator()),
             $dispatcher,
-            new NullLogger()
+            FrozenClock::at('2026-06-07T12:00:00+00:00')
         );
     }
 
@@ -66,7 +63,7 @@ final class SubscribeCommandHandlerTest extends TestCase
     {
         $this->gitHub->expects($this->once())
             ->method('repositoryExists')
-            ->with('golang/go')
+            ->with(new RepositoryName('golang/go'))
             ->willReturn(true);
 
         $this->trackedRepositories->expects($this->once())
@@ -87,25 +84,35 @@ final class SubscribeCommandHandlerTest extends TestCase
         $this->assertSame('golang/go', $event->repository);
     }
 
-    public function testSubscribeInvalidEmailThrowsValidationException(): void
+    public function testSubscribeInvalidEmailThrowsInvalidArgumentException(): void
     {
-        $this->expectException(ValidationException::class);
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid email format');
 
         ($this->handler)(new SubscribeCommand('not-an-email', 'golang/go'));
     }
 
-    public function testSubscribeInvalidRepositoryThrowsValidationException(): void
+    public function testSubscribeInvalidRepositoryThrowsInvalidArgumentException(): void
     {
-        $this->expectException(ValidationException::class);
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid repository format. Expected: owner/repo');
 
         ($this->handler)(new SubscribeCommand('test@example.com', 'invalid-repo'));
+    }
+
+    public function testEmailViolationWinsWhenBothFieldsAreInvalid(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid email format');
+
+        ($this->handler)(new SubscribeCommand('not-an-email', 'invalid-repo'));
     }
 
     public function testSubscribeRepositoryNotFoundThrows(): void
     {
         $this->gitHub->expects($this->once())
             ->method('repositoryExists')
-            ->with('nonexistent/repo')
+            ->with(new RepositoryName('nonexistent/repo'))
             ->willReturn(false);
 
         $this->expectException(RepositoryNotFoundException::class);

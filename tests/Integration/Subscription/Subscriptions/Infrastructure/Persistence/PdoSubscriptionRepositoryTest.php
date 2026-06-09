@@ -147,7 +147,7 @@ final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
         $second = $this->subscribe($this->faker->safeEmail(), $repository);
         $this->subscribe($this->faker->safeEmail(), $this->repoName());
 
-        $subscribers = $this->repo->findSubscribersByRepository($repository);
+        $subscribers = $this->repo->findSubscribersByRepository(new RepositoryName($repository));
 
         $ids = array_map(fn($ref) => $ref->id, iterator_to_array($subscribers));
         sort($ids);

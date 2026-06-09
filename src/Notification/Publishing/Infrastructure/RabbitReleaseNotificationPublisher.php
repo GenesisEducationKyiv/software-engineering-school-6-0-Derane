@@ -18,13 +18,14 @@ final readonly class RabbitReleaseNotificationPublisher implements ReleaseNotifi
     ) {
     }
 
+    /** @param list<SendReleaseEmail> $messages */
     #[\Override]
-    public function publish(SendReleaseEmail $message): void
+    public function publishAll(array $messages): void
     {
-        $this->publisher->publish(
+        $this->publisher->publishBatch(
             'notifications',
             'release.email',
-            $this->serializer->toJson($message),
+            array_map($this->serializer->toJson(...), $messages),
             ['content_type' => 'application/json', 'delivery_mode' => 2],
         );
     }

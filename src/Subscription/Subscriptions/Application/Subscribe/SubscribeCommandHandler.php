@@ -9,13 +9,12 @@ use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;
+use App\Shared\Domain\Clock;
 use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\RepositoryName;
-use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
 use App\Subscription\Subscriptions\Domain\Subscription;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Psr\Log\LoggerInterface;
 
 /**
  * @implements CommandHandler<SubscribeCommand>
@@ -27,27 +26,31 @@ final readonly class SubscribeCommandHandler implements CommandHandler
         private SubscriptionRepository $repository,
         private ReleaseSource $gitHubService,
         private TrackedRepositoryRegistrar $trackedRepositories,
-        private SubscriptionValidator $validator,
         private EventDispatcherInterface $eventDispatcher,
-        private LoggerInterface $logger
+        private Clock $clock
     ) {
     }
 
     #[\Override]
     public function __invoke(Command $command): void
     {
-        $this->validator->assertValidSubscription($command->email, $command->repository);
+        // The self-validating VOs ARE the input validation: construction order
+        // (email first) preserves which violation a request with two bad
+        // fields reports. InvalidArgumentException maps to 400 / INVALID_ARGUMENT
+        // in ExceptionStatusMap.
+        $email = new EmailAddress($command->email);
+        $repository = new RepositoryName($command->repository);
 
-        if (!$this->gitHubService->repositoryExists($command->repository)) {
+        if (!$this->gitHubService->repositoryExists($repository)) {
             throw new RepositoryNotFoundException($command->repository);
         }
 
         $this->trackedRepositories->ensureExists($command->repository);
 
         $subscription = Subscription::subscribe(
-            new EmailAddress($command->email),
-            new RepositoryName($command->repository),
-            (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM)
+            $email,
+            $repository,
+            $this->clock->now()->format(\DateTimeInterface::ATOM)
         );
 
         $this->repository->create($subscription);
@@ -55,10 +58,5 @@ final readonly class SubscribeCommandHandler implements CommandHandler
         foreach ($subscription->pullDomainEvents() as $event) {
             $this->eventDispatcher->dispatch($event);
         }
-
-        $this->logger->info('Subscription created', [
-            'email' => $command->email,
-            'repository' => $command->repository,
-        ]);
     }
 }

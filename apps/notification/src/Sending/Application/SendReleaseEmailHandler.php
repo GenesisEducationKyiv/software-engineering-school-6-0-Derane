@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sending\Application;
 
-use App\Sending\Domain\DeliveryOutcomeRecorder;
+use App\Sending\Domain\ClaimOutcome;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
 use App\Sending\Domain\NotificationLedger;
@@ -22,9 +22,21 @@ final readonly class SendReleaseEmailHandler
 
     public function handle(ReleaseEmail $email): void
     {
-        if ($this->ledger->hasBeenSent($email->subscriptionId, $email->tagName, $email->repository)) {
+        $key = $email->key();
+
+        // Atomic claim, not check-then-act: only the worker that wins the
+        // claim may reach the mailer, so concurrent consumers (or a
+        // redelivery racing a slow first attempt) cannot double-send. The
+        // won claim's fencing token guards every subsequent ledger write.
+        $claim = $this->ledger->claim($key, $email->recipientEmail);
+
+        if ($claim->outcome === ClaimOutcome::AlreadySent) {
             $this->outcomes->recordDeduped();
             return;
+        }
+
+        if ($claim->outcome === ClaimOutcome::InFlight) {
+            throw NotificationInFlightException::forKey($key);
         }
 
         $rendered = $this->renderer->render($email);
@@ -32,17 +44,11 @@ final readonly class SendReleaseEmailHandler
         try {
             $this->mailer->send($email->recipientEmail, $rendered);
         } catch (\Throwable $e) {
-            $this->ledger->recordFailedAttempt(
-                $email->subscriptionId,
-                $email->tagName,
-                $email->repository,
-                $email->recipientEmail,
-                $e->getMessage(),
-            );
+            $this->ledger->recordFailedAttempt($key, $email->recipientEmail, $e->getMessage(), $claim->token());
             throw $e;
         }
 
-        $this->ledger->markSent($email->subscriptionId, $email->tagName, $email->repository, $email->recipientEmail);
+        $this->ledger->markSent($key, $email->recipientEmail, $claim->token());
         $this->outcomes->recordDelivered();
     }
 }

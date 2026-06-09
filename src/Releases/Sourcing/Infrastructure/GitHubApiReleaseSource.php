@@ -10,6 +10,7 @@ use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\Releases\Sourcing\Infrastructure\Cache\LatestReleaseCacheInterface;
 use App\Releases\Sourcing\Infrastructure\Cache\RepositoryExistenceCacheInterface;
 use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactoryInterface;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use Fig\Http\Message\StatusCodeInterface;
 use GuzzleHttp\Exception\ClientException;
 use Psr\Log\LoggerInterface;
@@ -27,25 +28,27 @@ final readonly class GitHubApiReleaseSource implements ReleaseSource
     }
 
     #[\Override]
-    public function repositoryExists(string $repository): bool
+    public function repositoryExists(RepositoryName $repository): bool
     {
-        $cached = $this->repositoryCache->getExists($repository);
+        $repositoryName = $repository->value();
+
+        $cached = $this->repositoryCache->getExists($repositoryName);
         if ($cached !== null) {
             return $cached;
         }
 
         try {
-            $this->apiClient->getRepository($repository);
-            $this->repositoryCache->putExists($repository, true);
+            $this->apiClient->getRepository($repositoryName);
+            $this->repositoryCache->putExists($repositoryName, true);
             return true;
         } catch (ClientException $e) {
             $statusCode = $e->getResponse()->getStatusCode();
             if ($statusCode === StatusCodeInterface::STATUS_NOT_FOUND) {
-                $this->repositoryCache->putExists($repository, false);
+                $this->repositoryCache->putExists($repositoryName, false);
                 return false;
             }
             if ($statusCode === StatusCodeInterface::STATUS_TOO_MANY_REQUESTS) {
-                $this->logger->warning("GitHub API rate limit hit for {$repository}");
+                $this->logger->warning("GitHub API rate limit hit for {$repositoryName}");
                 throw new RateLimitException($e->getResponse()->getHeaderLine('Retry-After'));
             }
             throw $e;
@@ -53,18 +56,20 @@ final readonly class GitHubApiReleaseSource implements ReleaseSource
     }
 
     #[\Override]
-    public function getLatestRelease(string $repository): ?Release
+    public function getLatestRelease(RepositoryName $repository): ?Release
     {
-        $cached = $this->releaseCache->getLatestRelease($repository);
+        $repositoryName = $repository->value();
+
+        $cached = $this->releaseCache->getLatestRelease($repositoryName);
         if ($cached !== null) {
             return $cached;
         }
 
         try {
-            $payload = $this->apiClient->getLatestRelease($repository);
+            $payload = $this->apiClient->getLatestRelease($repositoryName);
             $release = $this->releaseFactory->fromGitHubPayload($payload);
 
-            $this->releaseCache->putLatestRelease($repository, $release);
+            $this->releaseCache->putLatestRelease($repositoryName, $release);
 
             return $release;
         } catch (ClientException $e) {
@@ -72,7 +77,7 @@ final readonly class GitHubApiReleaseSource implements ReleaseSource
                 return null;
             }
             if ($e->getResponse()->getStatusCode() === StatusCodeInterface::STATUS_TOO_MANY_REQUESTS) {
-                $this->logger->warning("GitHub API rate limit hit for {$repository}");
+                $this->logger->warning("GitHub API rate limit hit for {$repositoryName}");
                 throw new RateLimitException($e->getResponse()->getHeaderLine('Retry-After'));
             }
             throw $e;

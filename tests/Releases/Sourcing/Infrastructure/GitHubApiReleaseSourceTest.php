@@ -11,6 +11,7 @@ use App\Releases\Sourcing\Infrastructure\Cache\GitHubRepositoryCache;
 use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactory;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Handler\MockHandler;
@@ -46,7 +47,7 @@ final class GitHubApiReleaseSourceTest extends TestCase
             new Response(200, [], json_encode(['full_name' => 'golang/go'])),
         ]);
 
-        $this->assertTrue($service->repositoryExists('golang/go'));
+        $this->assertTrue($service->repositoryExists(new RepositoryName('golang/go')));
     }
 
     public function testRepositoryExistsReturnsFalse(): void
@@ -59,7 +60,7 @@ final class GitHubApiReleaseSourceTest extends TestCase
             ),
         ]);
 
-        $this->assertFalse($service->repositoryExists('nonexistent/repo'));
+        $this->assertFalse($service->repositoryExists(new RepositoryName('nonexistent/repo')));
     }
 
     public function testGetLatestReleaseSuccess(): void
@@ -76,7 +77,7 @@ final class GitHubApiReleaseSourceTest extends TestCase
             new Response(200, [], json_encode($releaseData)),
         ]);
 
-        $result = $service->getLatestRelease('golang/go');
+        $result = $service->getLatestRelease(new RepositoryName('golang/go'));
 
         $this->assertNotNull($result);
         $this->assertEquals('v1.22.0', $result->tagName);
@@ -93,7 +94,7 @@ final class GitHubApiReleaseSourceTest extends TestCase
             ),
         ]);
 
-        $result = $service->getLatestRelease('test/repo');
+        $result = $service->getLatestRelease(new RepositoryName('test/repo'));
         $this->assertNull($result);
     }
 
@@ -109,7 +110,7 @@ final class GitHubApiReleaseSourceTest extends TestCase
 
         $this->expectException(RateLimitException::class);
 
-        $service->repositoryExists('golang/go');
+        $service->repositoryExists(new RepositoryName('golang/go'));
     }
 
     public function testGetLatestReleaseRateLimited(): void
@@ -124,6 +125,6 @@ final class GitHubApiReleaseSourceTest extends TestCase
 
         $this->expectException(RateLimitException::class);
 
-        $service->getLatestRelease('test/repo');
+        $service->getLatestRelease(new RepositoryName('test/repo'));
     }
 }

@@ -6,6 +6,7 @@ namespace App\Releases\Sourcing\Infrastructure;
 
 use App\Releases\Sourcing\Domain\Release;
 use App\Releases\Sourcing\Domain\ReleaseSource;
+use App\Shared\Domain\ValueObject\RepositoryName;
 
 /** @psalm-api */
 final readonly class SmokeGitHubReleaseSource implements ReleaseSource
@@ -25,15 +26,15 @@ final readonly class SmokeGitHubReleaseSource implements ReleaseSource
     }
 
     #[\Override]
-    public function repositoryExists(string $repository): bool
+    public function repositoryExists(RepositoryName $repository): bool
     {
-        return $repository === $this->smokeRelease['repository'];
+        return $repository->value() === $this->smokeRelease['repository'];
     }
 
     #[\Override]
-    public function getLatestRelease(string $repository): ?Release
+    public function getLatestRelease(RepositoryName $repository): ?Release
     {
-        if ($repository !== $this->smokeRelease['repository']) {
+        if ($repository->value() !== $this->smokeRelease['repository']) {
             return null;
         }
 

@@ -8,6 +8,7 @@ use App\Releases\Sourcing\Infrastructure\Cache\LatestReleaseCacheInterface;
 use App\Releases\Sourcing\Infrastructure\Cache\RepositoryExistenceCacheInterface;
 use App\Releases\Sourcing\Infrastructure\Factory\ReleaseFactory;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use Predis\Client as RedisClient;
 use Psr\Log\NullLogger;
 use Tests\Integration\IntegrationTestCase;
@@ -28,8 +29,8 @@ final class GitHubServiceCacheTest extends IntegrationTestCase
         $api = $this->spyReturning($repository);
         $service = $this->serviceWith($api);
 
-        $first = $service->getLatestRelease($repository);
-        $second = $service->getLatestRelease($repository);
+        $first = $service->getLatestRelease(new RepositoryName($repository));
+        $second = $service->getLatestRelease(new RepositoryName($repository));
 
         self::assertNotNull($first);
         self::assertNotNull($second);
@@ -43,13 +44,13 @@ final class GitHubServiceCacheTest extends IntegrationTestCase
         $repository = $this->repositoryName();
 
         $warmApi = $this->spyReturning($repository);
-        $this->serviceWith($warmApi)->getLatestRelease($repository);
+        $this->serviceWith($warmApi)->getLatestRelease(new RepositoryName($repository));
         self::assertSame(1, $warmApi->getLatestReleaseCalls);
 
         // A brand-new service with a brand-new API spy: Redis is the only shared
         // state, so a cache hit here proves the value really round-tripped Redis.
         $coldApi = $this->spyReturning($repository);
-        $cached = $this->serviceWith($coldApi)->getLatestRelease($repository);
+        $cached = $this->serviceWith($coldApi)->getLatestRelease(new RepositoryName($repository));
 
         self::assertNotNull($cached);
         self::assertSame('v1.4.0', $cached->tagName);
@@ -60,7 +61,7 @@ final class GitHubServiceCacheTest extends IntegrationTestCase
     public function testCachedReleaseKeyReceivesPositiveTtlInRedis(): void
     {
         $repository = $this->repositoryName();
-        $this->serviceWith($this->spyReturning($repository))->getLatestRelease($repository);
+        $this->serviceWith($this->spyReturning($repository))->getLatestRelease(new RepositoryName($repository));
 
         $ttl = $this->c->get(RedisClient::class)->ttl("github:latest_release:{$repository}");
 

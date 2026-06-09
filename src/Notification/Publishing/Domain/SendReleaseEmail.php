@@ -9,8 +9,12 @@ use App\Shared\Domain\ValueObject\RepositoryName;
 
 /**
  * Cross-service integration message, not a DomainEvent: it crosses a process
- * boundary, carries a versioned schema, and includes an eventId for
- * idempotency. DomainEvents are in-process only and carry none of these.
+ * boundary and carries a versioned schema. DomainEvents are in-process only
+ * and carry neither.
+ *
+ * eventId is a correlation/trace identifier only. Consumer-side dedup is by
+ * the business key (subscriptionId, release.tagName, repository) — a
+ * re-published release with a fresh eventId is still the same notification.
  *
  * @psalm-api
  */

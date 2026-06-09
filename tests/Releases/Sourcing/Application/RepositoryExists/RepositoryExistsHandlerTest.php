@@ -8,6 +8,7 @@ use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsHandler;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsQuery;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsResponse;
 use App\Releases\Sourcing\Domain\ReleaseSource;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -27,7 +28,7 @@ final class RepositoryExistsHandlerTest extends TestCase
     {
         $this->source->expects($this->once())
             ->method('repositoryExists')
-            ->with('golang/go')
+            ->with(new RepositoryName('golang/go'))
             ->willReturn(true);
 
         $query = new RepositoryExistsQuery('golang/go');
@@ -41,7 +42,7 @@ final class RepositoryExistsHandlerTest extends TestCase
     {
         $this->source->expects($this->once())
             ->method('repositoryExists')
-            ->with('nonexistent/repo')
+            ->with(new RepositoryName('nonexistent/repo'))
             ->willReturn(false);
 
         $query = new RepositoryExistsQuery('nonexistent/repo');

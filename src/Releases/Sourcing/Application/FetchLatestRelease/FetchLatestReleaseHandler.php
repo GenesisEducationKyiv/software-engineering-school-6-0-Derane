@@ -8,6 +8,7 @@ use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\Shared\Domain\Bus\Query\Query;
 use App\Shared\Domain\Bus\Query\QueryHandler;
 use App\Shared\Domain\Bus\Query\Response;
+use App\Shared\Domain\ValueObject\RepositoryName;
 
 /**
  * @implements QueryHandler<FetchLatestReleaseQuery, FetchLatestReleaseResponse>
@@ -23,6 +24,8 @@ final readonly class FetchLatestReleaseHandler implements QueryHandler
     #[\Override]
     public function __invoke(Query $query): Response
     {
-        return new FetchLatestReleaseResponse($this->source->getLatestRelease($query->repository));
+        return new FetchLatestReleaseResponse(
+            $this->source->getLatestRelease(new RepositoryName($query->repository))
+        );
     }
 }

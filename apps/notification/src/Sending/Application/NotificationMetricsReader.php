@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Sending\Domain;
+namespace App\Sending\Application;
 
 interface NotificationMetricsReader
 {
@@ -13,6 +13,8 @@ interface NotificationMetricsReader
     public function dedupedCount(): int;
 
     public function failedCount(): int;
+
+    public function contentionCount(): int;
 
     public function dlqCount(): int;
 }

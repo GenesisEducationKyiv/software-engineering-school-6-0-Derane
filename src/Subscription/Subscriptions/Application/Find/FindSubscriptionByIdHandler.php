@@ -29,7 +29,7 @@ final readonly class FindSubscriptionByIdHandler implements QueryHandler
     {
         $subscription = $this->repository->findById($query->id);
         if ($subscription === null) {
-            throw new SubscriptionNotFoundException($query->id);
+            throw SubscriptionNotFoundException::withId($query->id);
         }
 
         return $this->responseFactory->fromAggregate($subscription);

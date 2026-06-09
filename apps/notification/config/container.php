@@ -3,12 +3,12 @@
 declare(strict_types=1);
 
 use App\Sending\Application\SendReleaseEmailHandler;
-use App\Sending\Domain\DeliveryOutcomeRecorder;
+use App\Sending\Application\DeliveryOutcomeRecorder;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
-use App\Sending\Domain\MessageProcessingStatsRecorder;
+use App\Sending\Application\MessageProcessingStatsRecorder;
 use App\Sending\Domain\NotificationLedger;
-use App\Sending\Domain\NotificationMetricsReader;
+use App\Sending\Application\NotificationMetricsReader;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
 use App\Sending\Infrastructure\Health\CompositeHealthCheck;
 use App\Sending\Infrastructure\Health\DatabaseHealthCheck;
@@ -17,6 +17,7 @@ use App\Sending\Infrastructure\Health\RabbitMqHealthCheck;
 use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\HealthController;
 use App\Sending\Infrastructure\Http\MetricsController;
+use App\Sending\Infrastructure\Logging\StderrLogger;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
 use App\Sending\Infrastructure\Mail\PHPMailerFactory;
@@ -36,7 +37,6 @@ use DI\ContainerBuilder;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 use Slim\Psr7\Factory\ResponseFactory;
 
 return static function (array $settings): Container {
@@ -104,9 +104,10 @@ return static function (array $settings): Container {
             $c->get(SendReleaseEmailHandler::class),
             $c->get(SendReleaseEmailMessageMapper::class),
             $c->get(MessageProcessingStatsRecorder::class),
+            $c->get(LoggerInterface::class),
         ),
 
-        LoggerInterface::class => static fn() => new NullLogger(),
+        LoggerInterface::class => static fn() => new StderrLogger(),
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
         PrometheusFormatter::class => static fn() => new PrometheusFormatter(),

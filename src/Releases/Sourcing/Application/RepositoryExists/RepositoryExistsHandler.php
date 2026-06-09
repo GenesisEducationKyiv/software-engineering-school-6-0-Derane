@@ -8,6 +8,7 @@ use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\Shared\Domain\Bus\Query\Query;
 use App\Shared\Domain\Bus\Query\QueryHandler;
 use App\Shared\Domain\Bus\Query\Response;
+use App\Shared\Domain\ValueObject\RepositoryName;
 
 /**
  * @implements QueryHandler<RepositoryExistsQuery, RepositoryExistsResponse>
@@ -23,6 +24,8 @@ final readonly class RepositoryExistsHandler implements QueryHandler
     #[\Override]
     public function __invoke(Query $query): Response
     {
-        return new RepositoryExistsResponse($this->source->repositoryExists($query->repository));
+        return new RepositoryExistsResponse(
+            $this->source->repositoryExists(new RepositoryName($query->repository))
+        );
     }
 }

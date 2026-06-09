@@ -21,7 +21,7 @@ Clean layering with the dependency rule pointing **inward** (Domain ← Applicat
 - `src/<Context>/<Module>/Application/` — use-cases as CQRS command/query handlers
 - `src/<Context>/<Module>/Infrastructure/` — adapters (PDO, Slim controllers, gRPC, RabbitMQ, mail, cache)
 - `src/Shared/` — shared kernel (below)
-- `apps/` — deployables: `apps/monolith/{http,grpc,scanner}`, `apps/notification/` (the extracted service)
+- `apps/` — deployables. `apps/notification/` is the fully extracted service (own composer.json, src, tests). `apps/monolith/{http,grpc,scanner}` are placeholder stubs only — the monolith's real entrypoints are still `public/index.php`, `bin/grpc.php` and `bin/scanner.php` (which docker-compose runs directly); moving them under `apps/monolith` is deferred work.
 
 Contexts: **Subscription**, **RepositoryTracking**, **Releases**, **Scanning**, **Notification\Publishing** (monolith publisher) + **Notification\Sending** (the extracted service). Boundaries are enforced by deptrac (`deptrac.yaml`).
 
@@ -47,7 +47,7 @@ Old flat dirs still in place until moved into their context homes: `src/Domain` 
 - **`final readonly class`** for stateless services, repositories, controllers, middleware, bus adapters. Skip only when mutable state is required (see `SafeGitHubCacheDecorator`; and `AggregateRoot`'s event buffer).
 - **Entities are aggregate roots** extending `Shared\Domain\Aggregate\AggregateRoot` and recording domain events. **Value-object snapshots stay anemic + readonly** (e.g. `Release` — no identity/lifecycle). Anemic DTOs are constructed through a `*FactoryInterface` — no `from*` static methods. **Value objects** (e.g. `RepositoryName`, `EmailAddress`) may use named constructors like `fromString()` — that idiom is for self-validating VOs, not for the anemic DTOs the `from*` ban targets.
 - **Use-cases are CQRS handlers** dispatched through the in-house `CommandBus`/`QueryBus`; thin drivers (controllers, gRPC, CLI scanner) build a Command/Query and hand it to the bus.
-- **Validators are injected classes**, never inline `filter_var` / regex inside services.
+- **Input validation lives in the self-validating Shared VOs** (`EmailAddress`, `RepositoryName`, `ReleaseTag`) — constructing the VO *is* the validation; `Shared\Domain\Exception\InvalidArgumentException` maps to 400/INVALID_ARGUMENT in `ExceptionStatusMap`. Never inline `filter_var` / regex inside services, and don't reintroduce standalone validator classes (the legacy `App\Validation\*` ones were absorbed into the VOs). Transport-level shape checks (missing fields, non-JSON body) stay in controllers as `ValidationException`.
 - **Per-consumer ISP** for repositories/ports (`*Reader`, `*Writer`, `*Registrar`, `*Source`, `*Finder`). Split read/write, or one class implementing several narrow interfaces (see `SubscriptionRepository`).
 - **`#[\Override]`** on every interface implementation method.
 - **DI: bind interfaces only.** To share one instance across two interfaces, alias the second to the first. Never use a concrete class as a DI key just to share an instance.

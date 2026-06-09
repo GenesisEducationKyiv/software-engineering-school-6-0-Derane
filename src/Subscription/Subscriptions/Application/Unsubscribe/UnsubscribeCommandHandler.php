@@ -27,7 +27,7 @@ final readonly class UnsubscribeCommandHandler implements CommandHandler
     public function __invoke(Command $command): void
     {
         if ($this->repository->findById($command->id) === null) {
-            throw new SubscriptionNotFoundException($command->id);
+            throw SubscriptionNotFoundException::withId($command->id);
         }
 
         $this->repository->delete($command->id);

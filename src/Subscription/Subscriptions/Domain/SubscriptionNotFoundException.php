@@ -6,8 +6,18 @@ namespace App\Subscription\Subscriptions\Domain;
 
 final class SubscriptionNotFoundException extends \DomainException
 {
-    public function __construct(int $id)
+    private function __construct(string $message)
     {
-        parent::__construct("Subscription #{$id} not found");
+        parent::__construct($message);
+    }
+
+    public static function withId(int $id): self
+    {
+        return new self("Subscription #{$id} not found");
+    }
+
+    public static function forEmailAndRepository(string $email, string $repository): self
+    {
+        return new self("Subscription for {$email} on {$repository} not found");
     }
 }

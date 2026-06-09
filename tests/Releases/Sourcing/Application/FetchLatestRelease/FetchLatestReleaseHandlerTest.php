@@ -9,6 +9,7 @@ use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseQuery
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseResponse;
 use App\Releases\Sourcing\Domain\Release;
 use App\Releases\Sourcing\Domain\ReleaseSource;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -36,7 +37,7 @@ final class FetchLatestReleaseHandlerTest extends TestCase
 
         $this->source->expects($this->once())
             ->method('getLatestRelease')
-            ->with('acme/tool')
+            ->with(new RepositoryName('acme/tool'))
             ->willReturn($release);
 
         $query = new FetchLatestReleaseQuery('acme/tool');
@@ -50,7 +51,7 @@ final class FetchLatestReleaseHandlerTest extends TestCase
     {
         $this->source->expects($this->once())
             ->method('getLatestRelease')
-            ->with('acme/unknown')
+            ->with(new RepositoryName('acme/unknown'))
             ->willReturn(null);
 
         $query = new FetchLatestReleaseQuery('acme/unknown');

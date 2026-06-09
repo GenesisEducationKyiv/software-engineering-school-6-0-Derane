@@ -7,7 +7,7 @@ RUN apk add --no-cache \
         $PHPIZE_DEPS \
     && pecl install amqp \
     && docker-php-ext-enable amqp \
-    && docker-php-ext-install pdo_pgsql sockets \
+    && docker-php-ext-install pdo_pgsql sockets pcntl \
     && apk del $PHPIZE_DEPS \
     && rm -rf /var/cache/apk/*
 

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Releases\Sourcing\Domain;
 
+use App\Releases\Sourcing\Domain\DetectedRelease;
 use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\Release;
 use App\Shared\Domain\DomainEvent;
+use App\Shared\Domain\ValueObject\ReleaseTag;
 use App\Shared\Domain\ValueObject\RepositoryName;
 use PHPUnit\Framework\TestCase;
 
@@ -22,12 +24,15 @@ final class NewReleaseDetectedTest extends TestCase
             '2026-06-07T11:00:00+00:00',
             'notes'
         );
+        $detected = new DetectedRelease(new ReleaseTag('v1.2.3'), $release);
         $occurredOn = new \DateTimeImmutable('2026-06-07T12:00:00+00:00');
 
-        $event = new NewReleaseDetected($repository, $release, $occurredOn);
+        $event = new NewReleaseDetected($repository, $detected, $occurredOn);
 
         $this->assertSame($repository, $event->repository);
-        $this->assertSame($release, $event->release);
+        $this->assertSame($detected, $event->detected);
+        $this->assertSame($release, $event->detected->release);
+        $this->assertSame('v1.2.3', $event->detected->tag->value());
         $this->assertSame($occurredOn, $event->occurredOn());
     }
 
@@ -51,7 +56,10 @@ final class NewReleaseDetectedTest extends TestCase
 
         $event = new NewReleaseDetected(
             new RepositoryName('owner/repo'),
-            new Release('v1.0.0', 'name', 'https://example.test', '2026-01-01T00:00:00+00:00', 'body'),
+            new DetectedRelease(
+                new ReleaseTag('v1.0.0'),
+                new Release('v1.0.0', 'name', 'https://example.test', '2026-01-01T00:00:00+00:00', 'body')
+            ),
             $occurredOn
         );
 
@@ -62,12 +70,15 @@ final class NewReleaseDetectedTest extends TestCase
     {
         return new NewReleaseDetected(
             new RepositoryName('owner/repo'),
-            new Release(
-                'v1.2.3',
-                'Release name',
-                'https://github.com/owner/repo/releases/tag/v1.2.3',
-                '2026-06-07T11:00:00+00:00',
-                'notes'
+            new DetectedRelease(
+                new ReleaseTag('v1.2.3'),
+                new Release(
+                    'v1.2.3',
+                    'Release name',
+                    'https://github.com/owner/repo/releases/tag/v1.2.3',
+                    '2026-06-07T11:00:00+00:00',
+                    'notes'
+                )
             ),
             new \DateTimeImmutable('2026-06-07T12:00:00+00:00')
         );

@@ -20,6 +20,7 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\NullLogger;
+use Tests\Support\FrozenClock;
 
 final class ScanReleasesHandlerTest extends TestCase
 {
@@ -85,6 +86,7 @@ final class ScanReleasesHandlerTest extends TestCase
             $this->progress,
             new ReleaseDetector($this->gitHub, $this->statusReader, new NullLogger()),
             $eventDispatcher,
+            FrozenClock::at('2026-06-07T12:00:00+00:00'),
             new NullLogger()
         );
     }
@@ -105,7 +107,7 @@ final class ScanReleasesHandlerTest extends TestCase
 
         $this->gitHub->expects($this->once())
             ->method('getLatestRelease')
-            ->with('golang/go')
+            ->with(new RepositoryName('golang/go'))
             ->willReturn($release);
 
         $this->statusReader->expects($this->once())
@@ -130,7 +132,8 @@ final class ScanReleasesHandlerTest extends TestCase
         $event = $this->dispatchedEvents[0];
         self::assertInstanceOf(NewReleaseDetected::class, $event);
         self::assertTrue($event->repository->equals(new RepositoryName('golang/go')));
-        self::assertSame($release, $event->release);
+        self::assertSame($release, $event->detected->release);
+        self::assertSame('v1.22.0', $event->detected->tag->value());
 
         self::assertCount(2, $this->sequence, 'expected one NewReleaseDetected dispatch and one markReleaseSeen call');
         self::assertInstanceOf(NewReleaseDetected::class, $this->sequence[0]);
@@ -146,7 +149,7 @@ final class ScanReleasesHandlerTest extends TestCase
 
         $this->gitHub->expects($this->once())
             ->method('getLatestRelease')
-            ->with('golang/go')
+            ->with(new RepositoryName('golang/go'))
             ->willReturn($this->release('v1.21.0'));
 
         $this->statusReader->expects($this->once())
@@ -173,7 +176,7 @@ final class ScanReleasesHandlerTest extends TestCase
 
         $this->gitHub->expects($this->once())
             ->method('getLatestRelease')
-            ->with('some/repo')
+            ->with(new RepositoryName('some/repo'))
             ->willReturn(null);
 
         $this->progress->expects($this->once())
@@ -210,7 +213,7 @@ final class ScanReleasesHandlerTest extends TestCase
 
         $this->gitHub->expects($this->once())
             ->method('getLatestRelease')
-            ->with('golang/go')
+            ->with(new RepositoryName('golang/go'))
             ->willReturn($release);
 
         $this->statusReader->expects($this->once())

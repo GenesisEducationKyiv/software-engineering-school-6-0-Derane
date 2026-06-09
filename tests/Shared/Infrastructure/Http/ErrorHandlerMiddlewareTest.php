@@ -76,7 +76,7 @@ class ErrorHandlerMiddlewareTest extends TestCase
     public function testSubscriptionNotFoundReturns404(): void
     {
         $request = (new RequestFactory())->createRequest('GET', '/test');
-        $handler = $this->createHandler(new SubscriptionNotFoundException(42));
+        $handler = $this->createHandler(SubscriptionNotFoundException::withId(42));
 
         $result = $this->middleware->process($request, $handler);
 

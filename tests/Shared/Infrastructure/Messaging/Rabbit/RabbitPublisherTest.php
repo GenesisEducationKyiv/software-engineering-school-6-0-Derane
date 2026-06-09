@@ -97,6 +97,133 @@ final class RabbitPublisherTest extends TestCase
         $publisher->publish('notifications', 'release.email', '{"v":1}');
     }
 
+    public function testPublishBatchPublishesEveryBodyButWaitsForConfirmsExactlyOnce(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $ackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(function (callable $cb) use (&$ackHandler): void {
+            $ackHandler = $cb;
+        });
+        $channel->method('set_nack_handler')->willReturnCallback(static fn () => null);
+
+        /** @var list<AMQPMessage> $publishedMessages */
+        $publishedMessages = [];
+        $channel->expects(self::exactly(3))
+            ->method('basic_publish')
+            ->willReturnCallback(function (AMQPMessage $message) use (&$publishedMessages): void {
+                $publishedMessages[] = $message;
+            });
+
+        // The whole point of the batch API: ONE confirm round trip for N messages.
+        $channel->expects(self::once())
+            ->method('wait_for_pending_acks')
+            ->willReturnCallback(function () use (&$ackHandler, &$publishedMessages): void {
+                self::assertNotNull($ackHandler);
+                foreach ($publishedMessages as $message) {
+                    ($ackHandler)($message);
+                }
+            });
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        $publisher->publishBatch('notifications', 'release.email', ['{"v":1}', '{"v":2}', '{"v":3}']);
+
+        self::assertSame(
+            ['{"v":1}', '{"v":2}', '{"v":3}'],
+            array_map(static fn (AMQPMessage $m): string => $m->getBody(), $publishedMessages),
+        );
+    }
+
+    public function testPublishBatchRaisesRabbitPublishFailedExceptionWhenAnyMessageIsNacked(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $ackHandler = null;
+        $nackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(function (callable $cb) use (&$ackHandler): void {
+            $ackHandler = $cb;
+        });
+        $channel->method('set_nack_handler')->willReturnCallback(function (callable $cb) use (&$nackHandler): void {
+            $nackHandler = $cb;
+        });
+
+        /** @var list<AMQPMessage> $publishedMessages */
+        $publishedMessages = [];
+        $channel->method('basic_publish')->willReturnCallback(
+            function (AMQPMessage $message) use (&$publishedMessages): void {
+                $publishedMessages[] = $message;
+            }
+        );
+
+        // Broker acks the first and third but nacks the second — the batch must fail.
+        $channel->method('wait_for_pending_acks')->willReturnCallback(
+            function () use (&$ackHandler, &$nackHandler, &$publishedMessages): void {
+                ($ackHandler)($publishedMessages[0]);
+                ($nackHandler)($publishedMessages[1]);
+                ($ackHandler)($publishedMessages[2]);
+            }
+        );
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        $this->expectException(RabbitPublishFailedException::class);
+        $this->expectExceptionMessage('negatively acknowledged (nack)');
+
+        $publisher->publishBatch('notifications', 'release.email', ['{"v":1}', '{"v":2}', '{"v":3}']);
+    }
+
+    public function testPublishBatchChunksLargeBatchesSoEachConfirmWaitCoversABoundedSlice(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+
+        $ackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(function (callable $cb) use (&$ackHandler): void {
+            $ackHandler = $cb;
+        });
+        $channel->method('set_nack_handler')->willReturnCallback(static fn () => null);
+
+        /** @var list<AMQPMessage> $pending */
+        $pending = [];
+        $channel->expects(self::exactly(1001))
+            ->method('basic_publish')
+            ->willReturnCallback(function (AMQPMessage $message) use (&$pending): void {
+                $pending[] = $message;
+            });
+
+        // 1001 bodies at a 500-message chunk size → exactly 3 confirm waits.
+        $channel->expects(self::exactly(3))
+            ->method('wait_for_pending_acks')
+            ->willReturnCallback(function () use (&$ackHandler, &$pending): void {
+                self::assertNotNull($ackHandler);
+                foreach ($pending as $message) {
+                    ($ackHandler)($message);
+                }
+                $pending = [];
+            });
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        $publisher->publishBatch(
+            'notifications',
+            'release.email',
+            array_map(static fn (int $i): string => "{\"v\":{$i}}", range(1, 1001)),
+        );
+    }
+
+    public function testPublishBatchWithNoBodiesIsANoOp(): void
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+        $channel->method('set_ack_handler')->willReturnCallback(static fn () => null);
+        $channel->method('set_nack_handler')->willReturnCallback(static fn () => null);
+        $channel->expects(self::never())->method('basic_publish');
+        $channel->expects(self::never())->method('wait_for_pending_acks');
+
+        $publisher = new RabbitPublisher($this->connectionWrapping($channel));
+
+        $publisher->publishBatch('notifications', 'release.email', []);
+    }
+
     public function testRaisesRabbitPublishFailedExceptionOnConfirmWaitTimeout(): void
     {
         $channel = $this->createMock(AMQPChannel::class);

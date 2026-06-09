@@ -123,8 +123,17 @@ model {
 
         publishListener = component "WhenNewReleaseDetectedThenPublishReleaseEmails" {
             description "
-                Resolves subscribers and maps each one into a
-                SendReleaseEmail/v1 command for RabbitMQ.
+                Thin adapter: maps NewReleaseDetected into the Publishing
+                context's ReleaseSnapshot and delegates to the use-case.
+            "
+            technology "PHP"
+        }
+
+        publishUseCase = component "PublishReleaseEmailsForRelease" {
+            description "
+                Publishing use-case: resolves subscribers and builds one
+                SendReleaseEmail/v1 message per recipient, published as
+                a single batch.
             "
             technology "PHP"
         }
@@ -137,7 +146,7 @@ model {
         }
 
         rabbitPublisher = component "RabbitReleaseNotificationPublisher" {
-            description "Publishes SendReleaseEmail/v1 to RabbitMQ."
+            description "Publishes SendReleaseEmail/v1 batches to RabbitMQ."
             technology "PHP, AMQP"
         }
 
@@ -145,7 +154,9 @@ model {
         scanHandler -> scannerRepo "Reads due repositories and updates scan state"
         scanHandler -> releaseDetector "Resolves latest release"
         scanHandler -> publishListener "Triggers publish via NewReleaseDetected"
-        publishListener -> rabbitPublisher "Publishes one message per subscriber"
+        publishListener -> publishUseCase "Delegates repository + release snapshot"
+        publishUseCase -> scannerRepo "Resolves the repository's subscribers"
+        publishUseCase -> rabbitPublisher "Publishes the batch with one confirm-wait"
     }
 
     user -> notifier.httpApi.middleware "All HTTP requests (outermost edge)" "HTTPS"
@@ -165,20 +176,31 @@ model {
 
     extend notifier.notificationSvc {
         consumer = component "SendReleaseEmailConsumer" {
-            description "RabbitMQ consumer with ack/nack/DLQ handling."
+            description "
+                RabbitMQ consumer with ack/nack handling; transient
+                failures go to a TTL retry queue (delay grows per
+                attempt), claim contention parks for the lease window
+                without burning retry budget, poison messages and
+                exhausted retries go to the DLQ.
+            "
             technology "PHP, AMQP"
         }
 
         sendEmailHandler = component "SendReleaseEmailHandler" {
             description "
-                Idempotency gate: check ledger, render email,
-                send mail, mark delivered or deduped.
+                Idempotency gate: atomically claim the notification in
+                the ledger, render email, send mail, mark delivered —
+                or skip as dedupe / back off while another worker
+                holds the claim.
             "
             technology "PHP"
         }
 
         ledger = component "PdoNotificationLedger" {
-            description "Service-owned delivery ledger."
+            description "
+                Service-owned delivery ledger with an atomic
+                INSERT … ON CONFLICT claim per business key.
+            "
             technology "PHP, PDO"
         }
 
@@ -193,7 +215,7 @@ model {
         }
 
         consumer -> sendEmailHandler "Invokes for each consumed message"
-        sendEmailHandler -> ledger "Checks + records delivery"
+        sendEmailHandler -> ledger "Claims + records delivery"
         sendEmailHandler -> renderer "Builds subject/body"
         sendEmailHandler -> mailer "Sends email"
     }

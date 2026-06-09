@@ -2,10 +2,8 @@
 
 declare(strict_types=1);
 
-namespace App\Notification\Publishing\Infrastructure\Factory;
+namespace App\Notification\Publishing\Domain;
 
-use App\Notification\Publishing\Domain\ReleaseSnapshot;
-use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\RepositoryName;
 

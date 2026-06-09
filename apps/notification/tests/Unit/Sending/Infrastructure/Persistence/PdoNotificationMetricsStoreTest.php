@@ -57,6 +57,7 @@ final class PdoNotificationMetricsStoreTest extends TestCase
         self::assertSame(0, $this->store->deliveredCount());
         self::assertSame(0, $this->store->dedupedCount());
         self::assertSame(0, $this->store->failedCount());
+        self::assertSame(0, $this->store->contentionCount());
         self::assertSame(0, $this->store->dlqCount());
     }
 }

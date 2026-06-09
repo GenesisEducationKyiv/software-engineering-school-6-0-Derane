@@ -4,12 +4,20 @@ declare(strict_types=1);
 
 namespace App\Scanning\Scanner\Application;
 
-use App\Releases\Sourcing\Domain\Release;
+use App\Releases\Sourcing\Domain\DetectedRelease;
 use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
+use App\Shared\Domain\ValueObject\ReleaseTag;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use Psr\Log\LoggerInterface;
 
-/** @psalm-api */
+/**
+ * The tagName null-check below is the single boundary guard for tagless
+ * GitHub releases: everything downstream consumes DetectedRelease, whose
+ * ReleaseTag is non-nullable by construction.
+ *
+ * @psalm-api
+ */
 final readonly class ReleaseDetector
 {
     public function __construct(
@@ -19,14 +27,14 @@ final readonly class ReleaseDetector
     ) {
     }
 
-    public function detect(string $repoName): ?Release
+    public function detect(RepositoryName $repository): ?DetectedRelease
     {
-        $release = $this->gitHubService->getLatestRelease($repoName);
+        $release = $this->gitHubService->getLatestRelease($repository);
         if ($release === null || $release->tagName === null) {
             return null;
         }
 
-        $status = $this->trackedRepositories->getStatus($repoName);
+        $status = $this->trackedRepositories->getStatus($repository->value());
         $lastSeenTag = $status?->lastSeenTag();
 
         if ($lastSeenTag === $release->tagName) {
@@ -34,11 +42,11 @@ final readonly class ReleaseDetector
         }
 
         $this->logger->info('New release found', [
-            'repository' => $repoName,
+            'repository' => $repository->value(),
             'tag' => $release->tagName,
             'previous_tag' => $lastSeenTag,
         ]);
 
-        return $release;
+        return new DetectedRelease(new ReleaseTag($release->tagName), $release);
     }
 }

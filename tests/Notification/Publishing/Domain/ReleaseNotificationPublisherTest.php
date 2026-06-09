@@ -14,39 +14,40 @@ use PHPUnit\Framework\TestCase;
 
 final class ReleaseNotificationPublisherTest extends TestCase
 {
-    public function testIsAPureDomainInterfaceWithASinglePublishMethod(): void
+    public function testIsAPureDomainInterfaceWithASingleBatchPublishMethod(): void
     {
         $reflection = new \ReflectionClass(ReleaseNotificationPublisher::class);
 
         $this->assertTrue($reflection->isInterface());
         $this->assertSame('App\Notification\Publishing\Domain', $reflection->getNamespaceName());
-        $this->assertTrue($reflection->hasMethod('publish'));
+        $this->assertTrue($reflection->hasMethod('publishAll'));
 
-        $publish = $reflection->getMethod('publish');
-        $this->assertTrue($publish->hasReturnType());
-        $this->assertSame('void', (string) $publish->getReturnType());
+        $publishAll = $reflection->getMethod('publishAll');
+        $this->assertTrue($publishAll->hasReturnType());
+        $this->assertSame('void', (string) $publishAll->getReturnType());
 
-        $parameters = $publish->getParameters();
+        $parameters = $publishAll->getParameters();
         $this->assertCount(1, $parameters);
-        $this->assertSame(SendReleaseEmail::class, (string) $parameters[0]->getType());
+        $this->assertSame('array', (string) $parameters[0]->getType());
     }
 
-    public function testCanBeImplementedByAnAdapterThatPublishesTheMessage(): void
+    public function testCanBeImplementedByAnAdapterThatPublishesTheBatch(): void
     {
         $publisher = new class implements ReleaseNotificationPublisher {
-            public ?SendReleaseEmail $published = null;
+            /** @var list<SendReleaseEmail> */
+            public array $published = [];
 
             #[\Override]
-            public function publish(SendReleaseEmail $message): void
+            public function publishAll(array $messages): void
             {
-                $this->published = $message;
+                $this->published = $messages;
             }
         };
 
         $message = $this->buildMessage();
-        $publisher->publish($message);
+        $publisher->publishAll([$message]);
 
-        $this->assertSame($message, $publisher->published);
+        $this->assertSame([$message], $publisher->published);
     }
 
     private function buildMessage(): SendReleaseEmail

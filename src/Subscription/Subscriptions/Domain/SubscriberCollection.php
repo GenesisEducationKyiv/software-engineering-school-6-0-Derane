@@ -20,20 +20,6 @@ final readonly class SubscriberCollection implements IteratorAggregate, Countabl
     {
     }
 
-    /** @param callable(SubscriberRef): bool $hasBeenNotified */
-    public function withoutAlreadyNotified(callable $hasBeenNotified): self
-    {
-        return new self(array_values(array_filter(
-            $this->subscribers,
-            static fn(SubscriberRef $s): bool => !$hasBeenNotified($s)
-        )));
-    }
-
-    public function isEmpty(): bool
-    {
-        return $this->subscribers === [];
-    }
-
     #[\Override]
     public function count(): int
     {

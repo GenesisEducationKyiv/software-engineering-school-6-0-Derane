@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Subscription\Subscriptions\Infrastructure\Persistence;
 
 use App\Shared\Domain\ValueObject\Pagination;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Domain\SubscriberCollection;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\Subscription;
@@ -142,12 +143,12 @@ final readonly class PdoSubscriptionRepository implements
     }
 
     #[\Override]
-    public function findSubscribersByRepository(string $repository): SubscriberCollection
+    public function findSubscribersByRepository(RepositoryName $repository): SubscriberCollection
     {
         $stmt = $this->pdo->prepare(
             'SELECT id, email FROM subscriptions WHERE repository = :repository ORDER BY id'
         );
-        $stmt->execute(['repository' => $repository]);
+        $stmt->execute(['repository' => $repository->value()]);
         /** @var list<array<string, mixed>> $rows */
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

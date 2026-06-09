@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Sending\Domain;
+namespace App\Sending\Application;
 
 interface DeliveryOutcomeRecorder
 {

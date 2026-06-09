@@ -11,6 +11,7 @@ use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;
 use App\Scanning\Scanner\Application\ReleaseDetector;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;
+use App\Shared\Domain\Clock;
 use App\Shared\Domain\ValueObject\RepositoryName;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
@@ -26,6 +27,7 @@ final readonly class ScanReleasesHandler implements CommandHandler
         private ScanProgressWriter $progress,
         private ReleaseDetector $detector,
         private EventDispatcherInterface $eventDispatcher,
+        private Clock $clock,
         private LoggerInterface $logger,
         private int $scanBatchSize = 100
     ) {
@@ -39,7 +41,7 @@ final readonly class ScanReleasesHandler implements CommandHandler
 
         foreach ($repositories as $repoName) {
             try {
-                $this->checkRepository($repoName);
+                $this->checkRepository(new RepositoryName($repoName));
             } catch (RateLimitException $e) {
                 $this->logger->warning('Rate limited — stopping scan cycle early', [
                     'repository' => $repoName,
@@ -55,27 +57,22 @@ final readonly class ScanReleasesHandler implements CommandHandler
         }
     }
 
-    private function checkRepository(string $repoName): void
+    private function checkRepository(RepositoryName $repository): void
     {
-        $release = $this->detector->detect($repoName);
-        if ($release === null) {
-            $this->progress->markChecked($repoName);
+        $detected = $this->detector->detect($repository);
+        if ($detected === null) {
+            $this->progress->markChecked($repository->value());
             return;
         }
 
         // Must run before markReleaseSeen. Exceptions propagate to the per-repo
         // catch so the marker stays un-advanced. Do NOT wrap in try/catch.
         $this->eventDispatcher->dispatch(new NewReleaseDetected(
-            new RepositoryName($repoName),
-            $release,
-            new \DateTimeImmutable()
+            $repository,
+            $detected,
+            $this->clock->now()
         ));
 
-        if ($release->tagName !== null) {
-            $this->progress->markReleaseSeen($repoName, $release->tagName);
-            return;
-        }
-
-        $this->progress->markChecked($repoName);
+        $this->progress->markReleaseSeen($repository->value(), $detected->tag->value());
     }
 }

@@ -18,4 +18,9 @@ final readonly class ReleaseEmail
         public string $publishedAt,
     ) {
     }
+
+    public function key(): NotificationKey
+    {
+        return new NotificationKey($this->subscriptionId, $this->tagName, $this->repository);
+    }
 }

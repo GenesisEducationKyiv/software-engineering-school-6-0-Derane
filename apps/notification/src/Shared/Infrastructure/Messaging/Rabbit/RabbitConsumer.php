@@ -29,11 +29,24 @@ use PhpAmqpLib\Wire\AMQPTable;
  * acks the original. `shouldRouteToDlq()` reads that header — the count
  * grows correctly with each retry.
  *
+ * ## Why retries go through a TTL retry queue (backoff)
+ *
+ * Republishing straight back to the work queue retries in milliseconds — an
+ * SMTP outage would burn every attempt instantly and park the message in the
+ * DLQ. Instead the copy is published to a retry queue (no consumers) with a
+ * per-message `expiration` that grows with the retry count; on expiry the
+ * broker dead-letters it back into the work queue. Per-message TTL only
+ * expires from the queue head, but because the delay grows monotonically
+ * with the retry count, FIFO order matches expiry order closely enough here.
+ *
  * @psalm-api
  */
 final readonly class RabbitConsumer
 {
     private const RETRY_HEADER = 'x-retry-count';
+
+    /** First retry delay; doubles with each subsequent attempt (5s, 10s, 20s…). */
+    private const BASE_RETRY_DELAY_SECONDS = 5;
 
     public function __construct(private RabbitConnection $connection)
     {
@@ -65,8 +78,39 @@ final readonly class RabbitConsumer
         $message->nack($requeue);
     }
 
-    public function requeueWithRetry(AMQPMessage $message): void
+    /**
+     * Publishes a delayed copy of $message to $retryQueue (via the default
+     * exchange) with an incremented retry count, then acks the original.
+     * Original message properties (content_type, …) are preserved; only the
+     * retry header, persistence and the per-message TTL are overridden.
+     */
+    public function requeueWithRetry(AMQPMessage $message, string $retryQueue): void
     {
+        $newCount = $this->retryCountFor($message) + 1;
+        $this->republishDelayed($message, $retryQueue, $newCount, $this->retryDelaySeconds($newCount));
+    }
+
+    /**
+     * Parks the message for $delaySeconds WITHOUT consuming retry budget —
+     * the retry count is carried over unchanged. For backoff that is not
+     * failure, e.g. waiting out another worker's claim lease.
+     *
+     * Per-message TTL only expires from the queue head, so a long park can
+     * delay shorter retries queued behind it — acceptable because parking
+     * only happens on claim contention, which needs a concurrent worker or
+     * a crashed predecessor to occur at all.
+     */
+    public function requeueWithoutRetryIncrement(AMQPMessage $message, string $retryQueue, int $delaySeconds): void
+    {
+        $this->republishDelayed($message, $retryQueue, $this->retryCountFor($message), $delaySeconds);
+    }
+
+    private function republishDelayed(
+        AMQPMessage $message,
+        string $retryQueue,
+        int $retryCount,
+        int $delaySeconds
+    ): void {
         $channel = $this->connection->channel();
         $channel->confirm_select();
         // Must register the nack handler BEFORE publishing. In php-amqplib,
@@ -80,15 +124,17 @@ final readonly class RabbitConsumer
             );
         });
 
-        $newCount = $this->retryCountFor($message) + 1;
-        $newMessage = new AMQPMessage(
-            $message->getBody(),
-            ['application_headers' => new AMQPTable([self::RETRY_HEADER => $newCount]), 'delivery_mode' => 2],
+        $properties = $message->get_properties();
+        $properties['application_headers'] = new AMQPTable(
+            array_merge($this->applicationHeadersOf($message), [self::RETRY_HEADER => $retryCount]),
         );
+        $properties['delivery_mode'] = 2;
+        $properties['expiration'] = (string) ($delaySeconds * 1000);
+
         $channel->basic_publish(
-            $newMessage,
-            $message->getExchange() ?? '',
-            $message->getRoutingKey() ?? '',
+            new AMQPMessage($message->getBody(), $properties),
+            '',
+            $retryQueue,
         );
         $channel->wait_for_pending_acks(5.0);
         $message->ack();
@@ -99,22 +145,35 @@ final readonly class RabbitConsumer
         return $this->retryCountFor($message) >= $maxRedeliveries;
     }
 
+    private function retryDelaySeconds(int $retryCount): int
+    {
+        return self::BASE_RETRY_DELAY_SECONDS * (1 << max(0, $retryCount - 1));
+    }
+
     private function retryCountFor(AMQPMessage $message): int
     {
+        $headers = $this->applicationHeadersOf($message);
+
+        return isset($headers[self::RETRY_HEADER]) && is_int($headers[self::RETRY_HEADER])
+            ? $headers[self::RETRY_HEADER]
+            : 0;
+    }
+
+    /** @return array<string, mixed> */
+    private function applicationHeadersOf(AMQPMessage $message): array
+    {
         if (!$message->has('application_headers')) {
-            return 0;
+            return [];
         }
 
         $headers = $message->get('application_headers');
         if (!$headers instanceof AMQPTable) {
-            return 0;
+            return [];
         }
 
         /** @var array<string, mixed> $data */
         $data = $headers->getNativeData();
 
-        return isset($data[self::RETRY_HEADER]) && is_int($data[self::RETRY_HEADER])
-            ? $data[self::RETRY_HEADER]
-            : 0;
+        return $data;
     }
 }

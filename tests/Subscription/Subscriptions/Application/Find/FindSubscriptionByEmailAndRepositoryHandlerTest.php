@@ -8,6 +8,7 @@ use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRe
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
 use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
+use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -40,14 +41,15 @@ final class FindSubscriptionByEmailAndRepositoryHandlerTest extends TestCase
         $this->assertSame(5, $response->id);
     }
 
-    public function testThrowsWhenRowMissingAfterInsert(): void
+    public function testThrowsTheDomainNotFoundExceptionWhenNoRowMatches(): void
     {
         $this->repository->expects($this->once())
             ->method('findByEmailAndRepository')
             ->with('a@b.com', 'golang/go')
             ->willReturn(null);
 
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(SubscriptionNotFoundException::class);
+        $this->expectExceptionMessage('Subscription for a@b.com on golang/go not found');
 
         ($this->handler)(new FindSubscriptionByEmailAndRepositoryQuery('a@b.com', 'golang/go'));
     }

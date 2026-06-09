@@ -6,9 +6,12 @@ use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Grpc\ReleaseNotifierService;
 use App\Releases\Sourcing\Domain\NewReleaseDetected;
+use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
+use App\Notification\Publishing\Domain\EventIdGenerator;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
+use App\Notification\Publishing\Domain\SendReleaseEmailFactoryInterface;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
-use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactoryInterface;
+use App\Notification\Publishing\Infrastructure\Factory\UuidV4EventIdGenerator;
 use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
 use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
@@ -31,6 +34,7 @@ use App\Releases\Sourcing\Infrastructure\GitHubApiClient;
 use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
 use App\Releases\Sourcing\Infrastructure\SmokeGitHubReleaseSource;
+use App\Releases\Sourcing\Infrastructure\StubReleaseSource;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
 use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanQuery;
 use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommand;
@@ -56,8 +60,10 @@ use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Shared\Domain\Clock;
 use App\Shared\Infrastructure\Bus\InMemoryCommandBus;
 use App\Shared\Infrastructure\Bus\InMemoryQueryBus;
+use App\Shared\Infrastructure\Clock\SystemClock;
 use App\Shared\Infrastructure\Error\ExceptionStatusMap;
 use App\Shared\Infrastructure\Event\InMemoryEventDispatcher;
 use App\Shared\Infrastructure\Event\ListenerProvider;
@@ -81,19 +87,18 @@ use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommandHandler;
-use App\Subscription\Subscriptions\Application\Validation\SubscriptionValidator;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
 use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
+use App\Subscription\Subscriptions\Domain\SubscriptionCreated;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactory;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriberRefFactoryInterface;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactory;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactoryInterface;
 use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
+use App\Subscription\Subscriptions\Infrastructure\Listener\WhenSubscriptionCreatedThenLog;
 use App\Subscription\Subscriptions\Infrastructure\Persistence\PdoSubscriptionRepository;
 use App\Migration\Migrator;
-use App\Validation\EmailValidator;
-use App\Validation\RepositoryNameValidator;
 use DI\Container;
 use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
@@ -106,7 +111,6 @@ use Psr\EventDispatcher\ListenerProviderInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
-use Tests\Support\FakeGitHubService;
 
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
@@ -196,7 +200,7 @@ return static function (array $settings): Container {
             }
 
             if ($settings['github']['stub']) {
-                return new FakeGitHubService();
+                return new StubReleaseSource();
             }
             return new GitHubApiReleaseSource(
                 $c->get(GitHubApiClientInterface::class),
@@ -220,13 +224,6 @@ return static function (array $settings): Container {
 
         PaginationFactoryInterface::class => static fn() => new PaginationFactory(),
 
-        EmailValidator::class => static fn() => new EmailValidator(),
-        RepositoryNameValidator::class => static fn() => new RepositoryNameValidator(),
-        SubscriptionValidator::class => static fn($c) => new SubscriptionValidator(
-            $c->get(EmailValidator::class),
-            $c->get(RepositoryNameValidator::class)
-        ),
-
         SubscriptionRepository::class => static fn($c) => new PdoSubscriptionRepository(
             $c->get(PDO::class),
             $c->get(SubscriptionFactoryInterface::class),
@@ -248,6 +245,7 @@ return static function (array $settings): Container {
         ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
         HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
+        Clock::class => static fn() => new SystemClock(),
 
         // Listener is intentionally lazy — the Rabbit publisher must not be resolved
         // while wiring HTTP/gRPC paths that don't need it; it is only touched during
@@ -259,18 +257,26 @@ return static function (array $settings): Container {
                     $listener($event);
                 },
             ],
+            SubscriptionCreated::class => [
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(WhenSubscriptionCreatedThenLog::class);
+                    $listener($event);
+                },
+            ],
         ]),
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
             $c->get(ListenerProviderInterface::class)
         ),
 
+        WhenSubscriptionCreatedThenLog::class => static fn($c) => new WhenSubscriptionCreatedThenLog(
+            $c->get(LoggerInterface::class)
+        ),
         SubscribeCommandHandler::class => static fn($c) => new SubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
             $c->get(ReleaseSource::class),
             $c->get(TrackedRepositoryRegistrar::class),
-            $c->get(SubscriptionValidator::class),
             $c->get(EventDispatcherInterface::class),
-            $c->get(LoggerInterface::class)
+            $c->get(Clock::class)
         ),
         UnsubscribeCommandHandler::class => static fn($c) => new UnsubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
@@ -331,13 +337,20 @@ return static function (array $settings): Container {
             $c->get(PrometheusFormatter::class)
         ),
 
-        SendReleaseEmailFactoryInterface::class => static fn() => new SendReleaseEmailFactory(),
+        EventIdGenerator::class => static fn() => new UuidV4EventIdGenerator(),
+        SendReleaseEmailFactoryInterface::class => static fn($c) => new SendReleaseEmailFactory(
+            $c->get(Clock::class),
+            $c->get(EventIdGenerator::class)
+        ),
         ReleaseNotificationPublisher::class => static fn($c) => $c->get(RabbitReleaseNotificationPublisher::class),
+        PublishReleaseEmailsForRelease::class => static fn($c) => new PublishReleaseEmailsForRelease(
+            $c->get(SubscriberFinder::class),
+            $c->get(SendReleaseEmailFactoryInterface::class),
+            $c->get(ReleaseNotificationPublisher::class)
+        ),
         WhenNewReleaseDetectedThenPublishReleaseEmails::class =>
             static fn($c) => new WhenNewReleaseDetectedThenPublishReleaseEmails(
-                $c->get(SubscriberFinder::class),
-                $c->get(SendReleaseEmailFactoryInterface::class),
-                $c->get(ReleaseNotificationPublisher::class)
+                $c->get(PublishReleaseEmailsForRelease::class)
             ),
 
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
@@ -351,6 +364,7 @@ return static function (array $settings): Container {
             $c->get(ScanProgressWriter::class),
             $c->get(ReleaseDetector::class),
             $c->get(EventDispatcherInterface::class),
+            $c->get(Clock::class),
             $c->get(LoggerInterface::class),
             $settings['github']['scan_batch_size']
         ),
