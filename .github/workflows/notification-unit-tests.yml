@@ -1,0 +1,15 @@
+name: Notification Service Unit Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  phpunit:
+    name: PHPUnit (notification service)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run notification-service Unit suite
+        run: make notification-unit

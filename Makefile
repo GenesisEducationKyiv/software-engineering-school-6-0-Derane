@@ -7,6 +7,7 @@
         tests ci c4-up c4-down c4-logs c4-validate \
         logs-rabbitmq logs-notification-db logs-notification-svc \
         migrate-notification notification-smoke scanner-smoke \
+        notification-unit notification-deptrac \
         notification-integration-up notification-integration-run notification-integration-down notification-integration
 
 HOST_UID := $(shell id -u)
@@ -110,11 +111,19 @@ notification-integration: notification-integration-up ## Run the notification se
 test: install ## Run PHPUnit Unit suite inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Unit --testdox
 
+notification-unit: install ## Run the notification service's PHPUnit Unit suite inside Docker
+	$(COMPOSE) run --rm --no-deps -w /app/apps/notification app sh -c \
+		"composer install --no-interaction --quiet && vendor/bin/phpunit --testsuite Unit --testdox"
+
 lint: install ## Run PHP_CodeSniffer inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
 
-deptrac: install ## Run deptrac architecture-boundary check inside Docker
+deptrac: install ## Run deptrac architecture-boundary check (monolith) inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/deptrac analyse --no-progress --no-cache
+
+notification-deptrac: install ## Run the notification service's deptrac architecture check inside Docker
+	$(COMPOSE) run --rm --no-deps -w /app/apps/notification app sh -c \
+		"composer install --no-interaction --quiet && vendor/bin/deptrac analyse --no-progress --no-cache"
 
 psalm: install ## Run Psalm inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
@@ -188,8 +197,9 @@ e2e-auth-down: ## Stop the auth-enabled E2E environment and remove volumes
 e2e-auth: e2e-auth-up ## Run Playwright auth-on E2E suite end-to-end
 	@$(MAKE) e2e-auth-run; status=$$?; $(MAKE) e2e-auth-down; exit $$status
 
-tests: ## Run every test suite (unit, integration, notification-integration, acceptance, acceptance-auth, e2e, e2e-auth)
+tests: ## Run every test suite (unit, notification-unit, integration, notification-integration, acceptance, acceptance-auth, e2e, e2e-auth)
 	$(MAKE) test
+	$(MAKE) notification-unit
 	$(MAKE) integration
 	$(MAKE) notification-integration
 	$(MAKE) acceptance
@@ -200,6 +210,7 @@ tests: ## Run every test suite (unit, integration, notification-integration, acc
 ci: install ## Run the full Dockerized CI pipeline locally
 	$(MAKE) lint
 	$(MAKE) deptrac
+	$(MAKE) notification-deptrac
 	$(MAKE) psalm
 	$(MAKE) tests
 
