@@ -1,0 +1,15 @@
+name: Architecture
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  deptrac:
+    name: deptrac (bounded-context boundaries)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run deptrac
+        run: make deptrac

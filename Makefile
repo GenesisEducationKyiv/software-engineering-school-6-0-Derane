@@ -1,4 +1,4 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint psalm check proto \
+.PHONY: help ensure-env install build up down restart logs migrate test lint deptrac psalm check proto \
         acceptance-up acceptance-run acceptance-down acceptance \
         acceptance-auth-up acceptance-auth-run acceptance-auth-down acceptance-auth \
         integration-up integration-run integration-down integration \
@@ -113,11 +113,15 @@ test: install ## Run PHPUnit Unit suite inside Docker
 lint: install ## Run PHP_CodeSniffer inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
 
+deptrac: install ## Run deptrac architecture-boundary check inside Docker
+	$(COMPOSE) run --rm --no-deps app vendor/bin/deptrac analyse --no-progress --no-cache
+
 psalm: install ## Run Psalm inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 
-check: install ## Run lint, static analysis and unit tests inside Docker
+check: install ## Run lint, architecture, static analysis and unit tests inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
+	$(COMPOSE) run --rm --no-deps app vendor/bin/deptrac analyse --no-progress --no-cache
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpunit --testsuite Unit --testdox
 
@@ -195,6 +199,7 @@ tests: ## Run every test suite (unit, integration, notification-integration, acc
 
 ci: install ## Run the full Dockerized CI pipeline locally
 	$(MAKE) lint
+	$(MAKE) deptrac
 	$(MAKE) psalm
 	$(MAKE) tests
 
