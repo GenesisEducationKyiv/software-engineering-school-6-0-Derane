@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Notification\Publishing\Infrastructure\Listener;
 
-use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\ReleaseSnapshot;
 use App\Notification\Publishing\Domain\SendReleaseEmail;

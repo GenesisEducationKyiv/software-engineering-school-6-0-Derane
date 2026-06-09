@@ -256,43 +256,35 @@ deptrac:
       - Shared.Infrastructure
 
     # ===== Scanning (orchestrator). In Epic B it gained cross-context port edges to
-    # Releases.Domain + RepositoryTracking.Domain (architecture §5). No Domain layer
-    # of its own — C2 adds NotificationPublishing.Domain so ScanReleasesHandler can
-    # construct/dispatch NewReleaseDetected (the event is owned by NotificationPublishing,
-    # not Scanning, since Scanning has no Domain layer of its own — see the event's
-    # own docblock for the placement rationale).
+    # Releases.Domain + RepositoryTracking.Domain (architecture §5). It has no Domain
+    # layer of its own; it dispatches NewReleaseDetected, which is owned by Releases (the
+    # context that owns the Release VO the event carries — see the event's docblock), so
+    # the only cross-context edges it needs are Releases.Domain + RepositoryTracking.Domain.
     Scanning.Application:
       - Shared.Domain
       - Shared.Application
-      - Releases.Domain               # B4: ScanReleasesHandler catches RateLimitException
+      - Releases.Domain               # B4: catches RateLimitException; A1: constructs/dispatches NewReleaseDetected (owned by Releases.Domain)
       - RepositoryTracking.Domain     # B4: ScanReleasesHandler uses ScanCandidateSource + ScanProgressWriter ports
-      - Subscription.Domain
-      - NotificationPublishing.Domain # C2: ScanReleasesHandler constructs + dispatches NewReleaseDetected (owned by NotificationPublishing.Domain)
     Scanning.Infrastructure:
       - Scanning.Application          # B4: ScannerCliRunner dispatches ScanReleasesCommand
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
 
-    # ===== Notification\Publishing. C2 grants two narrow, deliberate cross-context
-    # edges (both documented at the point of use):
-    #  - NotificationPublishing.Domain -> Releases.Domain: NewReleaseDetected carries
-    #    the real Releases\Sourcing\Domain\Release (it is an in-process event that
-    #    never serializes — see NewReleaseDetected's docblock). This is narrower than,
-    #    and distinct from, the SendReleaseEmail/ReleaseSnapshot rule: that wire message
-    #    must stay decoupled from Release because it crosses the queue boundary; this
-    #    event never does.
+    # ===== Notification\Publishing. Its Domain stays free of cross-context edges:
+    # SendReleaseEmail/ReleaseSnapshot are deliberately decoupled from Releases so the
+    # wire message can cross the queue boundary. The one cross-context edge it needs is
+    # at the Infrastructure layer:
     #  - NotificationPublishing.Infrastructure -> Subscription.Domain + Releases.Domain:
     #    WhenNewReleaseDetectedThenPublishReleaseEmails (Infrastructure\Listener — see
     #    its docblock for why it lives here, not in .Application: it depends on
     #    SendReleaseEmailFactoryInterface, an Infrastructure\Factory port, and an
-    #    Application placement would invert the dependency rule) resolves recipients
-    #    via SubscriberFinder/SubscriberCollection/SubscriberRef (Subscription.Domain)
-    #    and maps the event's Release into this context's own ReleaseSnapshot
-    #    (Releases.Domain for the source VO being mapped from).
+    #    Application placement would invert the dependency rule) consumes the
+    #    Releases-owned NewReleaseDetected, resolves recipients via
+    #    SubscriberFinder/SubscriberCollection/SubscriberRef (Subscription.Domain) and
+    #    maps the event's Release into this context's own ReleaseSnapshot (Releases.Domain).
     NotificationPublishing.Domain:
       - Shared.Domain
-      - Releases.Domain               # C2: NewReleaseDetected carries Releases\Sourcing\Domain\Release (in-process event, narrower than the SendReleaseEmail decoupling rule)
     NotificationPublishing.Application:
       - NotificationPublishing.Domain
       - Shared.Domain

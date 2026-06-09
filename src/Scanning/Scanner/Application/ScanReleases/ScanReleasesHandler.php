@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Scanning\Scanner\Application\ScanReleases;
 
-use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\RateLimitException;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
 use App\RepositoryTracking\Repositories\Domain\ScanProgressWriter;

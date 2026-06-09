@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Scanning\Scanner\Application\ScanReleases;
 
-use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\RateLimitException;
 use App\Releases\Sourcing\Domain\Release;
 use App\Releases\Sourcing\Domain\ReleaseSource;

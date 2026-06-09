@@ -169,8 +169,11 @@ Domain→Infrastructure edge, cross-context Infrastructure deps, and
   `NewReleaseDetected{repository, release}` on the PSR-14 bus; a listener
   `WhenNewReleaseDetectedThenPublishReleaseEmails` (`Notification\Publishing`)
   resolves recipients (Subscription port) and publishes per-recipient
-  `SendReleaseEmail` to RabbitMQ. Scanning then depends ONLY on Releases +
-  RepositoryTracking — no direct edge to Subscription/Notification.
+  `SendReleaseEmail` to RabbitMQ. The event is **owned by `Releases\Sourcing\Domain`**
+  (the context that owns the `Release` VO it carries), so both the Scanning raiser and
+  the Notification listener depend *inward* on Releases — never Scanning → Notification.
+  Scanning then depends ONLY on Releases + RepositoryTracking — no direct edge to
+  Subscription/Notification.
 - **Why a pre-commit *process* event (not an aggregate-saved event):** the event
   is dispatched **synchronously before** `markReleaseSeen` is persisted, and the
   listener publishes within that sync call. If publish throws → the marker is NOT

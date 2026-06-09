@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Tests\Notification\Publishing\Domain;
+namespace Tests\Releases\Sourcing\Domain;
 
-use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\Release;
 use App\Shared\Domain\DomainEvent;
 use App\Shared\Domain\ValueObject\RepositoryName;

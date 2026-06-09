@@ -5,7 +5,7 @@ declare(strict_types=1);
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Grpc\ReleaseNotifierService;
-use App\Notification\Publishing\Domain\NewReleaseDetected;
+use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactoryInterface;
