@@ -87,6 +87,55 @@ make down      # зупинити стек
 
 `make up` автоматично створює `.env` із `.env.example`, якщо його ще немає.
 
+## Спостережуваність (Observability)
+
+Підняти застосунок разом зі стеком спостережуваності (Filebeat → Elasticsearch → Kibana
+для логів, Prometheus + Grafana для метрик):
+
+```bash
+make obs-up     # додає ELK + Prometheus + Grafana поверх основного стеку
+make obs-logs   # логи стеку спостережуваності
+make obs-down   # зупинити та прибрати томи
+```
+
+| Сервіс | URL | Примітка |
+|--------|-----|----------|
+| Grafana | http://localhost:3000 | admin/admin, дашборд «Release Notifier — RED & Observability» |
+| Prometheus | http://localhost:9090 | таргет `app:8080/metrics` |
+| Kibana | http://localhost:5601 | data view `release-notifier-logs-*` створюється автоматично |
+| Elasticsearch | http://localhost:9200 | сховище логів |
+
+### Структуроване логування
+
+Усі три процеси (`api`, `grpc`, `scanner`) пишуть логи у форматі JSON у stdout/stderr.
+Кожен запис містить `component`, `env` і `correlation_id` (один id на запит/виклик/цикл
+сканування; HTTP підхоплює вхідний `X-Request-Id`, gRPC — метадані `x-request-id`, тож
+трасування може охоплювати межі сервісів). Кожен HTTP-запит і gRPC-виклик
+лишає структурований access-рядок (`http request handled` / `grpc call handled` з
+`grpc_method`/`grpc_code`/`duration_seconds`); серверні збої (HTTP 500 / gRPC `INTERNAL`)
+додатково логуються на рівні `error` з винятком. Filebeat збирає логи контейнерів,
+розбирає JSON і відправляє в Elasticsearch; у Kibana їх можна шукати й агрегувати за
+`extra.component`, `extra.correlation_id`, `level_name`, `channel`.
+
+### Метрики (RED) на `/metrics`
+
+`/metrics` віддає бізнес-gauge'і (`app_subscriptions_total`, …) **і** RED-метрики.
+Усі процеси пишуть у спільний реєстр на Redis, тож один таргет Prometheus бачить
+метрики HTTP, gRPC і сканера:
+
+| Метрика | Тип | Що міряє |
+|---------|-----|----------|
+| `http_requests_total{method,route,status}` | counter | Rate / Errors HTTP |
+| `http_request_duration_seconds{method,route}` | histogram | Duration HTTP |
+| `grpc_server_handled_total{grpc_method,grpc_code}` | counter | Rate / Errors gRPC |
+| `grpc_server_handling_seconds{grpc_method}` | histogram | Duration gRPC |
+| `scan_cycles_total`, `scan_cycle_duration_seconds` | counter/histogram | Сканер: Rate / Duration |
+| `scan_errors_total{type}` | counter | Сканер: Errors |
+| `releases_detected_total`, `notifications_total{result}` | counter | Доменна пропускна здатність |
+
+У тестах використовується `METRICS_STORAGE=memory` (без Redis). Деталі рішень — у
+[`docs/adr/0002-observability.md`](docs/adr/0002-observability.md).
+
 ## Архітектура
 
 Ключові entrypoints:

@@ -3,10 +3,20 @@ model {
         // Edge — PSR-15 middleware pipeline
         middleware = component "HTTP Middleware Pipeline" {
             description "
-                PSR-15 stack: ErrorHandler → ApiKey → Slim BodyParser.
-                See ARCHITECTURE.md for routing and whitelist details.
+                PSR-15 stack (outermost first): CorrelationId → RequestMetrics →
+                ErrorHandler → Routing → RouteTag → ApiKey → BodyParser.
+                Mints/propagates a correlation id, records HTTP RED metrics and a
+                structured access log for every request.
             "
             technology "PHP, PSR-15"
+        }
+
+        httpMetrics = component "HTTP Metrics Recorder" {
+            description "
+                Records http_requests_total and http_request_duration_seconds into
+                the shared Redis-backed Prometheus registry.
+            "
+            technology "PHP, promphp"
         }
 
         // Controllers
@@ -21,15 +31,16 @@ model {
         }
 
         metricsCtrl = component "MetricsController" {
-            description "Exposes Prometheus metrics."
+            description "Exposes the Prometheus exposition at /metrics."
             technology "PHP, Slim 4"
         }
 
         // Application services
         subscriptionSvc = component "SubscriptionService" {
             description "
-                Core business logic: validates email and
-                owner/repo, checks GitHub, persists subscription.
+                Core business logic: validates email and owner/repo, checks
+                GitHub, persists the subscription, and publishes a
+                SubscriptionCreated / SubscriptionDeleted application event.
             "
             technology "PHP"
         }
@@ -41,17 +52,41 @@ model {
 
         metricsSvc = component "MetricsService" {
             description "
-                Computes Prometheus gauges from the database
-                on each /metrics scrape: total subscriptions,
-                tracked repositories, and repositories that have
-                a known last_seen_tag.
+                Renders the whole promphp registry on each /metrics scrape:
+                HTTP/gRPC/scanner RED series plus business gauges (subscriptions,
+                tracked repositories, repositories with releases) read from the DB.
+            "
+            technology "PHP, promphp"
+        }
+
+        // Observability — application-event plane
+        eventPublisher = component "EventPublisher" {
+            description "
+                Fail-open, no-throw fan-out of application events to observability
+                sinks: a listener failure never changes the business outcome.
             "
             technology "PHP"
         }
 
+        eventLogger = component "ApplicationEventLogger" {
+            description "
+                Turns application events into structured stderr logs with a stable
+                event= field and masked email addresses (PII redaction).
+            "
+            technology "PHP, Monolog"
+        }
+
         // Persistence
         subscriptionRepo = component "SubscriptionRepository" {
-            description "Data access for subscriptions table."
+            description "Data access for the subscriptions table."
+            technology "PHP, PDO"
+        }
+
+        metricsRepo = component "MetricsRepository" {
+            description "
+                Reads the aggregate counts (subscriptions, tracked repositories,
+                repositories with releases) behind the business gauges.
+            "
             technology "PHP, PDO"
         }
 
@@ -65,14 +100,34 @@ model {
         middleware -> healthCtrl "Forwards GET /health"
         middleware -> metricsCtrl "Forwards GET /metrics"
         middleware -> homePage "Serves GET / (static)"
+        middleware -> httpMetrics "Records request rate / errors / duration"
         subscriptionCtrl -> subscriptionSvc "Delegates business logic"
         metricsCtrl -> metricsSvc "Renders Prometheus exposition"
-        metricsSvc -> subscriptionRepo "Reads aggregate counts on every scrape"
+        metricsSvc -> metricsRepo "Reads aggregate counts on every scrape"
         subscriptionSvc -> githubSvc "Verifies owner/repo exists"
         subscriptionSvc -> subscriptionRepo "Persists / loads subscriptions"
+        subscriptionSvc -> eventPublisher "Publishes SubscriptionCreated / Deleted"
+        eventPublisher -> eventLogger "Fans out to the log sink"
     }
 
     extend notifier.grpcApi {
+        measuredInvoker = component "MeasuredInvoker" {
+            description "
+                RoadRunner Invoker decorator — the single dispatch seam. Per call:
+                mints/propagates a correlation id, records gRPC RED metrics, and
+                emits a structured access log.
+            "
+            technology "PHP, RoadRunner gRPC"
+        }
+
+        grpcMetrics = component "gRPC Metrics Recorder" {
+            description "
+                Records grpc_server_handled_total and grpc_server_handling_seconds
+                into the shared Redis-backed Prometheus registry.
+            "
+            technology "PHP, promphp"
+        }
+
         grpcSvc = component "ReleaseNotifierService" {
             description "
                 gRPC service implementation:
@@ -102,24 +157,62 @@ model {
             technology "PHP, PDO"
         }
 
+        grpcEventPublisher = component "EventPublisher" {
+            description "gRPC-side fail-open application-event publisher (separate instance)."
+            technology "PHP"
+        }
+
+        grpcEventLogger = component "ApplicationEventLogger" {
+            description "gRPC-side structured event logger with masked emails."
+            technology "PHP, Monolog"
+        }
+
+        measuredInvoker -> grpcSvc "Dispatches each RPC"
+        measuredInvoker -> grpcMetrics "Records call rate / errors / duration"
         grpcSvc -> grpcSubscriptionSvc "Delegates business logic"
         grpcSubscriptionSvc -> grpcGithubSvc "Verifies owner/repo exists"
         grpcSubscriptionSvc -> grpcSubscriptionRepo "Persists / loads subscriptions"
+        grpcSubscriptionSvc -> grpcEventPublisher "Publishes SubscriptionCreated / Deleted"
+        grpcEventPublisher -> grpcEventLogger "Fans out to the log sink"
     }
 
-    user -> notifier.grpcApi.grpcSvc "RPC calls" "gRPC"
+    user -> notifier.grpcApi.measuredInvoker "RPC calls" "gRPC"
 
     extend notifier.scanner {
         scannerSvc = component "ScannerService" {
             description "
-                Loop driver. Picks repositories to scan in batches,
-                resolves the latest release tag from GitHub,
-                compares against repositories.last_seen_tag,
-                dispatches per-subscriber emails (skipping
-                already-delivered tags via release_notifications),
-                advances last_seen_tag only after all subscribers got the email.
+                Loop driver / orchestrator. Pulls a batch of due repositories,
+                delegates detection and notification, advances scan markers, and
+                publishes scan-lifecycle application events. Holds no direct
+                logging or metrics dependency.
             "
             technology "PHP CLI"
+        }
+
+        releaseDetector = component "ReleaseDetector" {
+            description "
+                Resolves the latest release tag from GitHub, compares against
+                repositories.last_seen_tag, and publishes ReleaseDetected when the
+                tag differs.
+            "
+            technology "PHP"
+        }
+
+        notificationDispatcher = component "NotificationDispatcher" {
+            description "
+                Finds subscribers for a repository, skips already-delivered tags via
+                the release_notifications ledger, and sends each email through
+                NotifierService.
+            "
+            technology "PHP"
+        }
+
+        notifierSvc = component "NotifierService" {
+            description "
+                Renders and sends the release email via SMTP, publishing
+                ReleaseNotificationSent / Failed per recipient.
+            "
+            technology "PHP, PHPMailer"
         }
 
         scannerGithub = component "GitHubService" {
@@ -127,40 +220,69 @@ model {
             technology "PHP, Guzzle"
         }
 
-        notifierSvc = component "NotifierService" {
-            description "Builds and sends release email via SMTP."
-            technology "PHP, PHPMailer"
-        }
-
-        scannerRepo = component "SubscriptionRepository" {
+        scannerRepo = component "Scanner Repositories" {
             description "
-                Data access on the scanner side: reads subscriptions
-                and repositories rows, updates repositories.last_seen_tag
-                and last_checked_at, writes per-tag delivery rows
-                into release_notifications.
+                Per-consumer PDO data access for the scan loop: candidate source
+                (due repos), progress writer (last_seen_tag / last_checked_at),
+                repository-status reader, subscriber finder, and the
+                release_notifications delivery ledger.
             "
             technology "PHP, PDO"
         }
 
-        scannerSvc -> scannerRepo "Picks batches"
-        scannerSvc -> scannerGithub "Resolves latest release per repo"
-        scannerSvc -> notifierSvc "Dispatches email when release is new"
+        scannerEventPublisher = component "EventPublisher" {
+            description "Scanner-side fail-open application-event publisher (separate instance)."
+            technology "PHP"
+        }
+
+        scanMetricsListener = component "ScanMetricsListener" {
+            description "
+                Translates scan events (cycle completed, repository failed, rate
+                limited, release detected, notification result) into the scanner
+                RED / throughput metrics.
+            "
+            technology "PHP, promphp"
+        }
+
+        scannerEventLogger = component "ApplicationEventLogger" {
+            description "Scanner-side structured event logger with masked emails."
+            technology "PHP, Monolog"
+        }
+
+        scannerSvc -> scannerRepo "Reads scan candidates, advances markers"
+        scannerSvc -> releaseDetector "Detects a new release per repo"
+        scannerSvc -> notificationDispatcher "Dispatches notifications for a release"
+        scannerSvc -> scannerEventPublisher "Publishes scan-cycle events"
+        releaseDetector -> scannerGithub "Resolves latest release"
+        releaseDetector -> scannerRepo "Reads last_seen_tag"
+        releaseDetector -> scannerEventPublisher "Publishes ReleaseDetected"
+        notificationDispatcher -> scannerRepo "Finds subscribers, dedups via ledger"
+        notificationDispatcher -> notifierSvc "Sends release email"
+        notifierSvc -> scannerEventPublisher "Publishes notification result"
+        scannerEventPublisher -> scanMetricsListener "Fans out to the metrics sink"
+        scannerEventPublisher -> scannerEventLogger "Fans out to the log sink"
     }
 
     user -> notifier.httpApi.middleware "All HTTP requests (outermost edge)" "HTTPS"
 
+    // --- Cross-scope relationships ---
     notifier.httpApi.healthCtrl -> notifier.db "SELECT 1 (liveness probe)" "SQL/TCP"
     notifier.httpApi.githubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
     notifier.httpApi.githubSvc -> github "Calls REST API" "HTTPS"
     notifier.httpApi.subscriptionRepo -> notifier.db "SQL" "TCP"
+    notifier.httpApi.metricsRepo -> notifier.db "Aggregate count queries" "SQL/TCP"
+    notifier.httpApi.httpMetrics -> notifier.redis "Writes HTTP RED series (shared registry)" "RESP"
+    notifier.httpApi.metricsSvc -> notifier.redis "Reads all RED series for exposition" "RESP"
 
     notifier.grpcApi.grpcSvc -> notifier.db "SELECT 1 on Health() (liveness)" "SQL/TCP"
     notifier.grpcApi.grpcGithubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
     notifier.grpcApi.grpcGithubSvc -> github "Calls REST API" "HTTPS"
     notifier.grpcApi.grpcSubscriptionRepo -> notifier.db "SQL" "TCP"
+    notifier.grpcApi.grpcMetrics -> notifier.redis "Writes gRPC RED series (shared registry)" "RESP"
 
     notifier.scanner.scannerGithub -> notifier.redis "Reads/writes cached responses" "RESP"
     notifier.scanner.scannerGithub -> github "Calls REST API" "HTTPS"
     notifier.scanner.scannerRepo -> notifier.db "SQL" "TCP"
     notifier.scanner.notifierSvc -> smtp "Sends email" "SMTP"
+    notifier.scanner.scanMetricsListener -> notifier.redis "Writes scanner RED series (shared registry)" "RESP"
 }

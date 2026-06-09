@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The HTTP API renders the shared registry, so this single target also exposes
+  # the gRPC and scanner RED metrics (all processes write to the same Redis store).
+  - job_name: release-notifier
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["app:8080"]
+        labels:
+          service: release-notifier

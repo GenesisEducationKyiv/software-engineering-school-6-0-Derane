@@ -1,0 +1,34 @@
+# Ships the application's structured JSON logs from container stdout/stderr to
+# Elasticsearch. Each Monolog line is decoded so its fields (level, channel,
+# context.*, extra.component, extra.correlation_id) become searchable in Kibana.
+filebeat.inputs:
+  - type: container
+    paths:
+      - /var/lib/docker/containers/*/*.log
+
+processors:
+  - add_docker_metadata:
+      host: "unix:///var/run/docker.sock"
+  - decode_json_fields:
+      fields: ["message"]
+      target: ""
+      overwrite_keys: true
+      add_error_key: true
+      max_depth: 3
+  # Keep only this app's structured logs — they carry the observability component
+  # tag injected by ContextProcessor. Infra logs (postgres/redis) are dropped.
+  - drop_event:
+      when:
+        not:
+          has_fields: ["extra.component"]
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "release-notifier-logs-%{+yyyy.MM.dd}"
+
+setup.template.name: "release-notifier-logs"
+setup.template.pattern: "release-notifier-logs-*"
+setup.ilm.enabled: false
+setup.dashboards.enabled: false
+
+logging.level: warning

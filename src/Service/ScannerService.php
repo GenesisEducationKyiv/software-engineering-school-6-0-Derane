@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Application\Event\Factory\ScanEventFactoryInterface;
 use App\Exception\RateLimitException;
 use App\Repository\ScanCandidateSource;
 use App\Repository\ScanProgressWriter;
-use Psr\Log\LoggerInterface;
+use App\Application\Event\EventPublisherInterface;
 
 /** @psalm-api */
 final readonly class ScannerService
@@ -17,31 +18,39 @@ final readonly class ScannerService
         private ScanProgressWriter $progress,
         private ReleaseDetector $detector,
         private NotificationDispatcherInterface $dispatcher,
-        private LoggerInterface $logger,
+        private EventPublisherInterface $events,
+        private ScanEventFactoryInterface $eventFactory,
         private int $scanBatchSize = 100
     ) {
     }
 
     public function scan(): void
     {
-        $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
-        $this->logger->info('Scanning ' . count($repositories) . ' repositories for new releases');
+        $start = microtime(true);
+        $attempted = 0;
 
-        foreach ($repositories as $repoName) {
-            try {
-                $this->checkRepository($repoName);
-            } catch (RateLimitException $e) {
-                $this->logger->warning('Rate limited — stopping scan cycle early', [
-                    'repository' => $repoName,
-                    'retry_after' => $e->retryAfter,
-                ]);
-                break;
-            } catch (\Exception $e) {
-                $this->logger->error('Scan error', [
-                    'repository' => $repoName,
-                    'error' => $e->getMessage(),
-                ]);
+        try {
+            $repositories = $this->candidates->getDueForScan($this->scanBatchSize);
+            $this->events->publish($this->eventFactory->cycleStarted(count($repositories)));
+
+            foreach ($repositories as $repoName) {
+                $attempted++;
+                try {
+                    $this->checkRepository($repoName);
+                } catch (RateLimitException $e) {
+                    $this->events->publish($this->eventFactory->interruptedByRateLimit($repoName, $e->retryAfter));
+                    break;
+                } catch (\Exception $e) {
+                    $this->events->publish($this->eventFactory->repositoryFailed($repoName, $e));
+                }
             }
+        } catch (\Throwable $e) {
+            $this->events->publish($this->eventFactory->cycleFailed($e));
+        } finally {
+            // Count repositories actually attempted (a rate-limit break stops early,
+            // so the batch size would overstate throughput) and always record the
+            // cycle and its duration, even when it failed.
+            $this->events->publish($this->eventFactory->cycleCompleted($attempted, microtime(true) - $start));
         }
     }
 
@@ -54,6 +63,9 @@ final readonly class ScannerService
         }
 
         $allDelivered = $this->dispatcher->dispatch($repoName, $release);
+        $this->events->publish(
+            $this->eventFactory->notificationBatchCompleted($repoName, $release->tagName, $allDelivered)
+        );
 
         if ($allDelivered && $release->tagName !== null) {
             $this->progress->markReleaseSeen($repoName, $release->tagName);
@@ -61,9 +73,6 @@ final readonly class ScannerService
         }
 
         $this->progress->markChecked($repoName);
-        $this->logger->warning('Some notifications failed; release marker not advanced', [
-            'repository' => $repoName,
-            'tag' => $release->tagName,
-        ]);
+        $this->events->publish($this->eventFactory->releaseMarkerWithheld($repoName, $release->tagName));
     }
 }

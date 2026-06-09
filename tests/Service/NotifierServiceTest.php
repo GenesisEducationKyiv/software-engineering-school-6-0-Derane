@@ -5,16 +5,25 @@ declare(strict_types=1);
 namespace Tests\Service;
 
 use App\Config\Factory\SmtpConfigFactory;
+use App\Application\Event\Factory\ApplicationEventFactory;
+use App\Application\Event\ReleaseNotificationFailed;
 use App\Domain\Release;
 use App\Factory\PHPMailerFactory;
+use App\Notifier\MailerInterface;
 use App\Notifier\ReleaseEmailRenderer;
 use App\Notifier\SmtpMailer;
+use App\Observability\Event\EventDispatcher;
+use App\Observability\Logging\EmailMasker;
+use App\Observability\Logging\FallbackLogger;
 use App\Service\NotifierService;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\NullLogger;
+use Tests\Support\RecordingEventPublisher;
+use Tests\Support\ThrowingListenerProvider;
 
 class NotifierServiceTest extends TestCase
 {
+    private RecordingEventPublisher $events;
+
     private function createService(array $overrides = []): NotifierService
     {
         $config = (new SmtpConfigFactory())->fromArray(array_merge([
@@ -26,10 +35,13 @@ class NotifierServiceTest extends TestCase
             'encryption' => '',
         ], $overrides));
 
+        $this->events = new RecordingEventPublisher();
+
         return new NotifierService(
             new SmtpMailer($config, new PHPMailerFactory()),
             new ReleaseEmailRenderer(),
-            new NullLogger()
+            $this->events,
+            new ApplicationEventFactory()
         );
     }
 
@@ -51,6 +63,11 @@ class NotifierServiceTest extends TestCase
         $this->assertFalse(
             $service->notifyReleaseAvailable('user@example.com', 'golang/go', $this->release())
         );
+
+        $failures = $this->events->ofType(ReleaseNotificationFailed::class);
+        $this->assertCount(1, $failures);
+        $this->assertSame('user@example.com', $failures[0]->email);
+        $this->assertSame('golang/go', $failures[0]->repository);
     }
 
     public function testNotifyAcceptsAllParameters(): void
@@ -63,6 +80,22 @@ class NotifierServiceTest extends TestCase
                 'owner/repo',
                 $this->release("Line 1\nLine 2\n<script>alert('xss')</script>")
             )
+        );
+
+        $this->assertCount(1, $this->events->ofType(ReleaseNotificationFailed::class));
+    }
+
+    public function testSuccessfulSendStaysTrueEvenWhenAListenerThrows(): void
+    {
+        $service = new NotifierService(
+            $this->createMock(MailerInterface::class),
+            new ReleaseEmailRenderer(),
+            new EventDispatcher(new ThrowingListenerProvider(), new FallbackLogger('test', 'test', new EmailMasker())),
+            new ApplicationEventFactory()
+        );
+
+        $this->assertTrue(
+            $service->notifyReleaseAvailable('user@example.com', 'golang/go', $this->release())
         );
     }
 }

@@ -4,7 +4,8 @@
         integration-up integration-run integration-down integration \
         e2e-up e2e-run e2e-down e2e \
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
-        tests ci c4-up c4-down c4-logs c4-validate
+        tests ci c4-up c4-down c4-logs c4-validate \
+        obs-up obs-down obs-logs
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -16,6 +17,7 @@ E2E_AUTH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.
 ACCEPTANCE_AUTH_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.test.yml -f docker-compose.acceptance-auth.yml
 C4_COMPOSE := HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose -f docker-compose.architecture.yml
 C4_RUN := $(C4_COMPOSE) run --rm --no-deps -T likec4
+OBS_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.observability.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -145,3 +147,17 @@ c4-logs: ## Tail LikeC4 logs
 
 c4-validate: ## Validate the LikeC4 model
 	$(C4_RUN) validate
+
+obs-up: ensure-env ## Start the app stack + observability (Filebeat/ES/Kibana + Prometheus/Grafana)
+	$(OBS_COMPOSE) up -d --build
+	@echo "Grafana:       http://localhost:3000 (admin/admin) — dashboard: Release Notifier — RED & Observability"
+	@echo "Prometheus:    http://localhost:9090"
+	@echo "Kibana:        http://localhost:5601 — data view 'release-notifier-logs-*' is auto-provisioned"
+	@echo "Elasticsearch: http://localhost:9200"
+	@echo "(Kibana/Elasticsearch take ~30-60s to become ready.)"
+
+obs-down: ## Stop the observability + app stack and remove volumes
+	$(OBS_COMPOSE) down -v
+
+obs-logs: ## Tail observability stack logs
+	$(OBS_COMPOSE) logs -f

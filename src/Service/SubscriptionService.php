@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Config\Pagination;
+use App\Application\Event\Factory\SubscriptionEventFactoryInterface;
 use App\Domain\Subscription;
 use App\Domain\SubscriptionPage;
 use App\Exception\RepositoryNotFoundException;
@@ -12,7 +13,7 @@ use App\Exception\SubscriptionNotFoundException;
 use App\Repository\SubscriptionRepositoryInterface;
 use App\Repository\TrackedRepositoryRegistrar;
 use App\Validation\SubscriptionValidator;
-use Psr\Log\LoggerInterface;
+use App\Application\Event\EventPublisherInterface;
 
 /** @psalm-api */
 final readonly class SubscriptionService implements SubscriptionServiceInterface
@@ -22,7 +23,8 @@ final readonly class SubscriptionService implements SubscriptionServiceInterface
         private TrackedRepositoryRegistrar $trackedRepositories,
         private GitHubServiceInterface $gitHubService,
         private SubscriptionValidator $validator,
-        private LoggerInterface $logger
+        private EventPublisherInterface $events,
+        private SubscriptionEventFactoryInterface $eventFactory
     ) {
     }
 
@@ -38,10 +40,7 @@ final readonly class SubscriptionService implements SubscriptionServiceInterface
         $this->trackedRepositories->ensureExists($repoName);
         $subscription = $this->repository->create($email, $repoName);
 
-        $this->logger->info('Subscription created', [
-            'email' => $email,
-            'repository' => $repoName,
-        ]);
+        $this->events->publish($this->eventFactory->subscriptionCreated($email, $repoName));
 
         return $subscription;
     }
@@ -51,7 +50,7 @@ final readonly class SubscriptionService implements SubscriptionServiceInterface
     {
         $this->findOrFail($id);
         $this->repository->delete($id);
-        $this->logger->info('Subscription deleted', ['id' => $id]);
+        $this->events->publish($this->eventFactory->subscriptionDeleted($id));
     }
 
     #[\Override]
