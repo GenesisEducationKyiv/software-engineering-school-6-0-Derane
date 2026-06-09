@@ -114,7 +114,6 @@ return static function (array $settings): Container {
     $containerBuilder->addDefinitions([
         'settings' => $settings,
 
-        // === Infrastructure: logging, PDO, Redis, HTTP ===
         LoggerInterface::class => static function () {
             $logger = new Logger('app');
             $logger->pushHandler(new StreamHandler('php://stderr'));
@@ -142,17 +141,6 @@ return static function (array $settings): Container {
             ]);
         },
 
-        // === Messaging: RabbitMQ (C4 — shared transport seam, no callers yet) ===
-        // Concrete-class DI key (Decision 4): there is no *Interface to bind to —
-        // RabbitConnection/RabbitPublisher/RabbitConsumer ARE the lowest-level
-        // adapters, mirroring the PDO::class/RedisClient::class precedent for
-        // "infrastructure connection objects" above. The AMQPStreamConnection is
-        // built here (the only place that opens a real socket) from the
-        // 'rabbitmq' settings group, using its dedicated host/port/user/password/
-        // vhost constructor arguments — never an assembled connection-URI string,
-        // which is what avoids any RABBITMQ_VHOST=/ URL-encoding concern. Its
-        // channel is then handed to RabbitConnection, which idempotently asserts
-        // the full AR-MQ1 topology exactly once per process.
         RabbitConnection::class => static function () use ($settings) {
             $connection = new AMQPStreamConnection(
                 $settings['rabbitmq']['host'],
@@ -174,7 +162,6 @@ return static function (array $settings): Container {
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
-        // === Releases context (B3) — cache + factory + client + service ===
         GitHubCacheInterface::class => static fn($c) => new SafeGitHubCacheDecorator(
             new RedisGitHubCache($c->get(RedisClient::class)),
             $c->get(LoggerInterface::class)
@@ -220,7 +207,6 @@ return static function (array $settings): Container {
             );
         },
 
-        // Releases context CQRS handlers (B3)
         FetchLatestReleaseHandler::class => static fn($c) => new FetchLatestReleaseHandler(
             $c->get(ReleaseSource::class)
         ),
@@ -228,14 +214,12 @@ return static function (array $settings): Container {
             $c->get(ReleaseSource::class)
         ),
 
-        // === Domain factories — injected for testability ===
         SubscriptionFactoryInterface::class => static fn() => new SubscriptionFactory(),
         SubscriberRefFactoryInterface::class => static fn() => new SubscriberRefFactory(),
         RepositoryStatusFactoryInterface::class => static fn() => new RepositoryStatusFactory(),
 
         PaginationFactoryInterface::class => static fn() => new PaginationFactory(),
 
-        // === Legacy.Application: Validation ===
         EmailValidator::class => static fn() => new EmailValidator(),
         RepositoryNameValidator::class => static fn() => new RepositoryNameValidator(),
         SubscriptionValidator::class => static fn($c) => new SubscriptionValidator(
@@ -243,14 +227,12 @@ return static function (array $settings): Container {
             $c->get(RepositoryNameValidator::class)
         ),
 
-        // === Repositories / persistence ports ===
         SubscriptionRepository::class => static fn($c) => new PdoSubscriptionRepository(
             $c->get(PDO::class),
             $c->get(SubscriptionFactoryInterface::class),
             $c->get(SubscriberRefFactoryInterface::class)
         ),
         SubscriberFinder::class => static fn($c) => $c->get(SubscriptionRepository::class),
-        // B5: count port aliased to the same PdoSubscriptionRepository instance
         SubscriptionCountPort::class => static fn($c) => $c->get(SubscriptionRepository::class),
 
         RepositoryStatusReader::class => static fn($c) => new PdoTrackedRepositoryReader(
@@ -258,23 +240,18 @@ return static function (array $settings): Container {
             $c->get(RepositoryStatusFactoryInterface::class)
         ),
         ScanCandidateSource::class => static fn($c) => $c->get(RepositoryStatusReader::class),
-        // B5: count port aliased to the same PdoTrackedRepositoryReader instance
         RepositoryCountPort::class => static fn($c) => $c->get(RepositoryStatusReader::class),
 
         TrackedRepositoryRegistrar::class => static fn($c) => new PdoTrackedRepositoryWriter(
             $c->get(PDO::class)
         ),
         ScanProgressWriter::class => static fn($c) => $c->get(TrackedRepositoryRegistrar::class),
-        // === Shared kernel: health + exception mapping ===
         HealthCheckInterface::class => static fn($c) => new DatabaseHealthCheck($c->get(PDO::class)),
         ExceptionStatusMap::class => static fn() => new ExceptionStatusMap(),
 
-        // === In-process PSR-14 event plane ===
-        // NewReleaseDetected (C2/E3): keep the listener callable LAZY. The
-        // Rabbit publisher must not be resolved while wiring unrelated
-        // HTTP/gRPC command paths such as subscription management; it should be
-        // touched only when NewReleaseDetected is actually dispatched during a
-        // scan cycle.
+        // Listener is intentionally lazy — the Rabbit publisher must not be resolved
+        // while wiring HTTP/gRPC paths that don't need it; it is only touched during
+        // scan cycles when NewReleaseDetected is actually dispatched.
         ListenerProviderInterface::class => static fn($c) => new ListenerProvider([
             NewReleaseDetected::class => [
                 static function (object $event) use ($c): void {
@@ -287,7 +264,6 @@ return static function (array $settings): Container {
             $c->get(ListenerProviderInterface::class)
         ),
 
-        // === Subscription context — CQRS handlers (B1) ===
         SubscribeCommandHandler::class => static fn($c) => new SubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
             $c->get(ReleaseSource::class),
@@ -315,7 +291,6 @@ return static function (array $settings): Container {
             $c->get(SubscriptionResponseFactoryInterface::class),
         ),
 
-        // === RepositoryTracking context — CQRS handlers (B2) ===
         RegisterRepositoryCommandHandler::class => static fn($c) => new RegisterRepositoryCommandHandler(
             $c->get(TrackedRepositoryRegistrar::class)
         ),
@@ -331,7 +306,6 @@ return static function (array $settings): Container {
             $c->get(ScanCandidateSource::class)
         ),
 
-        // === In-house CQRS buses ===
         CommandBus::class => static fn($c) => new InMemoryCommandBus([
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
@@ -350,7 +324,6 @@ return static function (array $settings): Container {
             RepositoryExistsQuery::class => $c->get(RepositoryExistsHandler::class),
         ]),
 
-        // === Shared kernel — metrics (B5 FR2 count-port fix) ===
         PrometheusFormatter::class => static fn() => new PrometheusFormatter(),
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
             $c->get(SubscriptionCountPort::class),
@@ -358,11 +331,6 @@ return static function (array $settings): Container {
             $c->get(PrometheusFormatter::class)
         ),
 
-        // === Notification\Publishing context — NewReleaseDetected wiring (C2) ===
-        // SendReleaseEmailFactoryInterface: C1 deliberately left it unbound
-        // ("nothing calls it yet"); C2 is its first caller. No constructor deps
-        // — pure UUID-generation + VO assembly — follows the *FactoryInterface
-        // -> *Factory aliasing convention used for Subscription/RepositoryTracking.
         SendReleaseEmailFactoryInterface::class => static fn() => new SendReleaseEmailFactory(),
         ReleaseNotificationPublisher::class => static fn($c) => $c->get(RabbitReleaseNotificationPublisher::class),
         WhenNewReleaseDetectedThenPublishReleaseEmails::class =>
@@ -372,14 +340,12 @@ return static function (array $settings): Container {
                 $c->get(ReleaseNotificationPublisher::class)
             ),
 
-        // === Scanning context — application services (B5) ===
         ReleaseDetector::class => static fn($c) => new ReleaseDetector(
             $c->get(ReleaseSource::class),
             $c->get(RepositoryStatusReader::class),
             $c->get(LoggerInterface::class)
         ),
 
-        // === Scanning context — CQRS handler + CLI runner (B4) ===
         ScanReleasesHandler::class => static fn($c) => new ScanReleasesHandler(
             $c->get(ScanCandidateSource::class),
             $c->get(ScanProgressWriter::class),
@@ -394,7 +360,6 @@ return static function (array $settings): Container {
             $settings['github']['scan_interval']
         ),
 
-        // === HTTP + gRPC boundaries ===
         SubscriptionController::class => static fn($c) => new SubscriptionController(
             $c->get(CommandBus::class),
             $c->get(QueryBus::class),

@@ -8,18 +8,14 @@ use App\Validation\EmailValidator;
 use App\Validation\RepositoryNameValidator;
 
 /**
- * Injected validation collaborator invoked by SubscribeCommandHandler before the
- * aggregate is built. It throws Shared\Domain\Exception\ValidationException (via
- * the legacy Email/RepositoryName validators) so the 400 / INVALID_ARGUMENT mapping in
- * ExceptionStatusMap is preserved exactly.
+ * Throws Shared\Domain\Exception\ValidationException (via the legacy Email/RepositoryName
+ * validators) so the 400 / INVALID_ARGUMENT mapping in ExceptionStatusMap is preserved.
  *
- * Lives in the Application layer (it is a use-case input concern), so the handler
- * depends on it without crossing the Application -> Infrastructure boundary.
+ * Lives in the Application layer (use-case input concern), so the handler depends on it
+ * without crossing the Application -> Infrastructure boundary.
  *
- * B5 tech-debt: it depends on App\Validation\* (Legacy.Application) — a
- * transitional Subscription.Application -> Legacy.Application deptrac edge,
- * granted explicitly until B5 moves the validators / fully absorbs them into the
- * Shared VOs.
+ * Depends on App\Validation\* (Legacy.Application) — a transitional deptrac edge granted
+ * explicitly until the validators are absorbed into the Shared VOs.
  *
  * @psalm-api
  */

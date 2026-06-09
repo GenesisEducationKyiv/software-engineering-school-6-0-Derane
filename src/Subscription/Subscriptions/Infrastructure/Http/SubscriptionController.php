@@ -19,13 +19,7 @@ use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
-/**
- * Thin HTTP driver over the CQRS buses. Parses the request, dispatches a command
- * or asks a query, and maps the typed response to the frozen JSON shape
- * {id, email, repository, created_at}.
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class SubscriptionController
 {
     public function __construct(

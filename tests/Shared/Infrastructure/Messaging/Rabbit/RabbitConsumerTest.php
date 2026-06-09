@@ -12,10 +12,10 @@ use PhpAmqpLib\Wire\AMQPTable;
 use PHPUnit\Framework\TestCase;
 
 /**
- * AC4: `RabbitConsumer` exposes generic ack/nack/requeue primitives and
- * routes over-redelivered messages to the DLQ via bounded `x-death`
- * inspection — proven against fixture `AMQPMessage`s with synthetic
- * `x-death` headers (no live broker).
+ * `RabbitConsumer` exposes generic ack/nack/requeue primitives and routes
+ * over-redelivered messages to the DLQ via bounded `x-death` inspection —
+ * proven against fixture `AMQPMessage`s with synthetic `x-death` headers
+ * (no live broker).
  */
 final class RabbitConsumerTest extends TestCase
 {

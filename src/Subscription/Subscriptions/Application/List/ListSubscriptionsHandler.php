@@ -14,10 +14,6 @@ use App\Subscription\Subscriptions\Domain\SubscriptionPage;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
 /**
- * Read-side: list subscriptions, filtered by email or all, paginated. Delegates
- * to findByEmail / findAll exactly as the legacy listSubscriptions did, mapping
- * the page items to the typed response.
- *
  * @implements QueryHandler<ListSubscriptionsQuery, SubscriptionPageResponse>
  *
  * @psalm-api

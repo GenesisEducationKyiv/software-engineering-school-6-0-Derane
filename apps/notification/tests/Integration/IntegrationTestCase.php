@@ -10,11 +10,9 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Base class for notification service integration tests. Bootstraps the real
- * DI container once per test class and resets ledger data between tests.
- *
- * Must run inside the notification-svc dev container where notification-db,
- * rabbitmq, and mailhog are reachable by hostname.
+ * Bootstraps the real DI container once per test class and resets ledger data between tests.
+ * Must run inside the notification-svc dev container where notification-db, rabbitmq, and
+ * mailhog are reachable by hostname.
  */
 abstract class IntegrationTestCase extends TestCase
 {

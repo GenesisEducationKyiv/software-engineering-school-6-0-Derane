@@ -13,11 +13,6 @@ use PhpAmqpLib\Message\AMQPMessage;
  * be wasteful and signals a misunderstanding. Called once in the constructor;
  * ack/nack handlers are also registered once here.
  *
- * Three outcomes from publish():
- * - ack → returns normally
- * - nack → throws RabbitPublishFailedException::nacked()
- * - timeout → throws RabbitPublishFailedException::confirmTimedOut()
- *
  * @psalm-api
  */
 final readonly class RabbitPublisher

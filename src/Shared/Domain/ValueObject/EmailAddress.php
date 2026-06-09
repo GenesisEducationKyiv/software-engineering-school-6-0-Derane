@@ -6,12 +6,7 @@ namespace App\Shared\Domain\ValueObject;
 
 use App\Shared\Domain\Exception\InvalidArgumentException;
 
-/**
- * Immutable, self-validating value object for an email address. Absorbs the rule
- * enforced by EmailValidator (filter_var FILTER_VALIDATE_EMAIL).
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class EmailAddress implements \Stringable
 {
     public function __construct(private string $value)

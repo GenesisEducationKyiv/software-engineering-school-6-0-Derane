@@ -6,8 +6,7 @@ namespace App\Subscription\Subscriptions\Domain;
 
 /**
  * Cross-context Domain port: resolves the subscribers of a repository for the
- * notification flow. A legitimate Domain port edge consumed by the (legacy until
- * C1) NotificationDispatcher.
+ * notification flow. A legitimate Domain port edge consumed by NotificationDispatcher.
  *
  * @psalm-api
  */

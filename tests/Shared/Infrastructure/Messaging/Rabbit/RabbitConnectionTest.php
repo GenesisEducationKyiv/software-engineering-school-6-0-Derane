@@ -8,11 +8,6 @@ use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PHPUnit\Framework\TestCase;
 
-/**
- * AC2: `RabbitConnection` idempotently asserts the exact AR-MQ1 topology
- * (exchange/queue/binding/DLX/DLQ — verbatim from C3's handoff) on
- * construction, via a mocked `AMQPChannel` — no live broker required.
- */
 final class RabbitConnectionTest extends TestCase
 {
     public function testAssertsTheExactTopologyOnConstruction(): void
@@ -42,7 +37,6 @@ final class RabbitConnectionTest extends TestCase
 
         new RabbitConnection($channel);
 
-        // --- Exchanges: notifications (topic, durable) then notifications.dlx (fanout, durable) ---
         self::assertSame(
             ['notifications', 'topic', false, true, false],
             array_slice($exchangeDeclareCalls[0], 0, 5)
@@ -52,7 +46,6 @@ final class RabbitConnectionTest extends TestCase
             array_slice($exchangeDeclareCalls[1], 0, 5)
         );
 
-        // --- Queues: notifications.send-email (durable, DLX arg) then the DLQ (durable) ---
         self::assertSame('notifications.send-email', $queueDeclareCalls[0][0]);
         self::assertFalse($queueDeclareCalls[0][1]);  // passive
         self::assertTrue($queueDeclareCalls[0][2]);   // durable
@@ -70,14 +63,13 @@ final class RabbitConnectionTest extends TestCase
         self::assertFalse($queueDeclareCalls[1][3]);  // exclusive
         self::assertFalse($queueDeclareCalls[1][4]);  // auto_delete
 
-        // --- Bindings: notifications -> send-email (release.email), dlx -> dlq (fanout, no key) ---
         self::assertSame(
             ['notifications.send-email', 'notifications', 'release.email'],
             array_slice($queueBindCalls[0], 0, 3)
         );
         self::assertSame('notifications.send-email.dlq', $queueBindCalls[1][0]);
         self::assertSame('notifications.dlx', $queueBindCalls[1][1]);
-        self::assertSame('', $queueBindCalls[1][2]);  // fanout DLX -> DLQ: no routing-key semantics (Decision 1)
+        self::assertSame('', $queueBindCalls[1][2]);  // fanout DLX: no routing-key semantics
     }
 
     public function testExposesTheUnderlyingChannelForReuseByPublisherAndConsumer(): void

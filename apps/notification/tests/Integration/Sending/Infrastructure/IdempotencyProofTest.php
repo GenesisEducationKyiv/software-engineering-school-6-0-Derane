@@ -58,10 +58,6 @@ final class IdempotencyProofTest extends IntegrationTestCase
         self::assertCount(1, $this->mailHogMessagesContaining($token));
     }
 
-    // -------------------------------------------------------------------------
-    // Driving the real chain
-    // -------------------------------------------------------------------------
-
     /** @param array<string, mixed> $payload */
     private function publish(array $payload): void
     {
@@ -108,10 +104,6 @@ final class IdempotencyProofTest extends IntegrationTestCase
         $this->rabbitChannel()->queue_purge(SendReleaseEmailConsumer::QUEUE);
     }
 
-    // -------------------------------------------------------------------------
-    // Payload builder
-    // -------------------------------------------------------------------------
-
     /** @return array<string, mixed> */
     private function buildPayload(string $token): array
     {
@@ -148,10 +140,6 @@ final class IdempotencyProofTest extends IntegrationTestCase
             bin2hex(random_bytes(6)),
         );
     }
-
-    // -------------------------------------------------------------------------
-    // Assertions
-    // -------------------------------------------------------------------------
 
     /**
      * Counts rows by the (subscription_id, tag_name, repository) triple — uses

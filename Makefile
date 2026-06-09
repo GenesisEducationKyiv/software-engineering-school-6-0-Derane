@@ -65,32 +65,6 @@ notification-smoke: ensure-env ## Publish a notification smoke message and wait 
 scanner-smoke: ensure-env ## Seed a smoke release, run one scan cycle, and wait for MailHog delivery
 	$(COMPOSE) run --rm --no-deps app php bin/scanner-smoke.php
 
-# E2 (AC-4): the notification service's first tests/Integration suite needs real
-# notification-db + rabbitmq + mailhog, but NOT the persistent notification-svc
-# worker — its long-running consumer would race the test for
-# notifications.send-email deliveries (both are valid AMQP consumers; whichever
-# wins first processes the message, which is fine for notification-smoke's
-# "did *an* email arrive" check but breaks this suite's need to deterministically
-# drive+observe each delivery itself). It is not enough to simply not *start*
-# notification-svc here — `restart: unless-stopped` means an already-running
-# instance (e.g. from `make up`) reconnects its consumer the moment rabbitmq
-# becomes healthy. So -up explicitly `stop`s it first (idempotent — a no-op if
-# it is already stopped, e.g. on a fresh CI checkout where it was never up), and
-# -down restarts it afterwards. notification-db/rabbitmq/mailhog are deliberately
-# left running (not torn down) — they are shared with the rest of the compose
-# stack (notification-svc itself depends_on them), so stopping them in -down
-# would just make -down's own notification-svc restart fail/hang. -run itself
-# uses `run --rm --no-deps` (mirroring notification-smoke's one-off-container
-# pattern) so the suite executes in a fresh container that never registers as
-# a competing consumer either.
-#
-# The notification-svc image is intentionally lean (D1: only src/bin/config/
-# migrations/http are COPYed, no tests/ or dev tooling — unlike the monolith's
-# `COPY . .`), so -run bind-mounts tests/+phpunit.xml read-only and installs dev
-# deps at container-start (--ignore-platform-reqs: composer.lock's dev deps
-# resolve against PHP 8.4+; the image runs 8.2 with the pdo_pgsql/amqp/sockets
-# extensions this suite needs — the version constraint is a packaging-metadata
-# nicety the dev tools themselves don't actually require at runtime on 8.2).
 notification-integration-up: ensure-env ## Start notification-db + rabbitmq + mailhog for the notification service's Integration suite
 	$(COMPOSE) stop notification-svc
 	$(COMPOSE) up -d --wait notification-db rabbitmq mailhog

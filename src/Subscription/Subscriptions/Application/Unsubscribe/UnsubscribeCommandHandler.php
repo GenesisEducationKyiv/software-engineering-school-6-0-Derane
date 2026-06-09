@@ -11,10 +11,6 @@ use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use Psr\Log\LoggerInterface;
 
 /**
- * Write-side: delete a subscription. Ports the legacy unsubscribe logic: 404 when
- * the row is absent (preserved), then delete + log. Records no domain event
- * (SubscriptionDeleted is a future concern).
- *
  * @implements CommandHandler<UnsubscribeCommand>
  *
  * @psalm-api

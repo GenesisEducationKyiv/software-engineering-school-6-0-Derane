@@ -101,10 +101,6 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         $this->adapterWith($channel)->publish($this->makeMessage());
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     /** @return AMQPChannel&MockObject */
     private function channelBase(): AMQPChannel&MockObject
     {

@@ -13,8 +13,8 @@ use PhpAmqpLib\Message\AMQPMessage;
 use PHPUnit\Framework\TestCase;
 
 /**
- * AC3: `RabbitPublisher` puts the channel into confirm mode before any
- * publish, returns normally only on a broker ack, and raises
+ * `RabbitPublisher` puts the channel into confirm mode before any publish,
+ * returns normally only on a broker ack, and raises
  * {@see RabbitPublishFailedException} on a broker nack or confirm-wait
  * timeout — proven against a mocked `AMQPChannel` (no live broker).
  */
@@ -60,7 +60,6 @@ final class RabbitPublisherTest extends TestCase
 
         $publisher = new RabbitPublisher($this->connectionWrapping($channel));
 
-        // Returns normally — no exception.
         $publisher->publish('notifications', 'release.email', '{"v":1}');
 
         self::assertNotNull($publishedMessage);

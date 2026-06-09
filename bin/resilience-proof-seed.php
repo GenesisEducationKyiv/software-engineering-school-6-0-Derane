@@ -1,24 +1,15 @@
 <?php
 
 /**
- * E3 (AC-1/AC-3) helper — seeds ONE fresh smoke release + subscription and runs
- * ONE scan cycle, mirroring `bin/scanner-smoke.php`'s seed/dispatch idiom
- * (smoke repo via `GITHUB_SMOKE_*` env + `TrackedRepositoryRegistrar`/
- * `SubscriptionRepository` + `CommandBus::dispatch(new ScanReleasesCommand())`)
- * but WITHOUT its MailHog poll — `bin/resilience-proof.sh` seeds N of these
- * (one process per fresh release, since `SmokeGitHubReleaseSource` is
- * single-repo/single-release per process by design — see its constructor) and
- * polls MailHog itself, once, for the aggregate `total == N`.
+ * Seeds ONE fresh smoke release + subscription and runs ONE scan cycle, but
+ * WITHOUT the MailHog poll — `bin/resilience-proof.sh` seeds N of these (one
+ * process per fresh release, since `SmokeGitHubReleaseSource` is single-repo/
+ * single-release per process by design) and polls MailHog itself, once, for the
+ * aggregate `total == N`.
  *
- * Token is supplied by the caller via $RESILIENCE_TOKEN so the orchestrating
- * shell script can correlate seeded releases with observed queue/MailHog state
- * across N invocations. Prints the seeded repository's `full_name` to stdout
- * on success (the shell script captures it for the post-scan `last_seen_tag`
- * assertion in AC-3).
- *
- * Read-only with respect to wire contracts: dispatches the same
- * `ScanReleasesCommand` / `CommandBus` / `SubscriptionRepository` /
- * `TrackedRepositoryRegistrar` surfaces `bin/scanner-smoke.php` already uses.
+ * $RESILIENCE_TOKEN is supplied by the caller so the orchestrating shell script
+ * can correlate seeded releases with observed queue/MailHog state across N
+ * invocations. Prints the seeded repository's `full_name` to stdout on success.
  *
  * @psalm-api consumed only as a CLI entry point by bin/resilience-proof.sh
  */

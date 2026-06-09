@@ -21,7 +21,6 @@ final class InMemoryCommandBusTest extends TestCase
         $command = new FakeCommand();
         $bus->dispatch($command);
 
-        // Exactly that handler ran and received the dispatched instance.
         self::assertTrue($handler->handled);
         self::assertSame($command, $handler->received);
     }

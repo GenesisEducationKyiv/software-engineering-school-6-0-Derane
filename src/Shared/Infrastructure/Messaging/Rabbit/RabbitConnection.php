@@ -39,7 +39,6 @@ final readonly class RabbitConnection
 
     private function assertTopology(): void
     {
-        // --- Exchanges -------------------------------------------------
         $this->channel->exchange_declare(
             self::EXCHANGE_NOTIFICATIONS,
             'topic',
@@ -55,7 +54,6 @@ final readonly class RabbitConnection
             false   // auto_delete
         );
 
-        // --- Queues -----------------------------------------------------
         $this->channel->queue_declare(
             self::QUEUE_SEND_EMAIL,
             false,
@@ -73,7 +71,6 @@ final readonly class RabbitConnection
             false   // auto_delete
         );
 
-        // --- Bindings ----------------------------------------------------
         $this->channel->queue_bind(
             self::QUEUE_SEND_EMAIL,
             self::EXCHANGE_NOTIFICATIONS,

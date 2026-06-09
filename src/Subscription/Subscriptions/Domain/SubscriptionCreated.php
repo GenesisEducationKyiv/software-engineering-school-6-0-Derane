@@ -7,10 +7,8 @@ namespace App\Subscription\Subscriptions\Domain;
 use App\Shared\Domain\DomainEvent;
 
 /**
- * In-process domain event recorded by the Subscription aggregate on its create
- * path. Carries the payload a future listener (notification/analytics) needs
- * without the DB-generated id (unknown at record time — see the story's
- * "Aggregate id handling").
+ * Excludes the DB-generated id — it is unknown at record time (assigned by the
+ * persistence layer after the aggregate is saved).
  *
  * @psalm-api
  */

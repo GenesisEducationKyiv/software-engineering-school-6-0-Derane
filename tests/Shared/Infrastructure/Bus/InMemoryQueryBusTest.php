@@ -21,8 +21,6 @@ final class InMemoryQueryBusTest extends TestCase
 
         $result = $bus->ask(new FakeQuery());
 
-        // The typed Response is returned (no mixed leak) and it is the exact
-        // instance the handler produced.
         self::assertInstanceOf(FakeResponse::class, $result);
         self::assertSame($expected, $result);
     }

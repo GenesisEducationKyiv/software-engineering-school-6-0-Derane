@@ -9,12 +9,12 @@ use App\Sending\Domain\ReleaseEmail;
 /**
  * Maps a `SendReleaseEmail/v1` wire-format JSON message body to a `ReleaseEmail`.
  *
- * This is a plain mapper, not a `*FactoryInterface`, because it parses
- * untrusted bytes where "malformed" is an expected outcome the caller must
- * detect and route to the DLQ — not a Domain-construction concern. The
- * dedicated {@see MalformedReleaseEmailMessageException} lets the consumer
- * distinguish a poison message from an environmental failure without catching
- * generic \JsonException or \TypeError, which could also leak from a mapper bug.
+ * Plain mapper rather than a `*FactoryInterface`: it parses untrusted bytes
+ * where "malformed" is an expected outcome the caller must detect and route to
+ * the DLQ — not a Domain-construction concern. The dedicated
+ * {@see MalformedReleaseEmailMessageException} lets the consumer distinguish a
+ * poison message from an environmental failure without catching \JsonException
+ * or \TypeError, which could also leak from a mapper bug.
  *
  * Wire-format mapping (mirrors SendReleaseEmailSerializer::toArray()):
  *
@@ -29,10 +29,6 @@ use App\Sending\Domain\ReleaseEmail;
  * | releaseBody           | release.body          | no (defaults to '') |
  * | releaseUrl            | release.htmlUrl       | yes      |
  * | publishedAt           | release.publishedAt   | yes      |
- *
- * `schema` must equal `'SendReleaseEmail/v1'`; `occurredAt` is ignored.
- * Every required field is checked for both presence and type — a field with
- * the wrong type (e.g. subscriptionId as a JSON string) is treated as malformed.
  */
 final readonly class SendReleaseEmailMessageMapper
 {

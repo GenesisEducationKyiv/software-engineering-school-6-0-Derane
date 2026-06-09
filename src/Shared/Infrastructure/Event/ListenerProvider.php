@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Event;
 
+use Psr\EventDispatcher\ListenerProviderInterface;
+
 /**
  * Matches by instanceof rather than strict class equality, so a listener
  * registered against a base class or interface also fires for subtypes.
  *
  * @psalm-api
  */
-final readonly class ListenerProvider implements \Psr\EventDispatcher\ListenerProviderInterface
+final readonly class ListenerProvider implements ListenerProviderInterface
 {
     /**
      * @param array<class-string, list<callable>> $listeners

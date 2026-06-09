@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Shared\Domain\Bus\Command;
 
 /**
- * Contract for the single handler that executes a given command.
- *
  * The runtime parameter type is the base Command so PHP's signature-compatibility
  * check passes; the @template lets a concrete handler narrow to its specific
  * command for Psalm (e.g. @implements CommandHandler<SubscribeCommand>) WITHOUT

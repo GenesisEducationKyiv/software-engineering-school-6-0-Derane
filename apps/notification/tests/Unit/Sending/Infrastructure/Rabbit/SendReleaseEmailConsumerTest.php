@@ -208,10 +208,6 @@ final class SendReleaseEmailConsumerTest extends TestCase
         self::assertSame(['nack' => [6, false]], $captured);
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     /** Wires the mocked ports so the real handler runs its full happy path. */
     private function configureHandlerForSuccess(): void
     {

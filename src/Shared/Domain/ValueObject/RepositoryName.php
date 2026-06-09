@@ -6,12 +6,7 @@ namespace App\Shared\Domain\ValueObject;
 
 use App\Shared\Domain\Exception\InvalidArgumentException;
 
-/**
- * Immutable, self-validating value object for a GitHub repository name in
- * "owner/repo" form. Absorbs the rule enforced by RepositoryNameValidator.
- *
- * @psalm-api
- */
+/** @psalm-api */
 final readonly class RepositoryName implements \Stringable
 {
     private const PATTERN = '/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/';

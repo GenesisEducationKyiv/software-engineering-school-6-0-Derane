@@ -2,10 +2,6 @@
 
 declare(strict_types=1);
 
-// Env-array settings loader (Decision §5 — read directly from $_ENV/getenv(),
-// no phpdotenv: this service has no local-dev .env workflow yet, D6 wires it
-// into compose where variables arrive as real container env vars; mirrors the
-// monolith's config/settings.php shape so D5/D6 can extend it the same way).
 return [
     'notification_db' => [
         'host' => $_ENV['NOTIFICATION_DB_HOST'] ?? 'notification-db',
