@@ -45,7 +45,7 @@ Old flat dirs still in place until moved into their context homes: `src/Domain` 
 ## Conventions
 
 - **`final readonly class`** for stateless services, repositories, controllers, middleware, bus adapters. Skip only when mutable state is required (see `SafeGitHubCacheDecorator`; and `AggregateRoot`'s event buffer).
-- **Entities are aggregate roots** extending `Shared\Domain\Aggregate\AggregateRoot` and recording domain events. **Value-object snapshots stay anemic + readonly** (e.g. `Release` — no identity/lifecycle). Anemic DTOs are constructed through a `*FactoryInterface` — no `from*` static methods.
+- **Entities are aggregate roots** extending `Shared\Domain\Aggregate\AggregateRoot` and recording domain events. **Value-object snapshots stay anemic + readonly** (e.g. `Release` — no identity/lifecycle). Anemic DTOs are constructed through a `*FactoryInterface` — no `from*` static methods. **Value objects** (e.g. `RepositoryName`, `EmailAddress`) may use named constructors like `fromString()` — that idiom is for self-validating VOs, not for the anemic DTOs the `from*` ban targets.
 - **Use-cases are CQRS handlers** dispatched through the in-house `CommandBus`/`QueryBus`; thin drivers (controllers, gRPC, CLI scanner) build a Command/Query and hand it to the bus.
 - **Validators are injected classes**, never inline `filter_var` / regex inside services.
 - **Per-consumer ISP** for repositories/ports (`*Reader`, `*Writer`, `*Registrar`, `*Source`, `*Finder`). Split read/write, or one class implementing several narrow interfaces (see `SubscriptionRepository`).
