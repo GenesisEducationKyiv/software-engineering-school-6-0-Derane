@@ -87,7 +87,7 @@ final readonly class MeasuredInvoker implements InvokerInterface
         $this->logger->info('grpc call handled', [
             'grpc_method' => $method,
             'grpc_code' => $this->statusName->of($code),
-            'duration_ms' => round($durationSeconds * 1000.0, 2),
+            'duration_seconds' => round($durationSeconds, 5),
         ]);
 
         if ($code === StatusCode::INTERNAL && $failure !== null) {

@@ -43,68 +43,76 @@ final readonly class ApplicationEventLogger
             return;
         }
 
-        [$level, $name, $context] = $described;
-        $this->logger->log($level, $name, ['event' => $name] + $context);
+        $this->logger->log(
+            $described->level,
+            $described->name,
+            ['event' => $described->name] + $described->context,
+        );
     }
 
-    /**
-     * @return array{0: LogLevel::*, 1: non-empty-string, 2: array<string, scalar|null>}|null
-     */
-    private function describe(object $event): ?array
+    private function describe(object $event): ?DescribedLog
     {
         return match (true) {
-            $event instanceof ScanCycleStarted => [LogLevel::INFO, 'scan.cycle_started', [
+            $event instanceof ScanCycleStarted => new DescribedLog(LogLevel::INFO, 'scan.cycle_started', [
                 'repository_count' => $event->repositoryCount,
-            ]],
-            $event instanceof ScanCycleCompleted => [LogLevel::INFO, 'scan.cycle_completed', [
+            ]),
+            $event instanceof ScanCycleCompleted => new DescribedLog(LogLevel::INFO, 'scan.cycle_completed', [
                 'repository_count' => $event->repositoryCount,
-                'duration_ms' => round($event->durationSeconds * 1000.0, 2),
-            ]],
-            $event instanceof RepositoryScanFailed => [LogLevel::ERROR, 'scan.repository_failed', [
+                'duration_seconds' => round($event->durationSeconds, 5),
+            ]),
+            $event instanceof RepositoryScanFailed => new DescribedLog(LogLevel::ERROR, 'scan.repository_failed', [
                 'repository' => $event->repository,
                 'error_class' => $event->errorClass,
                 'error' => $event->errorMessage,
-            ]],
-            $event instanceof ScanInterruptedByRateLimit => [LogLevel::WARNING, 'scan.rate_limited', [
+            ]),
+            $event instanceof ScanInterruptedByRateLimit => new DescribedLog(LogLevel::WARNING, 'scan.rate_limited', [
                 'repository' => $event->repository,
                 'retry_after' => $event->retryAfter,
-            ]],
-            $event instanceof ScanCycleFailed => [LogLevel::ERROR, 'scan.cycle_failed', [
+            ]),
+            $event instanceof ScanCycleFailed => new DescribedLog(LogLevel::ERROR, 'scan.cycle_failed', [
                 'error_class' => $event->errorClass,
                 'error' => $event->errorMessage,
-            ]],
-            $event instanceof ReleaseDetected => [LogLevel::INFO, 'release.detected', [
+            ]),
+            $event instanceof ReleaseDetected => new DescribedLog(LogLevel::INFO, 'release.detected', [
                 'repository' => $event->repository,
                 'tag' => $event->tag,
                 'previous_tag' => $event->previousTag,
-            ]],
-            $event instanceof NotificationBatchCompleted => [LogLevel::INFO, 'notification.batch_completed', [
-                'repository' => $event->repository,
-                'tag' => $event->tag,
-                'result' => $event->allDelivered ? 'sent' : 'failed',
-            ]],
-            $event instanceof ReleaseMarkerWithheld => [LogLevel::WARNING, 'notification.marker_withheld', [
-                'repository' => $event->repository,
-                'tag' => $event->tag,
-            ]],
-            $event instanceof ReleaseNotificationSent => [LogLevel::INFO, 'notification.sent', [
+            ]),
+            $event instanceof NotificationBatchCompleted => new DescribedLog(
+                LogLevel::INFO,
+                'notification.batch_completed',
+                [
+                    'repository' => $event->repository,
+                    'tag' => $event->tag,
+                    'result' => $event->allDelivered ? 'sent' : 'failed',
+                ],
+            ),
+            $event instanceof ReleaseMarkerWithheld => new DescribedLog(
+                LogLevel::WARNING,
+                'notification.marker_withheld',
+                [
+                    'repository' => $event->repository,
+                    'tag' => $event->tag,
+                ],
+            ),
+            $event instanceof ReleaseNotificationSent => new DescribedLog(LogLevel::INFO, 'notification.sent', [
                 'email' => $event->email,
                 'repository' => $event->repository,
                 'tag' => $event->tag,
-            ]],
-            $event instanceof ReleaseNotificationFailed => [LogLevel::ERROR, 'notification.failed', [
+            ]),
+            $event instanceof ReleaseNotificationFailed => new DescribedLog(LogLevel::ERROR, 'notification.failed', [
                 'email' => $event->email,
                 'repository' => $event->repository,
                 'error_class' => $event->errorClass,
                 'error' => $event->errorMessage,
-            ]],
-            $event instanceof SubscriptionCreated => [LogLevel::INFO, 'subscription.created', [
+            ]),
+            $event instanceof SubscriptionCreated => new DescribedLog(LogLevel::INFO, 'subscription.created', [
                 'email' => $event->email,
                 'repository' => $event->repository,
-            ]],
-            $event instanceof SubscriptionDeleted => [LogLevel::INFO, 'subscription.deleted', [
+            ]),
+            $event instanceof SubscriptionDeleted => new DescribedLog(LogLevel::INFO, 'subscription.deleted', [
                 'id' => $event->id,
-            ]],
+            ]),
             default => null,
         };
     }

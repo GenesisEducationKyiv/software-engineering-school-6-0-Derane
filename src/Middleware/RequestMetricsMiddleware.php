@@ -53,7 +53,7 @@ final readonly class RequestMetricsMiddleware implements MiddlewareInterface
                 'http_method' => $method,
                 'route' => $route,
                 'status' => $status,
-                'duration_ms' => round($durationSeconds * 1000.0, 2),
+                'duration_seconds' => round($durationSeconds, 5),
             ]);
         }
     }

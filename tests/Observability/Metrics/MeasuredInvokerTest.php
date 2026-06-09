@@ -113,7 +113,7 @@ class MeasuredInvokerTest extends TestCase
         $record = $this->logs->getRecords()[0];
         $this->assertSame('Health', $record->context['grpc_method']);
         $this->assertSame('OK', $record->context['grpc_code']);
-        $this->assertArrayHasKey('duration_ms', $record->context);
+        $this->assertArrayHasKey('duration_seconds', $record->context);
     }
 
     public function testMapsThrownStatusCodeAndRethrows(): void

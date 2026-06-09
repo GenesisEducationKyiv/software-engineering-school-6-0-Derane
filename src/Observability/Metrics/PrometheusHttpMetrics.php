@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Observability\Metrics;
 
+use Prometheus\Counter;
+use Prometheus\Histogram;
 use Prometheus\RegistryInterface;
 
 /**
@@ -11,27 +13,29 @@ use Prometheus\RegistryInterface;
  */
 final readonly class PrometheusHttpMetrics implements HttpMetrics
 {
-    public function __construct(private RegistryInterface $registry)
-    {
-    }
+    private Counter $requests;
+    private Histogram $duration;
 
-    #[\Override]
-    public function observe(string $method, string $route, int $status, float $durationSeconds): void
+    public function __construct(RegistryInterface $registry)
     {
-        $requests = $this->registry->getOrRegisterCounter(
+        $this->requests = $registry->getOrRegisterCounter(
             '',
             'http_requests_total',
             'Total number of HTTP requests',
             ['method', 'route', 'status']
         );
-        $requests->inc([$method, $route, (string) $status]);
-
-        $duration = $this->registry->getOrRegisterHistogram(
+        $this->duration = $registry->getOrRegisterHistogram(
             '',
             'http_request_duration_seconds',
             'HTTP request duration in seconds',
-            ['method', 'route']
+            ['method', 'route', 'status']
         );
-        $duration->observe($durationSeconds, [$method, $route]);
+    }
+
+    #[\Override]
+    public function observe(string $method, string $route, int $status, float $durationSeconds): void
+    {
+        $this->requests->inc([$method, $route, (string) $status]);
+        $this->duration->observe($durationSeconds, [$method, $route, (string) $status]);
     }
 }

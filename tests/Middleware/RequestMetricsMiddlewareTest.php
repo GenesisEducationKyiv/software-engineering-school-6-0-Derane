@@ -44,7 +44,10 @@ class RequestMetricsMiddlewareTest extends TestCase
         $this->assertStringContainsString('method="POST"', $out);
         $this->assertStringContainsString('route="/api/subscriptions"', $out);
         $this->assertStringContainsString('status="201"', $out);
-        $this->assertStringContainsString('http_request_duration_seconds_bucket', $out);
+        $this->assertStringContainsString(
+            'http_request_duration_seconds_bucket{method="POST",route="/api/subscriptions",status="201"',
+            $out
+        );
     }
 
     public function testCountsRoutingFailureResponsesAsUnmatched(): void
