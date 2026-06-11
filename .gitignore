@@ -13,6 +13,7 @@ tests/e2e/test-results/
 /_bmad/
 /_bmad-output/
 /.claude/skills/bmad-*/
+!/.claude/skills/bmad-fr-nfr-review-gate/
 
 # deptrac analysis cache (config + baseline ARE tracked)
 /.deptrac.cache
