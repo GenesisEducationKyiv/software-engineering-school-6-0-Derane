@@ -31,4 +31,34 @@ class MetricsServiceTest extends TestCase
         $this->assertStringContainsString('# TYPE app_subscriptions_total gauge', $output);
         $this->assertStringContainsString('# HELP app_subscriptions_total', $output);
     }
+
+    public function testCollectOutputIsByteIdenticalToTheFrozenPrometheusContract(): void
+    {
+        $subscriptions = $this->createMock(SubscriptionCountPort::class);
+        $subscriptions->method('countAll')->willReturn(7);
+
+        $repositories = $this->createMock(RepositoryCountPort::class);
+        $repositories->method('countAll')->willReturn(4);
+        $repositories->method('countWithReleases')->willReturn(2);
+
+        $service = new MetricsService($subscriptions, $repositories, new PrometheusFormatter());
+
+        $expected = implode("\n", [
+            '# HELP app_subscriptions_total Total number of active subscriptions',
+            '# TYPE app_subscriptions_total gauge',
+            'app_subscriptions_total 7',
+            '# HELP app_repositories_total Total number of tracked repositories',
+            '# TYPE app_repositories_total gauge',
+            'app_repositories_total 4',
+            '# HELP app_repositories_with_releases Repositories that have at least one known release',
+            '# TYPE app_repositories_with_releases gauge',
+            'app_repositories_with_releases 2',
+            '# HELP app_info Application info',
+            '# TYPE app_info gauge',
+            'app_info{version="1.0.0"} 1',
+            '',
+        ]);
+
+        $this->assertSame($expected, $service->collect());
+    }
 }

@@ -244,4 +244,64 @@ final class ScanReleasesHandlerTest extends TestCase
         // normally rather than throwing out of __invoke().
         $handler->__invoke(new ScanReleasesCommand());
     }
+
+    public function testContinuesToTheNextRepositoryAfterAGenericScanError(): void
+    {
+        $this->candidates->expects($this->once())
+            ->method('getDueForScan')
+            ->with(100)
+            ->willReturn(['a/one', 'b/two']);
+
+        // a/one fails with a generic error; b/two must still be scanned and
+        // advanced — proving __invoke()'s per-repo catch (\Exception) CONTINUES.
+        $this->gitHub->method('getLatestRelease')
+            ->willReturnCallback(function (RepositoryName $repo): ?Release {
+                if ($repo->value() === 'a/one') {
+                    throw new \RuntimeException('boom');
+                }
+
+                return $this->release('v2.0.0');
+            });
+
+        $this->statusReader->method('getStatus')
+            ->willReturn(RepositoryStatus::reconstitute('b/two', 'v1.0.0', null));
+
+        $this->progress->expects($this->once())
+            ->method('markReleaseSeen')
+            ->with('b/two', 'v2.0.0');
+        $this->progress->expects($this->never())->method('markChecked');
+
+        $this->handler->__invoke(new ScanReleasesCommand());
+
+        self::assertCount(1, $this->dispatchedEvents);
+        $event = $this->dispatchedEvents[0];
+        self::assertInstanceOf(NewReleaseDetected::class, $event);
+        self::assertTrue($event->repository->equals(new RepositoryName('b/two')));
+    }
+
+    public function testRateLimitStopsTheCycleWithoutTouchingLaterRepositories(): void
+    {
+        $this->candidates->expects($this->once())
+            ->method('getDueForScan')
+            ->with(100)
+            ->willReturn(['a/one', 'b/two']);
+
+        // a/one rate-limits; b/two must NEVER be queried — proving the per-repo
+        // catch (RateLimitException) BREAKS the cycle rather than continuing.
+        /** @var list<string> $queried */
+        $queried = [];
+        $this->gitHub->method('getLatestRelease')
+            ->willReturnCallback(function (RepositoryName $repo) use (&$queried): ?Release {
+                $queried[] = $repo->value();
+
+                throw new RateLimitException('60');
+            });
+
+        $this->progress->expects($this->never())->method('markReleaseSeen');
+
+        $this->handler->__invoke(new ScanReleasesCommand());
+
+        self::assertSame(['a/one'], $queried);
+        self::assertCount(0, $this->dispatchedEvents);
+    }
 }

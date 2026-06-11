@@ -134,13 +134,7 @@ deptrac:
         - type: directory
           value: src/Grpc/.*
         - type: directory
-          value: src/Repository/.*
-        - type: directory
           value: src/Migration/.*
-        - type: directory
-          value: src/Factory/.*
-        - type: directory
-          value: src/Config/.*
 
   ruleset:
     # ===== Shared kernel: depended on by all; depends on nothing outside Shared.

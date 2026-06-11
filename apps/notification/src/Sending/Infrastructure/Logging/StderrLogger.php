@@ -7,9 +7,10 @@ namespace App\Sending\Infrastructure\Logging;
 use Psr\Log\AbstractLogger;
 
 /**
- * Minimal PSR-3 stderr logger. Hand-rolled instead of pulling in monolog:
- * the service deliberately shares no code with the monolith and keeps its
- * dependency footprint to what the runtime actually needs.
+ * Minimal PSR-3 stderr logger emitting one structured JSON object per line
+ * (timestamp, level, service, message, context) for log aggregation. Hand-rolled
+ * instead of pulling in monolog: the service deliberately shares no code with the
+ * monolith and keeps its dependency footprint to what the runtime actually needs.
  *
  * Not readonly only because AbstractLogger is a non-readonly parent.
  *
@@ -33,24 +34,19 @@ final class StderrLogger extends AbstractLogger
     #[\Override]
     public function log($level, \Stringable|string $message, array $context = []): void
     {
-        fwrite($this->stream, sprintf(
-            "[%s] notification.%s: %s%s\n",
-            gmdate(\DateTimeInterface::RFC3339),
-            is_scalar($level) ? (string) $level : 'unknown',
-            (string) $message,
-            $this->encodeContext($context),
-        ));
-    }
+        $record = [
+            'timestamp' => gmdate(\DateTimeInterface::RFC3339),
+            'level' => is_scalar($level) ? (string) $level : 'unknown',
+            'service' => 'notification',
+            'message' => (string) $message,
+            'context' => $context,
+        ];
 
-    /** @param array<array-key, mixed> $context */
-    private function encodeContext(array $context): string
-    {
-        if ($context === []) {
-            return '';
+        $encoded = json_encode($record, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($encoded === false) {
+            $encoded = '{"level":"error","service":"notification","message":"unencodable log record"}';
         }
 
-        $encoded = json_encode($context, JSON_PARTIAL_OUTPUT_ON_ERROR);
-
-        return ' ' . ($encoded === false ? '<uncodable>' : $encoded);
+        fwrite($this->stream, $encoded . "\n");
     }
 }

@@ -223,13 +223,15 @@ publisher (monolith Scanning)                       consumer (notification-servi
     "subscriptionId": 123,
     "email": "user@example.com",
     "repository": "owner/repo",
-    "release": { "tagName": "v1.2.3", "name": "...", "htmlUrl": "...", "publishedAt": "RFC3339" }
+    "release": { "tagName": "v1.2.3", "name": "...", "htmlUrl": "...", "publishedAt": "RFC3339", "body": "release notes (optional)" }
   }
   ```
 - **Idempotency**: `eventId` + service ledger `UNIQUE(subscription_id, repository,
   tag_name)`. At-least-once transport → exactly-once *effect*.
-- **Retries/DLQ**: limited redelivery via `x-death` count; poison messages land in
-  `.dlq` with `last_error` persisted in the ledger.
+- **Retries/DLQ**: bounded redelivery (the running consumer tracks attempts via an
+  `x-retry-count` header + a TTL retry queue; the shared base also supports native
+  `x-death` counting) before poison messages land in `.dlq`, with `last_error`
+  persisted in the ledger.
 - **Anti-corruption**: consumer maps the wire message → its own Domain VOs;
   tolerates unknown fields; rejects malformed messages straight to DLQ.
 

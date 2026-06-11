@@ -94,6 +94,7 @@ use App\Migration\Migrator;
 use DI\Container;
 use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
@@ -112,7 +113,9 @@ return static function (array $settings): Container {
 
         LoggerInterface::class => static function () {
             $logger = new Logger('app');
-            $logger->pushHandler(new StreamHandler('php://stderr'));
+            $handler = new StreamHandler('php://stderr');
+            $handler->setFormatter(new JsonFormatter());
+            $logger->pushHandler($handler);
             return $logger;
         },
 

@@ -122,6 +122,10 @@ moves: `NotifierService`, `ReleaseEmailRenderer`/`RenderedEmail`, `SmtpMailer`
 
 - NFR1. **Idempotency / at-least-once**: end-to-end exactly-once *effect* (no
   duplicate emails) via the service-side ledger; the transport is at-least-once.
+  Caveat: a worker crash *between* the SMTP send and the ledger write can still
+  emit one duplicate (bounded by the claim lease) — true exactly-once would need
+  an SMTP-side idempotency key the transport does not provide. The ledger
+  guarantees exactly-once *state* and no duplicates on redelivery/re-publish.
 - NFR2. **Independent deployability**: service builds, migrates, and runs without
   the monolith's database; monolith runs without the service's database.
 - NFR3. **Resilience**: if the notification service or RabbitMQ is down, the

@@ -28,27 +28,34 @@ final class StderrLoggerTest extends TestCase
         return $contents;
     }
 
-    public function testWritesLevelMessageAndJsonContextOnOneLine(): void
+    public function testWritesOneStructuredJsonRecordPerLine(): void
     {
         $stream = $this->memoryStream();
 
         (new StderrLogger($stream))->warning('Release email failed', ['repository' => 'owner/repo']);
 
         $line = $this->contents($stream);
-        self::assertStringContainsString('notification.warning:', $line);
-        self::assertStringContainsString('Release email failed', $line);
-        self::assertStringContainsString('{"repository":"owner\/repo"}', $line);
         self::assertStringEndsWith("\n", $line);
+
+        $record = json_decode(trim($line), true);
+        self::assertIsArray($record);
+        self::assertSame('warning', $record['level']);
+        self::assertSame('notification', $record['service']);
+        self::assertSame('Release email failed', $record['message']);
+        self::assertSame(['repository' => 'owner/repo'], $record['context']);
+        self::assertArrayHasKey('timestamp', $record);
     }
 
-    public function testOmitsContextSuffixWhenContextIsEmpty(): void
+    public function testEmitsAnEmptyContextWhenNoContextIsGiven(): void
     {
         $stream = $this->memoryStream();
 
         (new StderrLogger($stream))->info('Notification consumer started');
 
-        $line = $this->contents($stream);
-        self::assertStringContainsString('notification.info: Notification consumer started', $line);
-        self::assertStringNotContainsString('{', $line);
+        $record = json_decode(trim($this->contents($stream)), true);
+        self::assertIsArray($record);
+        self::assertSame('info', $record['level']);
+        self::assertSame('Notification consumer started', $record['message']);
+        self::assertSame([], $record['context']);
     }
 }
