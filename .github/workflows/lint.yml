@@ -14,5 +14,11 @@ jobs:
       - name: Run PHP_CodeSniffer
         run: make lint
 
+      - name: Run PHP_CodeSniffer (notification service)
+        run: make notification-lint
+
       - name: Run Psalm
         run: make psalm
+
+      - name: Run Psalm (notification service)
+        run: make notification-psalm

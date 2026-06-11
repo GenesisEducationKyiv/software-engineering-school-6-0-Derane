@@ -35,14 +35,6 @@ use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 use App\Releases\Sourcing\Infrastructure\GitHubApiReleaseSource;
 use App\Releases\Sourcing\Infrastructure\SmokeGitHubReleaseSource;
 use App\Releases\Sourcing\Infrastructure\StubReleaseSource;
-use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanHandler;
-use App\RepositoryTracking\Repositories\Application\GetDueForScan\GetDueForScanQuery;
-use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommand;
-use App\RepositoryTracking\Repositories\Application\MarkChecked\MarkCheckedCommandHandler;
-use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseSeenCommand;
-use App\RepositoryTracking\Repositories\Application\MarkReleaseSeen\MarkReleaseSeenCommandHandler;
-use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommand;
-use App\RepositoryTracking\Repositories\Application\Register\RegisterRepositoryCommandHandler;
 use App\RepositoryTracking\Repositories\Domain\RepositoryCountPort;
 use App\RepositoryTracking\Repositories\Domain\RepositoryStatusReader;
 use App\RepositoryTracking\Repositories\Domain\ScanCandidateSource;
@@ -159,11 +151,6 @@ return static function (array $settings): Container {
             $c->get(RabbitConnection::class),
         ),
         SendReleaseEmailSerializer::class => static fn() => new SendReleaseEmailSerializer(),
-        RabbitReleaseNotificationPublisher::class => static fn($c) => new RabbitReleaseNotificationPublisher(
-            $c->get(RabbitPublisher::class),
-            $c->get(SendReleaseEmailSerializer::class),
-            $c->get(LoggerInterface::class),
-        ),
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),
         GuzzleClient::class => static fn() => new GuzzleClient(),
@@ -298,27 +285,9 @@ return static function (array $settings): Container {
             $c->get(SubscriptionResponseFactoryInterface::class),
         ),
 
-        RegisterRepositoryCommandHandler::class => static fn($c) => new RegisterRepositoryCommandHandler(
-            $c->get(TrackedRepositoryRegistrar::class)
-        ),
-        MarkCheckedCommandHandler::class => static fn($c) => new MarkCheckedCommandHandler(
-            $c->get(ScanProgressWriter::class),
-            $c->get(EventDispatcherInterface::class)
-        ),
-        MarkReleaseSeenCommandHandler::class => static fn($c) => new MarkReleaseSeenCommandHandler(
-            $c->get(ScanProgressWriter::class),
-            $c->get(EventDispatcherInterface::class)
-        ),
-        GetDueForScanHandler::class => static fn($c) => new GetDueForScanHandler(
-            $c->get(ScanCandidateSource::class)
-        ),
-
         CommandBus::class => static fn($c) => new InMemoryCommandBus([
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
-            RegisterRepositoryCommand::class => $c->get(RegisterRepositoryCommandHandler::class),
-            MarkCheckedCommand::class => $c->get(MarkCheckedCommandHandler::class),
-            MarkReleaseSeenCommand::class => $c->get(MarkReleaseSeenCommandHandler::class),
             ScanReleasesCommand::class => $c->get(ScanReleasesHandler::class),
         ]),
         QueryBus::class => static fn($c) => new InMemoryQueryBus([
@@ -326,7 +295,6 @@ return static function (array $settings): Container {
             FindSubscriptionByEmailAndRepositoryQuery::class =>
                 $c->get(FindSubscriptionByEmailAndRepositoryHandler::class),
             ListSubscriptionsQuery::class => $c->get(ListSubscriptionsHandler::class),
-            GetDueForScanQuery::class => $c->get(GetDueForScanHandler::class),
             FetchLatestReleaseQuery::class => $c->get(FetchLatestReleaseHandler::class),
             RepositoryExistsQuery::class => $c->get(RepositoryExistsHandler::class),
         ]),
@@ -343,7 +311,11 @@ return static function (array $settings): Container {
             $c->get(Clock::class),
             $c->get(EventIdGenerator::class)
         ),
-        ReleaseNotificationPublisher::class => static fn($c) => $c->get(RabbitReleaseNotificationPublisher::class),
+        ReleaseNotificationPublisher::class => static fn($c) => new RabbitReleaseNotificationPublisher(
+            $c->get(RabbitPublisher::class),
+            $c->get(SendReleaseEmailSerializer::class),
+            $c->get(LoggerInterface::class),
+        ),
         PublishReleaseEmailsForRelease::class => static fn($c) => new PublishReleaseEmailsForRelease(
             $c->get(SubscriberFinder::class),
             $c->get(SendReleaseEmailFactoryInterface::class),

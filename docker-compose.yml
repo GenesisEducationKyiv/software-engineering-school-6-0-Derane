@@ -117,6 +117,10 @@ services:
       RABBITMQ_PORT: 5672
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
+    ports:
+      # Publish the worker's health/metrics surface so /metrics is scrapeable
+      # and /health is curl-able from the host (NFR4 observability).
+      - "${NOTIFICATION_SVC_PORT:-8081}:8081"
     healthcheck:
       # busybox wget exits non-zero on the 503 that /health returns when
       # Postgres or RabbitMQ is unreachable.

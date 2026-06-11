@@ -102,7 +102,10 @@ src/
   RepositoryTracking/
     Repositories/
       Domain/         RepositoryStatus (AggregateRoot), 4 role ports
-      Application/    Register/, GetDueForScan/, MarkChecked/, MarkReleaseSeen/
+      Application/    (none — supporting context: its writes are driven through
+                      the Domain role ports by the Scanning + Subscription
+                      contexts, so standalone command/query wrappers were dropped
+                      as redundant rather than shipped as dead code)
       Infrastructure/ Persistence/PdoTrackedRepository{Reader,Writer}, Factory/
   Releases/                          (GitHub release-sourcing context)
     Sourcing/

@@ -80,10 +80,9 @@ return static function (array $settings): Container {
         MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
 
         NotificationLedger::class => static fn($c) => new PdoNotificationLedger($c->get(PDO::class)),
-        PdoNotificationMetricsStore::class => static fn($c) => new PdoNotificationMetricsStore($c->get(PDO::class)),
-        DeliveryOutcomeRecorder::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
-        MessageProcessingStatsRecorder::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
-        NotificationMetricsReader::class => static fn($c) => $c->get(PdoNotificationMetricsStore::class),
+        DeliveryOutcomeRecorder::class => static fn($c) => new PdoNotificationMetricsStore($c->get(PDO::class)),
+        MessageProcessingStatsRecorder::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
+        NotificationMetricsReader::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
         EmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
         Mailer::class => static fn($c) => new PhpMailerMailer(
             $c->get(SmtpConfig::class),

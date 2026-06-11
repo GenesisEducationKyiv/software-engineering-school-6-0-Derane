@@ -18,5 +18,9 @@ tests/e2e/test-results/
 # deptrac analysis cache (config + baseline ARE tracked)
 /.deptrac.cache
 
+# BMAD FR/NFR review-gate runtime artifacts (impact context, review/fix logs,
+# GitHub corroboration) written by scripts/ai-review-loop.sh; default --log-dir
+/var/ai-review/
+
 # gstack headless-browser session artifacts
 /.gstack/

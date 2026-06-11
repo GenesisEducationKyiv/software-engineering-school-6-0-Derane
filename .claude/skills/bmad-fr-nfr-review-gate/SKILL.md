@@ -134,18 +134,32 @@ vulnerability/defect risk blocks PASS.
    requirement with source path evidence.
 3. Confirm expected positive, negative, and edge test classes from the spec so
    missing automated coverage can be treated as a blocker.
-4. Run the review gate against the current implementation and tests.
-5. If manual testing is required, record evidence in a markdown file at
-   `var/manual-test-evidence/<task>.md` and include it in the review.
+4. Run the gate:
+
+   ```bash
+   BMAD_REVIEW_SPEC_PATH=specs/my-bundle make bmad-fr-nfr-review-gate
+   ```
+
+5. If manual testing is required, record evidence in a markdown file under
+   `var/manual-test-evidence/<task>.md` and rerun:
+
+   ```bash
+   BMAD_REVIEW_SPEC_PATH=specs/my-bundle \
+   BMAD_REVIEW_MANUAL_EVIDENCE=var/manual-test-evidence/<task>.md \
+   make bmad-fr-nfr-review-gate
+   ```
+
 6. If the review reports `STATUS: FAIL`, apply fixes within the current PR
-   scope, rerun `composer lint && ./vendor/bin/phpunit --no-coverage --testsuite Unit && composer psalm`,
-   then rerun the gate.
-7. Fetch and address GitHub comments when a PR exists.
+   scope, rerun `make ci`, then rerun the gate. When GitHub publishing is
+   enabled, failed review iterations publish a failing commit status before the
+   fix loop continues.
+7. Fetch and address GitHub comments with `make pr-comments` when a PR exists.
 8. Do not mark the PR/task complete until the gate reports `STATUS: PASS`,
-   quality gates pass, GitHub comments are resolved, required checks pass, and
-   no requested-changes review remains.
-9. For PR work, leave the final BMAD result visible on the PR through a
-   generated PR comment.
+   `make ci` passes, GitHub comments are resolved, required checks pass, and no
+   requested-changes review remains. Human approval is not required before the
+   BMAD reviewer runs or posts status updates.
+9. For PR work, leave the final BMAD result visible on the PR through the
+   generated PR comment and `BMAD FR/NFR Review Gate` commit status.
 
 ## Required PASS Markers
 
@@ -167,12 +181,28 @@ GITHUB_COMPLETION_GATE: PASS
 CI_GATE: PASS
 ```
 
-The gate treats a `STATUS: PASS` without these markers as failure. `STATUS: PASS`
-or `STATUS: FAIL` must be the exact first line of the review output. PASS also
-requires `EXPANDED_QUALITY_MIN_SCORE: 5/5` and `IMPACT_ANALYSIS_MIN_SCORE: 5/5`
-evidence markers, plus `SYSTEM_QUALITY_ATTRIBUTES_MIN_SCORE: 5/5`,
-`TEST_CASE_COVERAGE_MIN_SCORE: 5/5`, `AUTO_TEST_COVERAGE_MIN_SCORE: 5/5`, and
-`FLAKY_TEST_RISK_MIN_SCORE: 5/5`.
+The wrapper treats a `STATUS: PASS` without these markers as failure. In BMAD
+mode, `STATUS: PASS` or `STATUS: FAIL` must also be the exact first line of the
+review output. PASS also requires `EXPANDED_QUALITY_MIN_SCORE: 5/5` and
+`IMPACT_ANALYSIS_MIN_SCORE: 5/5` evidence markers, plus
+`SYSTEM_QUALITY_ATTRIBUTES_MIN_SCORE: 5/5`, `TEST_CASE_COVERAGE_MIN_SCORE:
+5/5`, `AUTO_TEST_COVERAGE_MIN_SCORE: 5/5`, and `FLAKY_TEST_RISK_MIN_SCORE:
+5/5`.
+
+## GitHub Publishing
+
+For BMAD wrapper PR runs, PR comment and commit-status publishing are required
+low-risk review-gate writes and must run without waiting for human approval.
+Set both `BMAD_REVIEW_POST_PR_COMMENT=false` and
+`BMAD_REVIEW_POST_GITHUB_STATUS=false` for local-only dry runs. Set either
+toggle individually only for tests that must suppress that GitHub write channel.
+Setting both to `false` also disables GitHub
+preflight/corroboration by default; set
+`BMAD_REVIEW_REQUIRE_GITHUB_CI_CORROBORATION=true` when a read-only GitHub gate
+is still required. The commit-status context defaults to
+`BMAD FR/NFR Review Gate`; the loop ignores that same context while checking the
+rest of the PR check rollup, so an earlier failed gate status does not block the
+next remediation run from starting.
 
 ## Manual Evidence Format
 
@@ -191,10 +221,17 @@ and report the exact manual action required.
 
 ## Verification
 
-Run quality gates for this project:
+Run focused checks for this skill change:
 
 ```bash
-composer lint
-./vendor/bin/phpunit --no-coverage --testsuite Unit
-composer psalm
+bash -n scripts/ai-review-loop.sh
+bash -n scripts/bmad-fr-nfr-review-gate.sh
+bash -n scripts/get-pr-comments.sh
+git diff --check
+```
+
+For production code changes, also run the project quality gates:
+
+```bash
+make ci
 ```

@@ -9,7 +9,8 @@
         migrate-notification notification-smoke scanner-smoke resilience-proof \
         audit notification-audit \
         notification-unit notification-deptrac \
-        notification-integration-up notification-integration-run notification-integration-down notification-integration
+        notification-integration-up notification-integration-run notification-integration-down notification-integration \
+        ai-review-loop bmad-fr-nfr-review-gate pr-comments pr-comments-current
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -110,6 +111,10 @@ notification-unit: install ## Run the notification service's PHPUnit Unit suite 
 lint: install ## Run PHP_CodeSniffer inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/phpcs
 
+notification-lint: install ## Run the notification service's PHP_CodeSniffer (PSR-12) inside Docker
+	$(COMPOSE) run --rm --no-deps -w /app/apps/notification app sh -c \
+		"composer install --no-interaction --quiet && vendor/bin/phpcs"
+
 deptrac: install ## Run deptrac architecture-boundary check (monolith) inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/deptrac analyse --no-progress --no-cache
 
@@ -119,6 +124,10 @@ notification-deptrac: install ## Run the notification service's deptrac architec
 
 psalm: install ## Run Psalm inside Docker
 	$(COMPOSE) run --rm --no-deps app vendor/bin/psalm
+
+notification-psalm: install ## Run the notification service's Psalm (100% types) inside Docker
+	$(COMPOSE) run --rm --no-deps -w /app/apps/notification app sh -c \
+		"composer install --no-interaction --quiet && vendor/bin/psalm"
 
 audit: install ## Run composer audit (production deps only) for the monolith inside Docker
 	$(COMPOSE) run --rm --no-deps app composer audit --locked --no-dev
@@ -207,9 +216,11 @@ tests: ## Run every test suite (unit, notification-unit, integration, notificati
 
 ci: install ## Run the full Dockerized CI pipeline locally
 	$(MAKE) lint
+	$(MAKE) notification-lint
 	$(MAKE) deptrac
 	$(MAKE) notification-deptrac
 	$(MAKE) psalm
+	$(MAKE) notification-psalm
 	$(MAKE) tests
 
 c4-up: ## Start LikeC4 live preview at http://localhost:5173
@@ -224,3 +235,64 @@ c4-logs: ## Tail LikeC4 logs
 
 c4-validate: ## Validate the LikeC4 model
 	$(C4_RUN) validate
+
+ai-review-loop: ## Run local AI code review + fix loop (Codex default)
+	./scripts/ai-review-loop.sh
+
+bmad-fr-nfr-review-gate: ## Run BMAD spec-driven FR/NFR review gate; set BMAD_REVIEW_SPEC_PATH=specs/my-bundle
+	@if [ -z "$${BMAD_REVIEW_SPEC_PATH:-}" ] && [ -z "$${AI_REVIEW_SPEC_PATH:-}" ]; then \
+		echo "Error: BMAD_REVIEW_SPEC_PATH or AI_REVIEW_SPEC_PATH is required, for example specs/my-bundle"; \
+		exit 1; \
+	fi
+	@./scripts/bmad-fr-nfr-review-gate.sh \
+		--spec "$${BMAD_REVIEW_SPEC_PATH:-$${AI_REVIEW_SPEC_PATH}}" \
+		$${BMAD_REVIEW_MANUAL_EVIDENCE:+--manual-evidence "$${BMAD_REVIEW_MANUAL_EVIDENCE}"} \
+		$${BMAD_REVIEW_PR:+--pr "$${BMAD_REVIEW_PR}"} \
+		$${BMAD_REVIEW_BASE:+--base "$${BMAD_REVIEW_BASE}"} \
+		$${BMAD_REVIEW_MAX_ITER:+--max-iter "$${BMAD_REVIEW_MAX_ITER}"} \
+		$${BMAD_REVIEW_VERIFY_CMD:+--verify-cmd "$${BMAD_REVIEW_VERIFY_CMD}"} \
+		$${BMAD_REVIEW_LOG_DIR:+--log-dir "$${BMAD_REVIEW_LOG_DIR}"} \
+		$${BMAD_REVIEW_IMPACT_CONTEXT:+--impact-context "$${BMAD_REVIEW_IMPACT_CONTEXT}"} \
+		$${BMAD_REVIEW_AGENTS:+--agents "$${BMAD_REVIEW_AGENTS}"}
+
+pr-comments: ## Retrieve ALL unresolved PR comments (incl. outdated) for current PR; set PR=<n> to target a PR
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "Error: GitHub CLI (gh) is required but not installed."; \
+		echo "Visit: https://cli.github.com/ for installation instructions"; \
+		exit 1; \
+	fi
+	@if ! command -v jq >/dev/null 2>&1; then \
+		echo "Error: jq is required but not installed."; \
+		echo "Install via package manager (e.g., apt-get install jq, brew install jq)"; \
+		exit 1; \
+	fi
+ifdef PR
+	@echo "Retrieving unresolved comments (including outdated) for PR #$(PR)..."
+	@GITHUB_HOST="$${GITHUB_HOST:-github.com}" INCLUDE_OUTDATED="true" \
+		./scripts/get-pr-comments.sh "$(PR)" "$${FORMAT:-markdown}"
+else
+	@echo "Auto-detecting PR from current git branch..."
+	@GITHUB_HOST="$${GITHUB_HOST:-github.com}" INCLUDE_OUTDATED="true" \
+		./scripts/get-pr-comments.sh "$${FORMAT:-markdown}"
+endif
+
+pr-comments-current: ## Retrieve only NON-OUTDATED unresolved PR comments; set PR=<n> to target a PR
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "Error: GitHub CLI (gh) is required but not installed."; \
+		echo "Visit: https://cli.github.com/ for installation instructions"; \
+		exit 1; \
+	fi
+	@if ! command -v jq >/dev/null 2>&1; then \
+		echo "Error: jq is required but not installed."; \
+		echo "Install via package manager (e.g., apt-get install jq, brew install jq)"; \
+		exit 1; \
+	fi
+ifdef PR
+	@echo "Retrieving current (non-outdated) unresolved comments for PR #$(PR)..."
+	@GITHUB_HOST="$${GITHUB_HOST:-github.com}" INCLUDE_OUTDATED="false" \
+		./scripts/get-pr-comments.sh "$(PR)" "$${FORMAT:-markdown}"
+else
+	@echo "Auto-detecting PR from current git branch..."
+	@GITHUB_HOST="$${GITHUB_HOST:-github.com}" INCLUDE_OUTDATED="false" \
+		./scripts/get-pr-comments.sh "$${FORMAT:-markdown}"
+endif

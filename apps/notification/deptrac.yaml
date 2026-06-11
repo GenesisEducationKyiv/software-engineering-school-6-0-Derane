@@ -18,6 +18,11 @@ deptrac:
         - type: directory
           value: src/Sending/Infrastructure/.*
 
+    - name: Shared
+      collectors:
+        - type: directory
+          value: src/Shared/.*
+
   ruleset:
     Notification.Domain: []
     Notification.Application:
@@ -25,3 +30,5 @@ deptrac:
     Notification.Infrastructure:
       - Notification.Domain
       - Notification.Application
+      - Shared
+    Shared: []
