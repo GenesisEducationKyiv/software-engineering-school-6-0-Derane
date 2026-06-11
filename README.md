@@ -84,6 +84,7 @@ make logs-rabbitmq
 make logs-notification-db
 make notification-smoke
 make scanner-smoke
+make resilience-proof
 ```
 
 Architecture model:

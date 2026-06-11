@@ -162,6 +162,7 @@ return static function (array $settings): Container {
         RabbitReleaseNotificationPublisher::class => static fn($c) => new RabbitReleaseNotificationPublisher(
             $c->get(RabbitPublisher::class),
             $c->get(SendReleaseEmailSerializer::class),
+            $c->get(LoggerInterface::class),
         ),
 
         ResponseFactoryInterface::class => static fn() => new ResponseFactory(),

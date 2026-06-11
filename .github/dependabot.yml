@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # Monolith PHP dependencies
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - php
+
+  # Notification microservice PHP dependencies
+  - package-ecosystem: composer
+    directory: /apps/notification
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - php
+      - notification-service
+
+  # GitHub Actions workflow dependencies
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

@@ -6,20 +6,18 @@ namespace App\Sending\Infrastructure\Health;
 
 final readonly class DatabaseHealthCheck implements HealthCheckInterface
 {
-    public function __construct(
-        private string $host,
-        private string $port,
-        private string $name,
-        private string $user,
-        private string $password,
-    ) {
+    /** @param \Closure(): \PDO $connect lazily resolves the connection so a cold DB is probed inside check() */
+    public function __construct(private \Closure $connect)
+    {
     }
 
     #[\Override]
     public function check(): void
     {
-        $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s', $this->host, $this->port, $this->name);
-        $pdo = new \PDO($dsn, $this->user, $this->password);
-        $pdo->query('SELECT 1');
+        try {
+            ($this->connect)()->query('SELECT 1');
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('Database is unreachable', 0, $e);
+        }
     }
 }

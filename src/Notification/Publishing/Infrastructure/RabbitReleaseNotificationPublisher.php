@@ -8,6 +8,7 @@ use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublisher;
+use Psr\Log\LoggerInterface;
 
 /** @psalm-api */
 final readonly class RabbitReleaseNotificationPublisher implements ReleaseNotificationPublisher
@@ -15,6 +16,7 @@ final readonly class RabbitReleaseNotificationPublisher implements ReleaseNotifi
     public function __construct(
         private RabbitPublisher $publisher,
         private SendReleaseEmailSerializer $serializer,
+        private LoggerInterface $logger,
     ) {
     }
 
@@ -28,5 +30,17 @@ final readonly class RabbitReleaseNotificationPublisher implements ReleaseNotifi
             array_map($this->serializer->toJson(...), $messages),
             ['content_type' => 'application/json', 'delivery_mode' => 2],
         );
+
+        // One log line per recipient so every eventId is observable and a
+        // published count is derivable from logs. Emitted only after the batch
+        // confirm-wait succeeds: a nack throws above and nothing is logged.
+        foreach ($messages as $message) {
+            $this->logger->info('release email published', [
+                'event_id' => $message->eventId,
+                'subscription_id' => $message->subscriptionId,
+                'repository' => $message->repository->value(),
+                'tag' => $message->release->tagName->value(),
+            ]);
+        }
     }
 }

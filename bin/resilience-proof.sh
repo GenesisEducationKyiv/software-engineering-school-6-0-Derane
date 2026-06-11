@@ -16,21 +16,22 @@
 # IS the intended posture; this script PROVES the LIVE truth, it changes
 # nothing in src/ or config/):
 #
-#   AC-3 / AR-FLOW2 (rabbitmq down):
-#     - GET /health (the one route with NO CommandBus/EventDispatcher in its
-#       resolution graph — see the "LIVE FINDING" box below) keeps returning
-#       200/{"status":"ok"} throughout the outage
+#   AC-2 / AC-3 / AR-FLOW2 (rabbitmq down):
+#     - GET /health AND POST /api/subscriptions both keep returning success
+#       (200 / 201) throughout the outage — neither resolution graph touches
+#       the RabbitMQ publisher (see the "VERIFIED INVARIANT" box below: the
+#       SubscriptionCreated listener is wired lazily and only logs; the broker
+#       publisher is reached solely on a NewReleaseDetected dispatch)
 #     - a scan cycle's publish fails, the per-repo 'Scan error' log appears,
 #       the cycle continues (does not abort), and the marker (last_seen_tag)
 #       does NOT advance — re-detected on the very next run
 #     - all of the above observed LIVE, SIMULTANEOUSLY, in one running stack
 #
 #   AC-1 (notification-svc down, rabbitmq up):
-#     - /health keeps returning success; /api/subscriptions ALSO keeps
-#       returning success here (rabbitmq — the thing /api/subscriptions
-#       actually depends on per the LIVE FINDING below — is reachable in
-#       this scenario; only notification-svc, which nothing in the monolith
-#       depends on, is down)
+#     - /health and /api/subscriptions both keep returning success; the
+#       monolith depends on neither notification-svc nor (for these REST
+#       surfaces) the broker, so stopping notification-svc changes nothing
+#       about REST liveness
 #     - N fresh smoke releases are scanned and published; publisher confirms
 #       ack at the broker; the durable notifications.send-email queue buffers
 #       them (messages_ready >= N, observed via the management HTTP API with
@@ -40,74 +41,49 @@
 #       total == N
 #
 # +-------------------------------------------------------------------------+
-# | LIVE FINDING that REVISES the story's finding §2 / AC-2 premise          |
-# | (decision-needed — surfaced here per the story's explicit instruction    |
-# | to flag rather than silently patch; NOT fixed by this proof — fixing it  |
-# | would mean editing config/container.php's DI bindings, which the story   |
-# | explicitly lists under "do not touch... they are correct and reviewed"). |
+# | VERIFIED INVARIANT: REST/subscribe survives a broker outage              |
+# | (this proof asserts it LIVE; the deterministic, docker-free regression   |
+# | lock for the same invariant is                                           |
+# | tests/Subscription/Subscriptions/Infrastructure/SubscribePathDoesNotResolveAmqpConnectionTest.php).
 # |                                                                           |
-# | Finding §2's static grep ("zero RabbitConnection|RabbitPublisher|        |
-# | ReleaseNotificationPublisher references in src/Controller, src/Grpc,     |
-# | src/Subscription") is accurate AS A SYMBOL-REFERENCE GREP — but it       |
-# | misses an eagerness introduced entirely in config/container.php's wiring |
-# | closures, invisible to a grep scoped to src/:                            |
+# | History: an earlier wiring eagerly built the whole listener map when the |
+# | EventDispatcher was first resolved, so resolving the subscribe path also |
+# | constructed WhenNewReleaseDetectedThenPublishReleaseEmails ->            |
+# | ReleaseNotificationPublisher -> RabbitConnection -> a real               |
+# | `new AMQPStreamConnection(...)` socket, with no event ever dispatched.   |
+# | That opened a live broker dependency on POST /api/subscriptions (500s    |
+# | while rabbitmq was down) and on gRPC boot. THAT BUG IS FIXED.            |
+# |                                                                           |
+# | config/container.php (~lines 250-269) now registers each listener as a   |
+# | lazy closure that calls $c->get(...) only when the event it handles is   |
+# | actually dispatched:                                                     |
 # |                                                                           |
 # |   ListenerProviderInterface::class => static fn($c) => new ListenerProvider([
-# |       NewReleaseDetected::class => [$c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class)],
-# |   ]),                                                                     |
-# |   CommandBus::class => static fn($c) => new InMemoryCommandBus([
-# |       SubscribeCommand::class => $c->get(SubscribeCommandHandler::class), ...
+# |       NewReleaseDetected::class => [fn($e) => $c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class)($e)],
+# |       SubscriptionCreated::class => [fn($e) => $c->get(WhenSubscriptionCreatedThenLog::class)($e)],
 # |   ]),                                                                     |
 # |                                                                           |
-# | Both factory closures call $c->get(...) on EVERY map entry EAGERLY, at   |
-# | the moment ListenerProviderInterface::class / CommandBus::class is first |
-# | resolved — not lazily, per dispatched-event / per-command, as their      |
-# | "lazy PHP-DI closure" framing implies. Since SubscriptionController and  |
-# | Grpc\ReleaseNotifierService both take CommandBus directly in their       |
-# | constructors, resolving EITHER for ANY action eagerly builds the WHOLE   |
-# | command-handler map, including SubscribeCommandHandler (needs            |
-# | EventDispatcherInterface -> ListenerProviderInterface -> eagerly needs   |
-# | WhenNewReleaseDetectedThenPublishReleaseEmails -> ReleaseNotificationPublisher
-# | -> RabbitReleaseNotificationPublisher -> RabbitPublisher -> RabbitConnection
-# | -> `new AMQPStreamConnection(...)`, which opens a REAL TCP socket to the  |
-# | broker IMMEDIATELY, with no event ever having been dispatched.           |
+# | Consequences, both ASSERTED below and locked by the PHPUnit test:        |
+# |   - resolving EventDispatcherInterface / the CommandBus map no longer    |
+# |     touches the publisher — no AMQP socket is opened during HTTP/gRPC    |
+# |     wiring                                                               |
+# |   - dispatching SubscriptionCreated runs ONLY the logger listener, so    |
+# |     POST /api/subscriptions returns 201 even with rabbitmq stopped       |
+# |   - the broker publisher is reached SOLELY on a NewReleaseDetected       |
+# |     dispatch (a scan cycle) — exactly where a broker-down failure SHOULD |
+# |     surface (AR-FLOW2: publish fails, marker not advanced, re-detected   |
+# |     next cycle)                                                          |
 # |                                                                           |
-# | LIVE, REPRODUCIBLE CONSEQENCE (re-derived twice against a really-stopped |
-# | rabbitmq, see Dev Agent Record "Live run results"):                      |
-# |   - GET  /health                 -> 200 (UNAFFECTED — HealthController   |
-# |                                     resolves only HealthCheckInterface,  |
-# |                                     no CommandBus, genuinely DB-only)    |
-# |   - POST /api/subscriptions      -> 500 "Internal server error"         |
-# |   - GET  /api/subscriptions      -> 500 "Internal server error"         |
-# |   - the `grpc` container ITSELF FAILS TO BOOT / crash-loops             |
-# |     (Grpc\ReleaseNotifierService also takes CommandBus directly — the    |
-# |     eager chain fires at gRPC server construction time, before any RPC  |
-# |     is ever served)                                                      |
-# |                                                                           |
-# | NET: AC-2's premise ("REST /subscriptions and gRPC keep serving... zero  |
-# | runtime dependency on the broker") is FALSE as literally written for the |
-# | /api/subscriptions surface and for gRPC as a whole. The TRUE, narrower   |
-# | claim — the one this proof actually asserts below — is: GET /health      |
-# | (only) is genuinely broker-isolated (HealthController -> PDO, no         |
-# | CommandBus in its graph); /api/subscriptions and gRPC are NOT isolated   |
-# | and DO have a live runtime dependency on RabbitMQ via the eager          |
-# | CommandBus/ListenerProvider DI bindings. This is a real, narrow,         |
-# | mechanically-fixable DI-wiring bug (wrap the array-literal $c->get()     |
-# | calls in lazy closures) — but fixing config/container.php's DI bindings  |
-# | is explicitly out of this story's authorized scope ("do not touch... DI  |
-# | bindings... this story PROVES them live, it does not change them"), so   |
-# | it is surfaced here as a decision-needed finding for the next story/     |
-# | review to act on, not silently patched.                                  |
+# | NET: AC-2 holds as written — REST /subscriptions and gRPC keep serving   |
+# | with zero runtime dependency on the broker. This script VERIFIES that    |
+# | invariant against a really-stopped rabbitmq; it does not document a bug. |
 # +-------------------------------------------------------------------------+
 #
 # Wire contracts are exercised READ-ONLY: existing REST endpoints
 # (POST/GET /api/subscriptions, GET /health), existing RabbitMQ management
 # API, existing MailHog API. Nothing here declares a new route, RPC, message
-# shape, or queue/exchange/binding. No production src/ code is touched (the
-# config/app.php stale-`use`-import fix — see the Dev Agent Record's separate
-# "blocking pre-existing bug" note — is the only production file this story
-# touches, and it is a mechanical revert-the-incomplete-rename correction
-# required just to make `app` BOOT at all, not a resilience mechanism).
+# shape, or queue/exchange/binding, and no production src/ or config/ code is
+# touched — the script only observes the running stack.
 #
 # Restores the stack to its pre-existing state on exit (see `restore_stack`).
 

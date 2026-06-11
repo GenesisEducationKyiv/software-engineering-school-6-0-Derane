@@ -18,6 +18,8 @@ use PhpAmqpLib\Channel\AMQPChannel;
 use PhpAmqpLib\Message\AMQPMessage;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Tests RabbitReleaseNotificationPublisher by wiring it with a real (mocked-channel)
@@ -88,6 +90,68 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
             self::assertSame('release.email', $captured[$i]['routingKey']);
             self::assertSame($serializer->toJson($message), $captured[$i]['body']);
         }
+    }
+
+    public function testLogsOneEventIdCorrelatedLinePerPublishedRecipient(): void
+    {
+        $messages = [$this->makeMessage(1), $this->makeMessage(2)];
+
+        $captured = [];
+        $channel = $this->ackingChannelCapturingPublish($captured);
+
+        /** @var list<array{message: string, context: array<string, mixed>}> $logged */
+        $logged = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::exactly(2))
+            ->method('info')
+            ->willReturnCallback(
+                function (string|\Stringable $message, array $context) use (&$logged): void {
+                    $logged[] = ['message' => (string) $message, 'context' => $context];
+                }
+            );
+
+        $this->adapterWith($channel, $logger)->publishAll($messages);
+
+        self::assertCount(2, $logged);
+        foreach ($messages as $i => $message) {
+            self::assertSame('release email published', $logged[$i]['message']);
+            self::assertSame($message->eventId, $logged[$i]['context']['event_id']);
+            self::assertSame($message->subscriptionId, $logged[$i]['context']['subscription_id']);
+            self::assertSame('owner/repo', $logged[$i]['context']['repository']);
+            self::assertSame('v1.2.3', $logged[$i]['context']['tag']);
+        }
+    }
+
+    public function testDoesNotLogWhenBrokerNacksBecausePublishThrowsFirst(): void
+    {
+        $channel = $this->channelBase();
+
+        $nackHandler = null;
+        $channel->method('set_ack_handler')->willReturnCallback(static fn() => null);
+        $channel->method('set_nack_handler')->willReturnCallback(
+            function (callable $cb) use (&$nackHandler): void {
+                $nackHandler = $cb;
+            }
+        );
+
+        $publishedMessage = null;
+        $channel->method('basic_publish')->willReturnCallback(
+            function (AMQPMessage $msg) use (&$publishedMessage): void {
+                $publishedMessage = $msg;
+            }
+        );
+        $channel->method('wait_for_pending_acks')->willReturnCallback(
+            function () use (&$nackHandler, &$publishedMessage): void {
+                ($nackHandler)($publishedMessage);
+            }
+        );
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('info');
+
+        $this->expectException(RabbitPublishFailedException::class);
+
+        $this->adapterWith($channel, $logger)->publishAll([$this->makeMessage()]);
     }
 
     public function testPublisherExceptionPropagatesUncaught(): void
@@ -183,11 +247,14 @@ final class RabbitReleaseNotificationPublisherTest extends TestCase
         return $channel;
     }
 
-    private function adapterWith(AMQPChannel $channel): RabbitReleaseNotificationPublisher
-    {
+    private function adapterWith(
+        AMQPChannel $channel,
+        ?LoggerInterface $logger = null
+    ): RabbitReleaseNotificationPublisher {
         return new RabbitReleaseNotificationPublisher(
             new RabbitPublisher(new RabbitConnection($channel)),
             new SendReleaseEmailSerializer(),
+            $logger ?? new NullLogger(),
         );
     }
 

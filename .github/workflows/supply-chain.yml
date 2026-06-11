@@ -1,0 +1,19 @@
+name: Supply-Chain Security
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  audit:
+    name: composer audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit monolith (production deps only)
+        # --no-dev excludes the dev-only low-severity symfony/yaml advisory (deptrac/psalm)
+        run: make audit
+
+      - name: Audit notification service
+        run: make notification-audit

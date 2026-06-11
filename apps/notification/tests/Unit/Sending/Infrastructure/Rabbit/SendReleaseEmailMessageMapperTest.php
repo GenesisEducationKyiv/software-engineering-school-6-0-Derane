@@ -142,6 +142,29 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
         $this->mapper->fromJson($json);
     }
 
+    public function testIgnoresUnknownExtraFields(): void
+    {
+        $payload = self::validPayload();
+        $payload['unknownTopLevel'] = 'should-be-ignored';
+        $payload['anotherExtra'] = ['nested' => true];
+        /** @var array<string, mixed> $release */
+        $release = $payload['release'];
+        $release['unknownReleaseField'] = 'also-ignored';
+        $payload['release'] = $release;
+
+        $email = $this->mapper->fromJson(json_encode($payload, JSON_THROW_ON_ERROR));
+
+        self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
+        self::assertSame(42, $email->subscriptionId);
+        self::assertSame('subscriber@example.com', $email->recipientEmail);
+        self::assertSame('owner/repo', $email->repository);
+        self::assertSame('v1.2.3', $email->tagName);
+        self::assertSame('Release name', $email->releaseName);
+        self::assertSame('Release body text.', $email->releaseBody);
+        self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
+        self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);
+    }
+
     /** @return array<string, mixed> */
     private static function validPayload(): array
     {

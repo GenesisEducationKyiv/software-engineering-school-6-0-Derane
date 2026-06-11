@@ -115,14 +115,8 @@ return static function (array $settings): Container {
             $c->get(NotificationMetricsReader::class),
             $c->get(PrometheusFormatter::class),
         ),
-        HealthCheckInterface::class => static fn() => new CompositeHealthCheck([
-            new DatabaseHealthCheck(
-                $settings['notification_db']['host'],
-                $settings['notification_db']['port'],
-                $settings['notification_db']['name'],
-                $settings['notification_db']['user'],
-                $settings['notification_db']['password'],
-            ),
+        HealthCheckInterface::class => static fn($c) => new CompositeHealthCheck([
+            new DatabaseHealthCheck(static fn(): PDO => $c->get(PDO::class)),
             new RabbitMqHealthCheck(
                 $settings['rabbitmq']['host'],
                 $settings['rabbitmq']['port'],

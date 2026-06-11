@@ -13,6 +13,8 @@ RUN apk add --no-cache \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+RUN addgroup -S app && adduser -S app -G app
+
 WORKDIR /app
 
 COPY composer.json composer.lock* ./
@@ -24,10 +26,16 @@ COPY config/ config/
 COPY migrations/ migrations/
 COPY http/ http/
 
+RUN chown -R app:app /app
+
+USER app
+
 EXPOSE 8081
 
 CMD ["sh", "bin/start.sh"]
 
 FROM base AS dev
 
-RUN composer install --optimize-autoloader --no-interaction
+USER root
+RUN composer install --optimize-autoloader --no-interaction --ignore-platform-reqs
+USER app
