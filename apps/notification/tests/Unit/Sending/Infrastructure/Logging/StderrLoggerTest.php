@@ -58,4 +58,29 @@ final class StderrLoggerTest extends TestCase
         self::assertSame('Notification consumer started', $record['message']);
         self::assertSame([], $record['context']);
     }
+
+    public function testRedactsSensitiveContextKeysRecursively(): void
+    {
+        $stream = $this->memoryStream();
+
+        (new StderrLogger($stream))->error('SMTP failure', [
+            'repository' => 'owner/repo',
+            'smtp_password' => 'smtp-secret',
+            'nested' => [
+                'apiKey' => 'client-secret',
+                'authorization' => 'Bearer token',
+            ],
+        ]);
+
+        $record = json_decode(trim($this->contents($stream)), true);
+        self::assertIsArray($record);
+        self::assertSame([
+            'repository' => 'owner/repo',
+            'smtp_password' => '[redacted]',
+            'nested' => [
+                'apiKey' => '[redacted]',
+                'authorization' => '[redacted]',
+            ],
+        ], $record['context']);
+    }
 }

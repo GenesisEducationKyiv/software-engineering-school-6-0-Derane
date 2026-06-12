@@ -665,7 +665,7 @@ test pins the shape.
 **When** Psalm analyzes it
 **Then** it is a Domain interface with no Infrastructure dependency (deptrac green), 100% types.
 
-**Dependencies:** A1 (VOs), B5 (Shared). 
+**Dependencies:** A1 (VOs), B5 (Shared).
 **Quality gates:** lint+deptrac, phpunit, psalm.
 
 ### Story C2: NewReleaseDetected domain event + WhenNewReleaseDetectedThenPublishReleaseEmails listener
@@ -912,7 +912,7 @@ successful
 **When** the handler runs
 **Then** it records the attempt + `last_error` and signals nack for retry — FR9 (handler side).
 
-**Dependencies:** D1, C1 (message shape). 
+**Dependencies:** D1, C1 (message shape).
 **Quality gates:** service lint+deptrac, phpunit, psalm.
 
 ### Story D4: Notification\Sending Infrastructure — Rabbit consumer (ack/nack/DLQ), PDO ledger, PHPMailer, renderer
@@ -1140,7 +1140,7 @@ and DI has no bindings for them — FR6.
 **Then** all pass, no module imports another's concrete repo/DTO (AC1), and Behat/JSON/gRPC are
 unchanged (FR11).
 
-**Dependencies:** E1, E2, E3 (cutover proven before deletion). 
+**Dependencies:** E1, E2, E3 (cutover proven before deletion).
 **Quality gates:** monolith lint+deptrac, phpunit, psalm; Behat unchanged.
 
 ### Story E5: Update README, ADR, and LikeC4 architecture model (AC7)

@@ -18,6 +18,8 @@ use Psr\Log\AbstractLogger;
  */
 final class StderrLogger extends AbstractLogger
 {
+    private const SENSITIVE_KEY_PATTERN = '/(authorization|api[_-]?key|password|passwd|secret|token)/i';
+
     /** @var resource */
     private $stream;
 
@@ -39,7 +41,7 @@ final class StderrLogger extends AbstractLogger
             'level' => is_scalar($level) ? (string) $level : 'unknown',
             'service' => 'notification',
             'message' => (string) $message,
-            'context' => $context,
+            'context' => $this->redactContext($context),
         ];
 
         $encoded = json_encode($record, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -48,5 +50,27 @@ final class StderrLogger extends AbstractLogger
         }
 
         fwrite($this->stream, $encoded . "\n");
+    }
+
+    /**
+     * @param array<array-key, mixed> $context
+     * @return array<array-key, mixed>
+     */
+    private function redactContext(array $context): array
+    {
+        /** @var array<array-key, mixed> $redacted */
+        $redacted = [];
+        /** @psalm-suppress MixedAssignment — iterating array<array-key, mixed> yields mixed values */
+        foreach ($context as $key => $value) {
+            if (is_string($key) && preg_match(self::SENSITIVE_KEY_PATTERN, $key) === 1) {
+                $redacted[$key] = '[redacted]';
+                continue;
+            }
+
+            /** @psalm-suppress MixedAssignment — $context values are intentionally mixed */
+            $redacted[$key] = is_array($value) ? $this->redactContext($value) : $value;
+        }
+
+        return $redacted;
     }
 }

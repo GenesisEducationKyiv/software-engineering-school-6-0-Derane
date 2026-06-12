@@ -27,7 +27,12 @@ use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
 require __DIR__ . '/../vendor/autoload.php';
 
-$token = $_ENV['RESILIENCE_TOKEN'] ?? ('resilience-' . bin2hex(random_bytes(4)));
+$token = $_ENV['RESILIENCE_TOKEN'] ?? '';
+if ($token === '') {
+    fwrite(STDERR, 'RESILIENCE_TOKEN is required for deterministic resilience proof seeding.' . PHP_EOL);
+    exit(2);
+}
+
 $repository = 'resilience/repo-' . $token;
 $email = $token . '@example.test';
 

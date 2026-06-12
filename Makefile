@@ -65,7 +65,9 @@ notification-smoke: ensure-env ## Publish a notification smoke message and wait 
 	$(COMPOSE) run --rm --no-deps notification-svc php bin/smoke.php
 
 scanner-smoke: ensure-env ## Seed a smoke release, run one scan cycle, and wait for MailHog delivery
-	$(COMPOSE) run --rm --no-deps app php bin/scanner-smoke.php
+	$(COMPOSE) up -d --wait postgres redis rabbitmq notification-db mailhog
+	$(COMPOSE) up -d --build --wait app notification-svc
+	$(COMPOSE) exec -T app php bin/scanner-smoke.php
 
 # E3 (AC5): a live, host-orchestrated proof that the monolith's REST/gRPC
 # subscription surface keeps serving while RabbitMQ and/or notification-svc
@@ -222,6 +224,9 @@ ci: install ## Run the full Dockerized CI pipeline locally
 	$(MAKE) psalm
 	$(MAKE) notification-psalm
 	$(MAKE) tests
+	$(MAKE) scanner-smoke
+	$(MAKE) resilience-proof
+	@echo "✅ CI checks successfully passed!"
 
 c4-up: ## Start LikeC4 live preview at http://localhost:5173
 	$(C4_COMPOSE) up -d

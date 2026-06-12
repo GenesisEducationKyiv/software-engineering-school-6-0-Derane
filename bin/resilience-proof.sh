@@ -8,7 +8,7 @@
 # process running *inside* a container cannot safely do to its own host's
 # compose stack. This script runs on the HOST, drives `docker compose`
 # directly, and talks to the stack over its host-mapped ports
-# (REST :8080, RabbitMQ management API :15672, MailHog :8025).
+# (REST :8080, gRPC :9001, RabbitMQ management API :15672, MailHog :8025).
 #
 # What this proves (NOT a new resilience mechanism — see docblock prose
 # inside bin/resilience-proof-seed.php and the Dev Agent Record's corrected
@@ -17,21 +17,21 @@
 # nothing in src/ or config/):
 #
 #   AC-2 / AC-3 / AR-FLOW2 (rabbitmq down):
-#     - GET /health AND POST /api/subscriptions both keep returning success
-#       (200 / 201) throughout the outage — neither resolution graph touches
-#       the RabbitMQ publisher (see the "VERIFIED INVARIANT" box below: the
-#       SubscriptionCreated listener is wired lazily and only logs; the broker
-#       publisher is reached solely on a NewReleaseDetected dispatch)
+#     - GET /health, POST /api/subscriptions, and gRPC CreateSubscription all
+#       keep returning success throughout the outage — neither resolution graph
+#       touches the RabbitMQ publisher (see the "VERIFIED INVARIANT" box below:
+#       the SubscriptionCreated listener is wired lazily and only logs; the
+#       broker publisher is reached solely on a NewReleaseDetected dispatch)
 #     - a scan cycle's publish fails, the per-repo 'Scan error' log appears,
 #       the cycle continues (does not abort), and the marker (last_seen_tag)
 #       does NOT advance — re-detected on the very next run
 #     - all of the above observed LIVE, SIMULTANEOUSLY, in one running stack
 #
 #   AC-1 (notification-svc down, rabbitmq up):
-#     - /health and /api/subscriptions both keep returning success; the
-#       monolith depends on neither notification-svc nor (for these REST
-#       surfaces) the broker, so stopping notification-svc changes nothing
-#       about REST liveness
+#     - /health, /api/subscriptions, and gRPC CreateSubscription all keep
+#       returning success; the monolith depends on neither notification-svc nor
+#       (for these REST/gRPC surfaces) the broker, so stopping notification-svc
+#       changes nothing about public API liveness
 #     - N fresh smoke releases are scanned and published; publisher confirms
 #       ack at the broker; the durable notifications.send-email queue buffers
 #       them (messages_ready >= N, observed via the management HTTP API with
@@ -79,11 +79,11 @@
 # | invariant against a really-stopped rabbitmq; it does not document a bug. |
 # +-------------------------------------------------------------------------+
 #
-# Wire contracts are exercised READ-ONLY: existing REST endpoints
-# (POST/GET /api/subscriptions, GET /health), existing RabbitMQ management
-# API, existing MailHog API. Nothing here declares a new route, RPC, message
-# shape, or queue/exchange/binding, and no production src/ or config/ code is
-# touched — the script only observes the running stack.
+# Wire contracts are exercised through existing surfaces: REST endpoints
+# (POST /api/subscriptions, GET /health), gRPC CreateSubscription/Health, the
+# RabbitMQ management API, and the MailHog API. Nothing here declares a new
+# route, RPC, message shape, or queue/exchange/binding, and no production src/
+# or config/ code is touched — the script only observes the running stack.
 #
 # Restores the stack to its pre-existing state on exit (see `restore_stack`).
 
@@ -91,13 +91,21 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose"
+# Use the normal compose stack plus the existing test overlay by default. The
+# overlay keeps repository validation deterministic (GITHUB_STUB=true) while the
+# proof still exercises real app/grpc/scanner, RabbitMQ, notification-svc,
+# Postgres, Redis, and MailHog containers. Override RESILIENCE_COMPOSE to target
+# a separately managed local stack.
+COMPOSE="${RESILIENCE_COMPOSE:-docker compose -f docker-compose.yml -f docker-compose.test.yml}"
 REST_BASE="http://localhost:${APP_PORT:-8080}"
+GRPC_TARGET="${GRPC_TARGET:-localhost:${GRPC_PORT:-9001}}"
+GRPCURL_IMAGE="${GRPCURL_IMAGE:-fullstorydev/grpcurl:v1.9.3}"
 RABBITMQ_MGMT="http://localhost:${RABBITMQ_MANAGEMENT_PORT:-15672}"
 RABBITMQ_AUTH="${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}"
 MAILHOG_BASE="http://localhost:8025"
 QUEUE_NAME="notifications.send-email"
 N=2 # number of fresh smoke releases for the AC-1 buffering scenario
+RUN_TOKEN="${RESILIENCE_RUN_ID:-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${GITHUB_SHA:-workspace}}"
 
 log() { printf '[resilience-proof] %s\n' "$*"; }
 fail() { printf '[resilience-proof] FAIL: %s\n' "$*" >&2; exit 1; }
@@ -165,6 +173,61 @@ assert_rest_alive() {
     log "$label: POST /api/subscriptions -> $subs_code (OK — REST surface alive)"
 }
 
+grpcurl_call() {
+    local payload="$1" method="$2"
+    docker run --rm --network host \
+        -v "${PWD}/proto:/proto:ro" \
+        "$GRPCURL_IMAGE" \
+        -plaintext \
+        -import-path /proto \
+        -proto release_notifier.proto \
+        -d "$payload" \
+        "$GRPC_TARGET" \
+        "$method"
+}
+
+assert_grpc_health_alive() {
+    local label="$1" output
+
+    if ! output="$(grpcurl_call '{}' 'release_notifier.v1.ReleaseNotifierService/Health' 2>&1)"; then
+        fail "$label: gRPC Health failed against ${GRPC_TARGET}: ${output}"
+    fi
+
+    printf '%s' "$output" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' \
+        || fail "$label: gRPC Health returned an unexpected response: ${output}"
+
+    log "$label: gRPC Health -> ok (OK)"
+}
+
+grpc_health_ready() {
+    local output
+
+    output="$(grpcurl_call '{}' 'release_notifier.v1.ReleaseNotifierService/Health' 2>&1)" || return 1
+    printf '%s' "$output" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+}
+
+assert_grpc_subscription_alive() {
+    local label="$1" safe_label email payload output
+
+    safe_label="$(printf '%s' "$label" \
+        | tr '[:upper:]' '[:lower:]' \
+        | tr -c 'a-z0-9' '-' \
+        | sed 's/^-*//;s/-*$//;s/--*/-/g')"
+    email="resilience-grpc-${safe_label:-outage}@example.test"
+    payload='{"email":"'"$email"'","repository":"docker/compose"}'
+
+    if ! output="$(grpcurl_call "$payload" 'release_notifier.v1.ReleaseNotifierService/CreateSubscription' 2>&1)"; then
+        fail "$label: gRPC CreateSubscription failed against ${GRPC_TARGET}: ${output}"
+    fi
+
+    printf '%s' "$output" | grep -Eq '"email"[[:space:]]*:[[:space:]]*"'"$email"'"' \
+        || fail "$label: gRPC CreateSubscription response did not include ${email}: ${output}"
+    printf '%s' "$output" | grep -Eq '"repository"[[:space:]]*:[[:space:]]*"docker/compose"' \
+        || fail "$label: gRPC CreateSubscription response did not include docker/compose: ${output}"
+
+    log "$label: gRPC CreateSubscription -> ${email} on docker/compose (OK — gRPC surface alive)"
+}
+
 queue_messages_ready() {
     curl -s -u "$RABBITMQ_AUTH" "${RABBITMQ_MGMT}/api/queues/%2F/${QUEUE_NAME}" | jq -r '.messages_ready // 0'
 }
@@ -191,13 +254,21 @@ seed_one_release() {
 log "Ensuring full stack is up (app, scanner, grpc, postgres, redis, rabbitmq, notification-svc, notification-db, mailhog)..."
 $COMPOSE up -d --wait postgres redis rabbitmq notification-db mailhog
 $COMPOSE up -d --build app scanner grpc notification-svc
-log "Waiting for app/grpc to become reachable..."
+log "Waiting for app to become reachable..."
 deadline=$((SECONDS + 90))
 until [ "$(rest_status GET /health)" = "200" ]; do
     [ "$SECONDS" -lt "$deadline" ] || fail "monolith /health did not become reachable within budget"
     sleep 2
 done
-log "Stack is up. /health is green."
+log "App /health is green."
+
+log "Waiting for gRPC to become reachable..."
+deadline=$((SECONDS + 90))
+until grpc_health_ready >/dev/null 2>&1; do
+    [ "$SECONDS" -lt "$deadline" ] || fail "gRPC Health did not become reachable within budget"
+    sleep 2
+done
+assert_grpc_health_alive "[startup]"
 
 $COMPOSE exec -T app php bin/migrate.php >/dev/null
 $COMPOSE exec -T notification-svc php bin/migrate.php >/dev/null
@@ -210,8 +281,9 @@ $COMPOSE stop rabbitmq
 sleep 2
 
 assert_rest_alive "[rabbitmq DOWN]"
+assert_grpc_subscription_alive "[rabbitmq DOWN]"
 
-TOKEN_A="resilienceA-$(date +%s)-$RANDOM"
+TOKEN_A="resilienceA-${RUN_TOKEN}"
 log "Seeding one fresh smoke release (token=${TOKEN_A}) and running a scan cycle while rabbitmq is down..."
 REPO_A="$(seed_one_release "$TOKEN_A")"
 [ -n "$REPO_A" ] || fail "seed_one_release did not return a repository name"
@@ -246,6 +318,7 @@ log "Both rabbitmq-down scan invocations returned successfully after logging pub
 
 log "Re-asserting REST is STILL alive after two failed scan cycles (broker down throughout)..."
 assert_rest_alive "[rabbitmq DOWN, post-scan]"
+assert_grpc_subscription_alive "[rabbitmq DOWN, post-scan]"
 
 log "Restarting rabbitmq..."
 $COMPOSE up -d rabbitmq
@@ -271,13 +344,14 @@ $COMPOSE stop notification-svc
 sleep 2
 
 assert_rest_alive "[notification-svc DOWN]"
+assert_grpc_subscription_alive "[notification-svc DOWN]"
 
 BEFORE_READY="$(queue_messages_ready)"
 log "Queue '${QUEUE_NAME}' messages_ready BEFORE seeding: ${BEFORE_READY}"
 
 declare -a REPOS_B
 for i in $(seq 1 "$N"); do
-    TOKEN_B="resilienceB${i}-$(date +%s)-$RANDOM"
+    TOKEN_B="resilienceB${i}-${RUN_TOKEN}"
     log "Seeding fresh smoke release #${i}/${N} (token=${TOKEN_B}) and running its scan cycle..."
     REPO_B="$(seed_one_release "$TOKEN_B")"
     [ -n "$REPO_B" ] || fail "seed_one_release #${i} did not return a repository name"
@@ -298,6 +372,7 @@ log "Queue '${QUEUE_NAME}' messages_ready AFTER seeding: ${AFTER_READY} (delta =
 
 log "Re-asserting REST is still alive while notification-svc remains down..."
 assert_rest_alive "[notification-svc DOWN, post-seed]"
+assert_grpc_subscription_alive "[notification-svc DOWN, post-seed]"
 
 log "Restarting notification-svc..."
 $COMPOSE up -d notification-svc
