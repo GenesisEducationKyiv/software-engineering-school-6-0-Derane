@@ -4,7 +4,8 @@
 -- States: sent_at NOT NULL = sent; claimed_at NOT NULL = claimed (in flight);
 -- both NULL = failed / never attempted (claimable).
 -- Existing rows keep both NULL: sent rows stay sent, failed rows stay
--- retryable. Idempotent — the migration runner re-applies every file.
+-- retryable. Safe to re-run manually; the migration runner records it after
+-- first application.
 ALTER TABLE release_notifications
     ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS claim_token VARCHAR(64);

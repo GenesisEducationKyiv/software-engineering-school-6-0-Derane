@@ -412,9 +412,11 @@ parse_status_line() {
 
   if is_enabled "$require_gate_markers"; then
     # Scan the full file: the model may write a preamble before STATUS even
-    # when gate markers are required. Use exact matching (no prefix strip).
+    # when gate markers are required. Strip markdown bold markers (**) that
+    # some models emit despite being instructed not to.
     while IFS= read -r line || [[ -n "$line" ]]; do
       line="${line%$'\r'}"
+      line="${line#\*\*}"; line="${line%\*\*}"
       case "$line" in
         "STATUS: PASS") echo "PASS"; return ;;
         "STATUS: FAIL") echo "FAIL"; return ;;

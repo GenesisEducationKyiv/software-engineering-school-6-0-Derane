@@ -266,6 +266,7 @@ deptrac:
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
+      - Apps.Notification        # tests/ → src/ within the same service
 
     # ===== Legacy transitional code (drains over Epic B).
     Legacy.Infrastructure:

@@ -39,7 +39,7 @@ Only after Step 2 passes:
 
 ```bash
 # Monolith database
-psql -U "$PGUSER" -d "$PGDB" -f migrations/003_drop_release_notifications.sql
+psql -U "$PGUSER" -d "$PGDB" -f manual-migrations/003_drop_release_notifications.sql
 ```
 
 ### Step 4 — Verify

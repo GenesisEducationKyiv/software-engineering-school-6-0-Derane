@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
+use App\Shared\Infrastructure\Migration\Migrator;
 use DI\Container;
 use PDO;
 use PHPUnit\Framework\TestCase;
@@ -56,21 +57,7 @@ abstract class IntegrationTestCase extends TestCase
 
     private static function migrate(PDO $pdo): void
     {
-        $migrationFiles = glob(dirname(__DIR__, 2) . '/migrations/*.sql');
-        if ($migrationFiles === false) {
-            throw new \RuntimeException('Failed to enumerate notification migrations');
-        }
-
-        sort($migrationFiles);
-
-        foreach ($migrationFiles as $migrationFile) {
-            $sql = file_get_contents($migrationFile);
-            if ($sql === false) {
-                throw new \RuntimeException(sprintf('Failed to read migration file: %s', $migrationFile));
-            }
-
-            $pdo->exec($sql);
-        }
+        (new Migrator($pdo, dirname(__DIR__, 2) . '/migrations'))->migrate();
     }
 
     private static function populateEnv(): void

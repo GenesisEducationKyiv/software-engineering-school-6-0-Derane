@@ -26,7 +26,6 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
         $escapedTag = htmlspecialchars($email->tagName);
         $escapedName = htmlspecialchars($email->releaseName);
         $escapedUrl = htmlspecialchars($email->releaseUrl);
-        $escapedPublishedAt = htmlspecialchars($email->publishedAt);
         $escapedBody = nl2br(htmlspecialchars($email->releaseBody));
 
         return <<<HTML
@@ -34,8 +33,9 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
             <h2>New Release for {$escapedRepo}</h2>
             <p><strong>Version:</strong> {$escapedTag}</p>
             <p><strong>Name:</strong> {$escapedName}</p>
-            <p><strong>Published:</strong> {$escapedPublishedAt}</p>
-            <div>{$escapedBody}</div>
+            <div style="margin: 16px 0; padding: 12px; background: #f6f8fa; border-radius: 6px;">
+                {$escapedBody}
+            </div>
             <p><a href="{$escapedUrl}" style="color: #0366d6;">View Release on GitHub</a></p>
             <hr style="border: none; border-top: 1px solid #e1e4e8; margin: 24px 0;">
             <p style="color: #586069; font-size: 12px;">
@@ -52,7 +52,6 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
 
         Version: {$email->tagName}
         Name: {$email->releaseName}
-        Published: {$email->publishedAt}
 
         {$email->releaseBody}
 

@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+use App\Shared\Infrastructure\Migration\Migrator;
+
 require __DIR__ . '/../vendor/autoload.php';
 
 $settings = require __DIR__ . '/../config/settings.php';
@@ -12,19 +14,5 @@ $container = $buildContainer($settings);
 /** @var \PDO $pdo */
 $pdo = $container->get(\PDO::class);
 
-$migrationFiles = glob(__DIR__ . '/../migrations/*.sql');
-if ($migrationFiles === false) {
-    throw new RuntimeException('Failed to enumerate notification migrations');
-}
-
-sort($migrationFiles);
-
-foreach ($migrationFiles as $migrationFile) {
-    $sql = file_get_contents($migrationFile);
-    if ($sql === false) {
-        throw new RuntimeException(sprintf('Failed to read migration file: %s', $migrationFile));
-    }
-
-    $pdo->exec($sql);
-    fwrite(STDOUT, sprintf("Applied %s\n", basename($migrationFile)));
-}
+(new Migrator($pdo, __DIR__ . '/../migrations'))->migrate();
+fwrite(STDOUT, "Migrations completed.\n");

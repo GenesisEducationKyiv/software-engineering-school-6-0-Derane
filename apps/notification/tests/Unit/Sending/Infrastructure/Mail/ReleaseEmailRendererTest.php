@@ -40,7 +40,7 @@ final class ReleaseEmailRendererTest extends TestCase
         self::assertSame('New Release: owner/repo v1.2.3', $rendered->subject);
     }
 
-    public function testHtmlBodyIncludesEveryReleaseEmailField(): void
+    public function testHtmlBodyPreservesFrozenReleaseTemplate(): void
     {
         $rendered = $this->renderer->render($this->email());
 
@@ -49,10 +49,15 @@ final class ReleaseEmailRendererTest extends TestCase
         self::assertStringContainsString('Shiny New Release', $rendered->htmlBody);
         self::assertStringContainsString('This release fixes several bugs and adds new features.', $rendered->htmlBody);
         self::assertStringContainsString('https://github.com/owner/repo/releases/tag/v1.2.3', $rendered->htmlBody);
-        self::assertStringContainsString('2026-06-07T11:00:00+00:00', $rendered->htmlBody);
+        self::assertStringContainsString(
+            '<div style="margin: 16px 0; padding: 12px; background: #f6f8fa; border-radius: 6px;">',
+            $rendered->htmlBody,
+        );
+        self::assertStringNotContainsString('Published:', $rendered->htmlBody);
+        self::assertStringNotContainsString('2026-06-07T11:00:00+00:00', $rendered->htmlBody);
     }
 
-    public function testTextBodyIncludesEveryReleaseEmailField(): void
+    public function testTextBodyPreservesFrozenReleaseTemplate(): void
     {
         $rendered = $this->renderer->render($this->email());
 
@@ -61,7 +66,8 @@ final class ReleaseEmailRendererTest extends TestCase
         self::assertStringContainsString('Shiny New Release', $rendered->textBody);
         self::assertStringContainsString('This release fixes several bugs and adds new features.', $rendered->textBody);
         self::assertStringContainsString('https://github.com/owner/repo/releases/tag/v1.2.3', $rendered->textBody);
-        self::assertStringContainsString('2026-06-07T11:00:00+00:00', $rendered->textBody);
+        self::assertStringNotContainsString('Published:', $rendered->textBody);
+        self::assertStringNotContainsString('2026-06-07T11:00:00+00:00', $rendered->textBody);
     }
 
     public function testEscapesHtmlSpecialCharactersInHtmlBody(): void
