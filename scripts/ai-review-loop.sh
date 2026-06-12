@@ -663,7 +663,7 @@ review_section_has_text_with_score() {
           last_cell_count = cell_count
           first_cell = cells[1]
           header = tolower(first_cell)
-          if (header == "category" || header == "dimension" || header == "attribute" || header == "surface" || header == "requirement" || header == "checkpoint" || header == "area") {
+          if (index(header, "category") > 0 || index(header, "dimension") > 0 || index(header, "attribute") > 0 || index(header, "surface") > 0 || index(header, "requirement") > 0 || index(header, "checkpoint") > 0 || index(header, "area") > 0) {
             score_col = 0
             for (i = 1; i <= cell_count; i++) {
               if (tolower(cells[i]) == "score") {
@@ -1465,7 +1465,7 @@ run_review() {
       else
         "${agent_env[@]}" "$claude_cmd" -p "$prompt" \
           ${claude_flags[@]+"${claude_flags[@]}"} \
-          --append-system-prompt "After completing the review, your FIRST line of output MUST be exactly STATUS: PASS or STATUS: FAIL." \
+          --append-system-prompt "After completing the review, your FIRST line of output MUST be exactly STATUS: PASS or STATUS: FAIL (bare plain text only — no markdown bold, no asterisks, no backticks around it). CRITICAL OUTPUT FORMAT: To stay within the token budget, use compact single-line format for EVERY scorecard entry. For System Quality Attributes use: **AttributeName**: one-sentence evidence. Source: file/test. 5/5 PASS. Improvement: none. For FR/NFR/AC use bullet format with three lines: - Evidence: ...; - Score: 5/5 PASS; - Source: file. For NFR catalog and expanded quality use the same three-line bullet format. Do NOT write multi-paragraph descriptions per attribute — every attribute must fit on one or two lines. Complete ALL required attributes in compact format rather than declaring token exhaustion." \
           --output-format text \
           >"$output_file" 2>"${output_file}.log"
       fi
