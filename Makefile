@@ -6,7 +6,7 @@
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
         tests ci c4-up c4-down c4-logs c4-validate \
         logs-rabbitmq logs-notification-db logs-notification-svc \
-        migrate-notification notification-smoke scanner-smoke resilience-proof \
+        migrate-notification purge-notification notification-smoke scanner-smoke resilience-proof \
         audit notification-audit \
         notification-unit notification-deptrac \
         notification-integration-up notification-integration-run notification-integration-down notification-integration \
@@ -60,6 +60,9 @@ migrate: ensure-env ## Run database migrations inside Docker
 
 migrate-notification: ensure-env ## Run notification-service migrations inside Docker
 	$(COMPOSE) exec -T notification-svc php bin/migrate.php
+
+purge-notification: ensure-env ## Purge notification ledger rows older than RETENTION_DAYS (default 90) days
+	$(COMPOSE) exec -T notification-svc php bin/purge.php
 
 notification-smoke: ensure-env ## Publish a notification smoke message and wait for MailHog delivery
 	$(COMPOSE) run --rm --no-deps notification-svc php bin/smoke.php

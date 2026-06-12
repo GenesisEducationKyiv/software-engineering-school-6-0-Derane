@@ -15,13 +15,18 @@ The notification service's `release_notifications` ledger stores:
 ## Retention period
 
 Ledger rows are retained for **90 days** from `sent_at`. Rows older than 90 days serve no
-deduplication purpose and are deleted by a scheduled maintenance job.
+deduplication purpose and are purged by the retention script.
 
-Maintenance query (run nightly via cron or a scheduled task):
+**Implementation:** `apps/notification/bin/purge.php` — run as a nightly cron job:
 
-```sql
-DELETE FROM release_notifications WHERE sent_at < NOW() - INTERVAL '90 days';
+```bash
+# crontab entry (nightly at 03:00)
+0 3 * * * docker compose exec -T notification-svc php bin/purge.php
 ```
+
+The script deletes all rows where `sent_at < NOW() - INTERVAL '90 days'` and logs the
+count of deleted rows to stdout. The retention window is configurable via `RETENTION_DAYS`
+environment variable (default: 90).
 
 ## Right to erasure (GDPR Art. 17)
 
