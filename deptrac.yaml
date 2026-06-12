@@ -10,20 +10,22 @@ deptrac:
 
   layers:
     # ---------------------------------------------------------------------
-    # Shared kernel
+    # Shared kernel (monolith src/ only). apps/notification/src/Shared/
+    # duplicates these classes with the same FQCN but belongs solely to
+    # Apps.Notification layer — see AR-DEPTRAC architecture.md §4 note.
     # ---------------------------------------------------------------------
     - name: Shared.Domain
       collectors:
         - type: directory
-          value: src/Shared/Domain/.*
+          value: ^src/Shared/Domain/.*
     - name: Shared.Application
       collectors:
         - type: directory
-          value: src/Shared/Application/.*
+          value: ^src/Shared/Application/.*
     - name: Shared.Infrastructure
       collectors:
         - type: directory
-          value: src/Shared/Infrastructure/.*
+          value: ^src/Shared/Infrastructure/.*
 
     # ---------------------------------------------------------------------
     # Subscription context (module: Subscriptions)

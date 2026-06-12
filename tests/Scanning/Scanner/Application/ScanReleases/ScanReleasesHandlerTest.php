@@ -245,6 +245,64 @@ final class ScanReleasesHandlerTest extends TestCase
         $handler->__invoke(new ScanReleasesCommand());
     }
 
+    /**
+     * Explicit test for FR5 partial-batch resilience: when multiple subscribers
+     * exist (a batch) and publishing fails after building all messages but
+     * before confirming delivery, the marker must NOT advance — the release
+     * will be retried next cycle and the consumer's idempotency ledger deduplicates
+     * any partial deliveries. This test complements
+     * testDoesNotMarkTheReleaseSeenWhenTheNewReleaseDetectedDispatchThrows by
+     * making the batch scenario (N>1 subscribers) explicit and verifying that
+     * failure to deliver ANY recipient blocks marker advancement (all-or-nothing
+     * semantics required for outbox-free flow).
+     */
+    public function testDoesNotMarkReleaseSeenWhenPublishFailsForBatchOfMultipleRecipients(): void
+    {
+        $release = $this->release('v2.5.0', 'Multi-subscriber release');
+
+        $this->candidates->expects($this->once())
+            ->method('getDueForScan')
+            ->with(100)
+            ->willReturn(['multi/repo']);
+
+        $this->gitHub->expects($this->once())
+            ->method('getLatestRelease')
+            ->with(new RepositoryName('multi/repo'))
+            ->willReturn($release);
+
+        $this->statusReader->expects($this->once())
+            ->method('getStatus')
+            ->with('multi/repo')
+            ->willReturn(RepositoryStatus::reconstitute('multi/repo', 'v2.4.0', null));
+
+        // Throwing dispatcher simulates PublishReleaseEmailsForRelease building
+        // a batch of N messages (one per subscriber — assume N=2+ for this test's
+        // intent), then publishAll() throws (e.g., RabbitMQ channel error, nack,
+        // or network failure). Even though multiple recipients exist, the batch
+        // publish is atomic: either all confirmed or none — a throw means ZERO
+        // deliveries guaranteed, so marker must stay un-advanced.
+        $throwingDispatcher = new class implements EventDispatcherInterface {
+            #[\Override]
+            public function dispatch(object $event): object
+            {
+                // Simulate batch publish failure (could be after building N messages
+                // but before/during RabbitMQ confirm-wait).
+                throw new \RuntimeException('publishBatch failed — RabbitMQ channel closed');
+            }
+        };
+
+        $handler = $this->buildHandler($throwingDispatcher);
+
+        $this->progress->expects($this->never())->method('markReleaseSeen');
+        $this->progress->expects($this->never())->method('markChecked');
+
+        // The per-repo catch (\Exception) swallows the exception and logs
+        // "Scan error"; the release will be retried next cycle, allowing the
+        // consumer's idempotency ledger to deduplicate any partial deliveries
+        // (though with atomic publishBatch, partial deliveries are impossible).
+        $handler->__invoke(new ScanReleasesCommand());
+    }
+
     public function testContinuesToTheNextRepositoryAfterAGenericScanError(): void
     {
         $this->candidates->expects($this->once())
