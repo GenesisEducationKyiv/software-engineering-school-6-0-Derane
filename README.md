@@ -105,6 +105,11 @@ composer lint
 composer psalm
 ```
 
+`composer lint` runs PHPCS (PSR-12) and deptrac (architecture boundaries). Deptrac output includes
+`Uncovered 269 | Allowed 306` — "Uncovered" counts classes not matched by any layer regex (e.g.
+generated/vendor classes, test helpers outside a declared layer); this is not a violation. The gate
+passes as long as the Violations count remains 0.
+
 Notification service:
 
 ```bash
