@@ -485,6 +485,17 @@ augment_impact_context_with_github_corroboration() {
     sed -n '1,20000p' "$github_context"
   } > "$combined_context"
 
+  # Truncate to ~200KB (line boundary) to stay within AI tool read limits
+  local combined_size
+  combined_size="$(wc -c < "$combined_context")"
+  if (( combined_size > 204800 )); then
+    local tmp_ctx
+    tmp_ctx="$(mktemp)"
+    awk -v max=204800 'BEGIN{b=0} {b+=length($0)+1; if(b>max){print "\n---\n*(Context truncated at 200KB to fit AI tool read limits. Use rg/grep or Read on individual source files for remaining relationships.)*"; exit} print}' \
+        "$combined_context" > "$tmp_ctx"
+    mv "$tmp_ctx" "$combined_context"
+  fi
+
   impact_context="$combined_context"
 }
 

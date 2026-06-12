@@ -647,10 +647,11 @@ review_section_has_text_with_score() {
             if (attr_name == category) { found = 1 }
           }
         }
-        # Format 3: **Category** heading on one line, Score: X/5 on a subsequent line.
+        # Format 3: **Category** heading on one line; any line with a qualifying score
+        # while in_category counts (handles "Score: 5/5", "**Score**: 5/5", "**Score:** 5/5").
         if ((pre_strip ~ /^\*\*[^*].*\*\*[[:space:]]*$/ || pre_strip ~ /^#+[[:space:]]/) && heading_check_base != "") {
           in_category = (heading_check_base == category)
-        } else if (in_category && (index(normalized, "Score:") == 1 || index(normalized, "score:") == 1) && line ~ threshold_regex) {
+        } else if (in_category && line ~ threshold_regex) {
           found = 1
         }
 
