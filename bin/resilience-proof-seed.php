@@ -34,7 +34,9 @@ if ($token === '') {
 }
 
 $repository = 'resilience/repo-' . $token;
-$email = $token . '@example.test';
+// md5 keeps the local part at 32 chars — well within the RFC 5321 64-char limit.
+// The full token can exceed 64 chars when run ID + SHA are both included.
+$email = md5($token) . '@example.test';
 
 $_ENV['GITHUB_SMOKE'] = 'true';
 $_ENV['GITHUB_SMOKE_REPOSITORY'] = $repository;
