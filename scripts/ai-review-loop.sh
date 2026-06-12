@@ -424,13 +424,15 @@ parse_status_line() {
     return
   fi
 
+  # Scan the full file: the /review skill may place the STATUS marker after
+  # a multi-paragraph preamble, well beyond the original 10-line window.
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="$(echo "$line" | sed 's/^[[:space:]`#*-]*//' | tr -d '\r')"
     case "$line" in
       "STATUS: PASS"*) echo "PASS"; return ;;
       "STATUS: FAIL"*) echo "FAIL"; return ;;
     esac
-  done < <(head -n 10 "$file")
+  done < "$file"
   echo "UNKNOWN"
 }
 
