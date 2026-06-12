@@ -22,7 +22,7 @@ final class RabbitConnectionTest extends TestCase
             });
 
         $queueDeclareCalls = [];
-        $channel->expects(self::exactly(2))
+        $channel->expects(self::exactly(3))
             ->method('queue_declare')
             ->willReturnCallback(function (...$args) use (&$queueDeclareCalls): void {
                 $queueDeclareCalls[] = $args;
@@ -57,11 +57,25 @@ final class RabbitConnectionTest extends TestCase
             $queueDeclareCalls[0][6]
         );
 
-        self::assertSame('notifications.send-email.dlq', $queueDeclareCalls[1][0]);
+        self::assertSame('notifications.send-email.retry', $queueDeclareCalls[1][0]);
         self::assertFalse($queueDeclareCalls[1][1]);  // passive
         self::assertTrue($queueDeclareCalls[1][2]);   // durable
         self::assertFalse($queueDeclareCalls[1][3]);  // exclusive
         self::assertFalse($queueDeclareCalls[1][4]);  // auto_delete
+        self::assertFalse($queueDeclareCalls[1][5]);  // nowait
+        self::assertSame(
+            [
+                'x-dead-letter-exchange' => ['S', ''],
+                'x-dead-letter-routing-key' => ['S', 'notifications.send-email'],
+            ],
+            $queueDeclareCalls[1][6]
+        );
+
+        self::assertSame('notifications.send-email.dlq', $queueDeclareCalls[2][0]);
+        self::assertFalse($queueDeclareCalls[2][1]);  // passive
+        self::assertTrue($queueDeclareCalls[2][2]);   // durable
+        self::assertFalse($queueDeclareCalls[2][3]);  // exclusive
+        self::assertFalse($queueDeclareCalls[2][4]);  // auto_delete
 
         self::assertSame(
             ['notifications.send-email', 'notifications', 'release.email'],

@@ -131,6 +131,8 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
         yield 'release.tagName as null' => [self::jsonWithReleaseField('tagName', null)];
         yield 'release.name as number' => [self::jsonWithReleaseField('name', 1)];
         yield 'release.htmlUrl as number' => [self::jsonWithReleaseField('htmlUrl', 1)];
+        yield 'release.htmlUrl as javascript: uri' => [self::jsonWithReleaseField('htmlUrl', 'javascript:alert(1)')];
+        yield 'release.htmlUrl as ftp: uri' => [self::jsonWithReleaseField('htmlUrl', 'ftp://example.com/release')];
         yield 'release.publishedAt as number' => [self::jsonWithReleaseField('publishedAt', 1)];
     }
 

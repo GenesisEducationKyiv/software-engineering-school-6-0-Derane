@@ -149,6 +149,9 @@ final class PdoNotificationLedgerTest extends TestCase
         self::assertStringContainsString('sent_at = NOW()', $capturedSql);
         self::assertStringContainsString('claimed_at = NULL', $capturedSql);
         self::assertStringContainsString('claim_token = NULL', $capturedSql);
+        self::assertStringContainsString('attempt_count = attempt_count + 1', $capturedSql);
+        self::assertStringNotContainsString('attempts = attempts + 1', $capturedSql);
+        self::assertStringContainsString('updated_at = NOW()', $capturedSql);
         self::assertStringContainsString('AND claim_token = :token', $capturedSql);
     }
 
@@ -177,6 +180,9 @@ final class PdoNotificationLedgerTest extends TestCase
 
         self::assertStringContainsString('claimed_at = NULL', $capturedSql);
         self::assertStringContainsString('claim_token = NULL', $capturedSql);
+        self::assertStringContainsString('attempt_count = attempt_count + 1', $capturedSql);
+        self::assertStringNotContainsString('attempts = attempts + 1', $capturedSql);
+        self::assertStringContainsString('updated_at = NOW()', $capturedSql);
         self::assertStringContainsString('AND claim_token = :token', $capturedSql);
         self::assertStringNotContainsString('sent_at = NOW()', $capturedSql);
     }

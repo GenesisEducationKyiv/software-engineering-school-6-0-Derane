@@ -38,13 +38,14 @@ final readonly class PdoNotificationLedger implements NotificationLedger
             'INSERT INTO release_notifications
                  (subscription_id, tag_name, repository, email, claimed_at, claim_token, attempt_count)
              VALUES (:sub, :tag, :repo, :email, NOW(), :token, 0)
-             ON CONFLICT (subscription_id, tag_name, repository)
-             DO UPDATE SET claimed_at = NOW(), claim_token = excluded.claim_token, email = excluded.email
+             ON CONFLICT (subscription_id, repository, tag_name)
+             DO UPDATE SET claimed_at = NOW(), claim_token = excluded.claim_token, email = excluded.email,
+                           updated_at = NOW()
              WHERE release_notifications.sent_at IS NULL
                AND (release_notifications.claimed_at IS NULL
                     OR release_notifications.claimed_at < NOW() - INTERVAL \'%d seconds\')
              RETURNING id',
-            self::CLAIM_LEASE_SECONDS,
+            NotificationLedger::CLAIM_LEASE_SECONDS,
         ));
         $stmt->execute([
             ':sub' => $key->subscriptionId,
@@ -67,7 +68,8 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         $stmt = $this->pdo->prepare(
             'UPDATE release_notifications
              SET sent_at = NOW(), claimed_at = NULL, claim_token = NULL, email = :email,
-                 attempt_count = attempt_count + 1, last_error = NULL
+                 attempt_count = attempt_count + 1, last_error = NULL,
+                 updated_at = NOW()
              WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo
                AND claim_token = :token'
         );
@@ -86,7 +88,8 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         $stmt = $this->pdo->prepare(
             'UPDATE release_notifications
              SET claimed_at = NULL, claim_token = NULL, email = :email,
-                 attempt_count = attempt_count + 1, last_error = :error
+                 attempt_count = attempt_count + 1, last_error = :error,
+                 updated_at = NOW()
              WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo
                AND claim_token = :token'
         );

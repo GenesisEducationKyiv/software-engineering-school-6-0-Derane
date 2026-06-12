@@ -57,7 +57,7 @@ final readonly class SendReleaseEmailMessageMapper
             tagName: $this->requireString($release, 'release.tagName', 'tagName'),
             releaseName: $this->requireString($release, 'release.name', 'name'),
             releaseBody: $this->optionalString($release, 'body'),
-            releaseUrl: $this->requireString($release, 'release.htmlUrl', 'htmlUrl'),
+            releaseUrl: $this->requireHttpUrl($release, 'release.htmlUrl', 'htmlUrl'),
             publishedAt: $this->requireString($release, 'release.publishedAt', 'publishedAt'),
         );
     }
@@ -122,6 +122,20 @@ final readonly class SendReleaseEmailMessageMapper
         if (!is_string($value)) {
             throw new MalformedReleaseEmailMessageException(
                 "SendReleaseEmail/v1 message is missing required string field \"{$field}\" or it has the wrong type."
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<array-key, mixed> $payload */
+    private function requireHttpUrl(array $payload, string $field, ?string $key = null): string
+    {
+        $value = $this->requireString($payload, $field, $key);
+
+        if (!preg_match('/^https?:\/\//i', $value)) {
+            throw new MalformedReleaseEmailMessageException(
+                "SendReleaseEmail/v1 field \"{$field}\" must be an http/https URL, got: {$value}"
             );
         }
 

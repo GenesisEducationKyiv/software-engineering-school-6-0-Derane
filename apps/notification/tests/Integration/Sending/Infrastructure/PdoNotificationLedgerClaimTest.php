@@ -58,6 +58,27 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
         self::assertNotSame($claim->token(), $retry->token(), 'a re-claim must mint a fresh fencing token');
     }
 
+    public function testAttemptCountIncrementsOnEachMutation(): void
+    {
+        $key = $this->key();
+
+        $failed = $this->ledger->claim($key, 'a@example.test');
+        $this->ledger->recordFailedAttempt($key, 'a@example.test', 'SMTP timeout', $failed->token());
+
+        self::assertSame(
+            ['attempt_count' => 1, 'last_error' => 'SMTP timeout'],
+            $this->attemptStateFor($key)
+        );
+
+        $sent = $this->ledger->claim($key, 'a@example.test');
+        $this->ledger->markSent($key, 'a@example.test', $sent->token());
+
+        self::assertSame(
+            ['attempt_count' => 2, 'last_error' => null],
+            $this->attemptStateFor($key)
+        );
+    }
+
     public function testMarkSentMakesEverySubsequentClaimAnAlreadySentDedupe(): void
     {
         $key = $this->key();
@@ -162,5 +183,25 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
         $value = $stmt->fetchColumn();
 
         return $value === false || $value === null ? null : (string) $value;
+    }
+
+    /** @return array{attempt_count: int, last_error: ?string} */
+    private function attemptStateFor(NotificationKey $key): array
+    {
+        $stmt = $this->c->get(PDO::class)->prepare(
+            'SELECT attempt_count, last_error
+             FROM release_notifications
+             WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo'
+        );
+        $stmt->execute([':sub' => $key->subscriptionId, ':tag' => $key->tagName, ':repo' => $key->repository]);
+
+        /** @var array{attempt_count: int|string, last_error: ?string}|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'expected exactly one notification ledger row');
+
+        return [
+            'attempt_count' => (int) $row['attempt_count'],
+            'last_error' => $row['last_error'],
+        ];
     }
 }

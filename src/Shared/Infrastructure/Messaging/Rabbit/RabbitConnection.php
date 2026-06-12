@@ -13,6 +13,9 @@ use PhpAmqpLib\Channel\AMQPChannel;
  *   messages unconditionally without a routing key — simpler than topic for a
  *   single DLQ)
  * - Queue `notifications.send-email` — durable, x-dead-letter-exchange: notifications.dlx
+ * - Queue `notifications.send-email.retry` — durable, no consumers; messages
+ *   carry a per-message TTL and dead-letter back into `notifications.send-email`
+ *   via the default exchange (x-dead-letter-routing-key = the work queue name)
  * - Queue `notifications.send-email.dlq` — durable
  * - Binding notifications → notifications.send-email on release.email
  * - Binding notifications.dlx → notifications.send-email.dlq (no routing key)
@@ -24,6 +27,7 @@ final readonly class RabbitConnection
     private const EXCHANGE_NOTIFICATIONS = 'notifications';
     private const EXCHANGE_DLX = 'notifications.dlx';
     private const QUEUE_SEND_EMAIL = 'notifications.send-email';
+    private const QUEUE_SEND_EMAIL_RETRY = 'notifications.send-email.retry';
     private const QUEUE_SEND_EMAIL_DLQ = 'notifications.send-email.dlq';
     private const ROUTING_KEY_RELEASE_EMAIL = 'release.email';
 
@@ -62,6 +66,20 @@ final readonly class RabbitConnection
             false,  // auto_delete
             false,  // nowait
             ['x-dead-letter-exchange' => ['S', self::EXCHANGE_DLX]]
+        );
+        // Retry parking queue: no consumers; expired messages dead-letter back
+        // into the work queue via the default exchange (routing key = queue name).
+        $this->channel->queue_declare(
+            self::QUEUE_SEND_EMAIL_RETRY,
+            false,
+            true,   // durable
+            false,  // exclusive
+            false,  // auto_delete
+            false,  // nowait
+            [
+                'x-dead-letter-exchange' => ['S', ''],
+                'x-dead-letter-routing-key' => ['S', self::QUEUE_SEND_EMAIL],
+            ]
         );
         $this->channel->queue_declare(
             self::QUEUE_SEND_EMAIL_DLQ,
