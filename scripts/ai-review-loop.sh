@@ -411,15 +411,15 @@ parse_status_line() {
   local line
 
   if is_enabled "$require_gate_markers"; then
-    if ! IFS= read -r line < "$file" && [[ -z "$line" ]]; then
-      echo "UNKNOWN"
-      return
-    fi
-    line="${line%$'\r'}"
-    case "$line" in
-      "STATUS: PASS") echo "PASS"; return ;;
-      "STATUS: FAIL") echo "FAIL"; return ;;
-    esac
+    # Scan the full file: the model may write a preamble before STATUS even
+    # when gate markers are required. Use exact matching (no prefix strip).
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      case "$line" in
+        "STATUS: PASS") echo "PASS"; return ;;
+        "STATUS: FAIL") echo "FAIL"; return ;;
+      esac
+    done < "$file"
     echo "UNKNOWN"
     return
   fi
@@ -444,7 +444,7 @@ review_pass_has_zero_issues_line() {
   # Locate the STATUS: PASS line and check the first non-empty line that
   # follows it.  The /review skill may emit a preamble before the status
   # line, so checking the absolute second line of the file is too fragile.
-  status_line_num="$(grep -nm 1 "STATUS: PASS" "$file" | cut -d: -f1)"
+  status_line_num="$(grep -nm 1 "^STATUS: PASS" "$file" | cut -d: -f1)"
   if [[ -n "$status_line_num" ]]; then
     second_line="$(sed -n "$((status_line_num + 1)),\$p" "$file" \
       | sed '/^[[:space:]]*$/d' | head -1)"
@@ -479,7 +479,7 @@ review_pass_has_empty_issues_section() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$is_heading" == "true" ]]; then
       is_heading=false
-      line="$(printf "%s" "$line" | sed 's/\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//;s/^#+[[:space:]]*//;s/^\*\*//;s/^Issues:\*\*[[:space:]]*//;s/^Issues:[[:space:]]*//;s/\*\*[[:space:]]*$//')"
+      line="$(printf "%s" "$line" | sed 's/\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//;s/^#+[[:space:]]*//;s/^\*\*//;s/^Issues:\*\*[[:space:]]*//;s/^Issues:[[:space:]]*//;s/^Issues[[:space:]]*//;s/\*\*[[:space:]]*$//')"
     fi
 
     normalized="$(normalize_issues_content_line "$line")"
@@ -510,7 +510,7 @@ review_required_fixes_are_empty() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$is_heading" == "true" ]]; then
       is_heading=false
-      line="$(printf "%s" "$line" | sed 's/\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//;s/^#+[[:space:]]*//;s/^\*\*//;s/^Required Fixes:\*\*[[:space:]]*//;s/^Required Fixes:[[:space:]]*//;s/\*\*[[:space:]]*$//')"
+      line="$(printf "%s" "$line" | sed 's/\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//;s/^#+[[:space:]]*//;s/^\*\*//;s/^Required Fixes:\*\*[[:space:]]*//;s/^Required Fixes:[[:space:]]*//;s/^Required Fixes[[:space:]]*//;s/\*\*[[:space:]]*$//')"
     fi
 
     normalized="$(normalize_required_fixes_content_line "$line")"
@@ -557,8 +557,8 @@ review_section_content() {
       sub(/^[[:space:]]*\*\*/, "", heading)
       sub(/\*\*[[:space:]]*$/, "", heading)
     }
-    heading ~ "^(#+[[:space:]]*)?" section ":" { in_section = 1; print; next }
-    in_section && heading ~ /^(#+[[:space:]]*)?(Requirement Scorecard|NFR Catalog Scorecard|Expanded Quality Scorecard|System Quality Attributes Scorecard|Whole-Codebase Impact Analysis|Graph Impact Context|Test Case Matrix|Automated Test And CI Coverage|Flaky Test Risk|Manual Test Evidence|QA Verification|GitHub Completion Gate|CI Gate|Issues|Required Fixes):/ { exit }
+    heading ~ "^(#+[[:space:]]*)?" section ":?" { in_section = 1; next }
+    in_section && heading ~ /^(#+[[:space:]]*)?(Requirement Scorecard|NFR Catalog Scorecard|Expanded Quality Scorecard|System Quality Attributes Scorecard|Whole-Codebase Impact Analysis|Graph Impact Context|Test Case Matrix|Automated Test And CI Coverage|Flaky Test Risk|Manual Test Evidence|QA Verification|GitHub Completion Gate|CI Gate|Issues|Required Fixes):?/ { exit }
     in_section { print }
   ' "$file"
 }
@@ -622,6 +622,35 @@ review_section_has_text_with_score() {
         sub(/^[[:space:]]*/, "", normalized)
         sub(/^[-*][[:space:]]*/, "", normalized)
         if (index(normalized, category ":") == 1 && line ~ threshold_regex) {
+          found = 1
+        }
+
+        # Formats 3+4: check heading BEFORE the [-*] prefix strip (which corrupts ** markers).
+        pre_strip = line
+        sub(/\r$/, "", pre_strip)
+        sub(/^[[:space:]]*/, "", pre_strip)
+        heading_check = pre_strip
+        sub(/^\*\*/, "", heading_check)
+        sub(/\*\*[[:space:]]*[:]?[[:space:]]*/, "", heading_check)
+        sub(/^#+[[:space:]]*/, "", heading_check)
+        heading_check_base = heading_check
+        sub(/[[:space:]]:.*$/, "", heading_check_base)
+        heading_check_base = trim(heading_check_base)
+        heading_check = trim(heading_check)
+        # Format 4: **Category**: evidence 5/5 on same line (inline bold + colon + content).
+        if (pre_strip ~ /^\*\*/ && line ~ threshold_regex) {
+          htest = pre_strip
+          sub(/^\*\*/, "", htest)
+          colon_pos = index(htest, "**:")
+          if (colon_pos > 0) {
+            attr_name = trim(substr(htest, 1, colon_pos - 1))
+            if (attr_name == category) { found = 1 }
+          }
+        }
+        # Format 3: **Category** heading on one line, Score: X/5 on a subsequent line.
+        if ((pre_strip ~ /^\*\*[^*].*\*\*[[:space:]]*$/ || pre_strip ~ /^#+[[:space:]]/) && heading_check_base != "") {
+          in_category = (heading_check_base == category)
+        } else if (in_category && (index(normalized, "Score:") == 1 || index(normalized, "score:") == 1) && line ~ threshold_regex) {
           found = 1
         }
 
@@ -873,7 +902,8 @@ review_has_scorecard_evidence() {
   [[ "$required_gate_markers_raw" == *"FLAKY_TEST_RISK: PASS"* ]] && required_sections+=("Flaky Test Risk:")
 
   for section in "${required_sections[@]}"; do
-    if ! grep -Fq -- "$section" "$file"; then
+    local section_base="${section%:}"
+    if ! grep -Fq -- "$section" "$file" && ! grep -Fq -- "$section_base" "$file"; then
       echo "Warning: BMAD PASS output is missing required section: $section" >&2
       return 1
     fi
