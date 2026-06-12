@@ -437,8 +437,18 @@ parse_status_line() {
 review_pass_has_zero_issues_line() {
   local file="$1"
   local second_line
+  local status_line_num
 
-  second_line="$(sed -n '2p' "$file")"
+  # Locate the STATUS: PASS line and check the first non-empty line that
+  # follows it.  The /review skill may emit a preamble before the status
+  # line, so checking the absolute second line of the file is too fragile.
+  status_line_num="$(grep -nm 1 "STATUS: PASS" "$file" | cut -d: -f1)"
+  if [[ -n "$status_line_num" ]]; then
+    second_line="$(sed -n "$((status_line_num + 1)),\$p" "$file" \
+      | sed '/^[[:space:]]*$/d' | head -1)"
+  else
+    second_line="$(sed -n '2p' "$file")"
+  fi
   second_line="${second_line%$'\r'}"
 
   if [[ "$second_line" != "0 issues." ]]; then
