@@ -446,7 +446,8 @@ review_pass_has_zero_issues_line() {
   # Locate the STATUS: PASS line and check the first non-empty line that
   # follows it.  The /review skill may emit a preamble before the status
   # line, so checking the absolute second line of the file is too fragile.
-  status_line_num="$(grep -nm 1 "^STATUS: PASS" "$file" | cut -d: -f1)"
+  # Also match the bold-wrapped variant (**STATUS: PASS**) that some models emit.
+  status_line_num="$(grep -nm 1 "^\*\*STATUS: PASS\*\*$\|^STATUS: PASS$" "$file" | cut -d: -f1)"
   if [[ -n "$status_line_num" ]]; then
     second_line="$(sed -n "$((status_line_num + 1)),\$p" "$file" \
       | sed '/^[[:space:]]*$/d' | head -1)"
@@ -1493,10 +1494,11 @@ run_fix() {
           >"${output_file}.log" 2>&1
       ;;
     claude)
-      "${agent_env[@]}" "$claude_cmd" -p "$prompt" \
-        ${claude_flags[@]+"${claude_flags[@]}"} \
-        --output-format text \
-        >"$output_file" 2>"${output_file}.log"
+      printf "%s" "$prompt" \
+        | "${agent_env[@]}" "$claude_cmd" -p - \
+          ${claude_flags[@]+"${claude_flags[@]}"} \
+          --output-format text \
+          >"$output_file" 2>"${output_file}.log"
       ;;
   esac
 }
