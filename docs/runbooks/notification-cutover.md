@@ -30,7 +30,6 @@ composer lint           # 0 violations
 
 ```bash
 make scanner-smoke      # scanner publishes via RabbitMQ, service delivers
-make resilience-proof   # scenario A + B pass
 ```
 
 ### Step 3 — Apply migration 003

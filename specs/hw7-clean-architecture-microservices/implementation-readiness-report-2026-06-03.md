@@ -39,6 +39,12 @@ overallVerdict: 'Ready-with-conditions'
 > docker-compose claim, a couple of testability gaps, and one naming/contract
 > ambiguity) should be resolved or explicitly accepted before Epic D/E execution.
 
+> **Update (2026-06-15) — NFR3 / AC5 / Story E3 descoped.** The notification-outage
+> *resilience proof* (`bin/resilience-proof.sh`, its CI workflow, and the manual-test
+> evidence under `var/manual-test-evidence/`) was removed. The assessment below is
+> preserved as the original 2026-06-03 snapshot and still references NFR3/AC5/E3 as
+> planned at that date.
+
 ---
 
 ## 1. Document Discovery

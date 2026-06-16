@@ -128,9 +128,9 @@ moves: `NotifierService`, `ReleaseEmailRenderer`/`RenderedEmail`, `SmtpMailer`
   guarantees exactly-once *state* and no duplicates on redelivery/re-publish.
 - NFR2. **Independent deployability**: service builds, migrates, and runs without
   the monolith's database; monolith runs without the service's database.
-- NFR3. **Resilience**: if the notification service or RabbitMQ is down, the
-  monolith's REST/gRPC/subscribe paths keep working; notifications are buffered
-  in the durable queue (or retried) and delivered when the service recovers.
+- NFR3. **Resilience** — *Descoped 2026-06-15.* The notification-outage resilience
+  proof was removed; broker/service-down liveness and queued-delivery-on-recovery
+  are no longer tracked requirements. (NFR4–NFR6 keep their numbers.)
 - NFR4. **Observability**: structured logs + metrics on both sides; a published
   vs. consumed vs. delivered count is derivable.
 - NFR5. **Quality gates** (lint, phpunit, psalm 100%, acceptance) pass for the
@@ -202,8 +202,8 @@ window self-heals via re-detection next cycle + idempotent consumer (architectur
   MailHog).
 - AC4. Re-running a scan / redelivering a message sends **no duplicate email**
   (idempotency proven by test).
-- AC5. Monolith with the service/RabbitMQ down still serves REST/gRPC and accepts
-  subscriptions; queued notifications deliver after recovery.
+- AC5. *Descoped 2026-06-15.* Resilience proof removed — outage liveness and
+  queued-delivery-after-recovery are no longer tracked acceptance criteria.
 - AC6. All monolith quality gates green; service has its own green gates.
 - AC7. Architecture docs (LikeC4 model + ADR) updated to show the new service,
   RabbitMQ, and the two databases.

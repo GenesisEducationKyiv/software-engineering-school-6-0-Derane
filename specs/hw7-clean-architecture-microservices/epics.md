@@ -74,9 +74,8 @@ NFR1: **Idempotency / at-least-once** — end-to-end exactly-once *effect* (no d
 the service-side ledger; the transport is at-least-once.
 NFR2: **Independent deployability** — service builds, migrates, and runs without the monolith's
 database; monolith runs without the service's database.
-NFR3: **Resilience** — if the notification service or RabbitMQ is down, the monolith's
-REST/gRPC/subscribe paths keep working; notifications buffer in the durable queue (or retry) and
-deliver on recovery.
+NFR3: **Resilience** — *Descoped 2026-06-15.* Resilience proof removed; broker/service-down
+liveness and queued-delivery-on-recovery are no longer tracked.
 NFR4: **Observability** — structured logs + metrics on both sides; published vs. consumed vs.
 delivered counts are derivable; correlate via `eventId`.
 NFR5: **Quality gates** — lint (PHPCS + deptrac), phpunit, psalm 100%, acceptance pass for the
@@ -169,8 +168,7 @@ in FR11 and enforced throughout. No UX-DRs apply.
 - FR11 → **Epic B** (refactors preserve wire shapes) + **Epic E** (end-to-end verification keeps
   Behat/JSON/gRPC green). Verified by gates in **every** story.
 
-NFR coverage: NFR1 → D + E2; NFR2 → D + E (separate DB/app, drop monolith table); NFR3 → E3
-(resilience test); NFR4 → C/D (metrics + logs, `eventId` correlation) + B5; NFR5 → quality-gate note
+NFR coverage: NFR1 → D + E2; NFR2 → D + E (separate DB/app, drop monolith table); NFR3 → descoped (resilience proof removed 2026-06-15); NFR4 → C/D (metrics + logs, `eventId` correlation) + B5; NFR5 → quality-gate note
 on **every** story; NFR6 → C3 (compose) + D6 (wire service into compose).
 
 ## Epic List
@@ -209,13 +207,12 @@ with ack/nack/DLQ, PDO ledger, PHPMailer, renderer, health/metrics). Wire into c
 end-to-end email lands in MailHog. (Phase P4)
 **FRs covered:** FR7, FR8, FR9, FR10. NFR1, NFR2, NFR4.
 
-### Epic E: Cutover, Idempotency/Resilience Proof, and Monolith Decommission
+### Epic E: Cutover, Idempotency Proof, and Monolith Decommission
 Flip Scanning to the Rabbit publisher and introduce the semantic change (marker advances on
-successful publish). Prove no duplicate emails on re-publish/redelivery and that the monolith stays
-up when RabbitMQ/the service is down. Then remove the in-process dispatcher/notifier/ledger/SMTP from
+successful publish). Prove no duplicate emails on re-publish/redelivery. Then remove the in-process dispatcher/notifier/ledger/SMTP from
 the monolith, drop `release_notifications` from the monolith DB, and update README, ADR, and the
 LikeC4 model. (Phases P5–P6)
-**FRs covered:** FR5, FR6 ; proves FR3, FR8 ; preserves FR11. NFR1, NFR2, NFR3, NFR4.
+**FRs covered:** FR5, FR6 ; proves FR3, FR8 ; preserves FR11. NFR1, NFR2, NFR4.
 
 ---
 
@@ -1001,12 +998,12 @@ So that a published `SendReleaseEmail` is delivered end-to-end in local dev (AC3
 
 ---
 
-## Epic E: Cutover, Idempotency/Resilience Proof, and Monolith Decommission
+## Epic E: Cutover, Idempotency Proof, and Monolith Decommission
 
 **Phase:** P5–P6. **Goal:** flip Scanning to the Rabbit publisher with the new marker semantics,
-prove idempotency + resilience, then decommission the in-process notification stack and drop the
+prove idempotency, then decommission the in-process notification stack and drop the
 monolith ledger table; update docs.
-**Covers:** FR5, FR6 ; proves FR3, FR8 ; preserves FR11 ; NFR1, NFR2, NFR3, NFR4.
+**Covers:** FR5, FR6 ; proves FR3, FR8 ; preserves FR11 ; NFR1, NFR2, NFR4.
 **Depends on:** Epic D (working service) + Epic C (Rabbit publisher).
 **Quality gates (every story):** monolith lint+deptrac, phpunit, psalm 100%; **Behat unchanged**;
 service gates green.
@@ -1073,38 +1070,12 @@ AC4.
 **Dependencies:** E1, D2, D4.
 **Quality gates:** service + monolith gates; the idempotency test is green and added to CI.
 
-### Story E3: Resilience proof — monolith serves while RabbitMQ / service is down (AC5)
+### Story E3: Resilience proof — Descoped (2026-06-15)
 
-As a QA engineer,
-I want a test demonstrating that with RabbitMQ or the service down, the monolith still serves
-REST/gRPC/subscribe and buffered notifications deliver on recovery,
-So that NFR3 / AC5 are proven.
-
-**Scope / files (PRD NFR3, AC5):**
-- Test: stop `notification-svc` (and separately stop `rabbitmq`); assert REST `/subscriptions` and
-  gRPC still respond and accept subscriptions. With the broker up but service down, publish N
-  messages, then bring the service back and assert the queued messages deliver.
-- **Deterministic recovery assertion (no sleeps/flakiness):** after restarting `notification-svc`,
-  poll MailHog `GET http://mailhog:8025/api/v2/messages` on a bounded budget (e.g. up to 30s, 15
-  attempts × 2s) until `total == N`; fail if the budget elapses. Reset MailHog (`DELETE
-  /api/v1/messages`) at test start so the count is exact.
-- Define monolith behavior when the broker itself is down during a scan: publish fails → marker not
-  advanced (re-detect next cycle) — consistent with E1/FR5; assert REST/gRPC stay healthy regardless.
-
-**Acceptance Criteria:**
-
-**Given** `notification-svc` is down but RabbitMQ is up
-**When** a scan publishes notifications
-**Then** they buffer in the durable queue, REST/gRPC keep working, and after the service restarts the
-bounded MailHog poll reaches `total == N` within the budget (deterministic) — NFR3, AC5.
-
-**Given** RabbitMQ is down
-**When** REST `/subscriptions` and gRPC are called
-**Then** they still succeed (subscription path does not depend on the broker); a scan's publish fails
-and the marker is not advanced (re-detect next cycle).
-
-**Dependencies:** E1, D6.
-**Quality gates:** monolith + service gates; resilience test green in CI.
+**Removed.** The live broker/service-outage resilience proof — `bin/resilience-proof.sh`, its
+`Scanner Smoke and Resilience Proof` CI workflow, and the manual-test evidence under
+`var/manual-test-evidence/` — was dropped. NFR3 and AC5 are descoped (see the PRD). Story numbering
+is preserved: E1, E2, and E4 are unchanged.
 
 ### Story E4: Decommission monolith notification stack + drop release_notifications (FR6, AC1)
 

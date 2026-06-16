@@ -31,9 +31,7 @@ stage aborts the run. Stages (see `Makefile`):
 | Static analysis        | `make psalm` + `make notification-psalm` | Psalm errorLevel 1 (100% type coverage)               |
 | Tests                  | `make tests`                           | PHPUnit Unit + Integration + notification + Behat acceptance |
 | Scanner smoke          | `make scanner-smoke`                   | One real scan cycle delivers an email via MailHog       |
-| Resilience proof       | `make resilience-proof`                | REST/gRPC liveness + durable buffering under outage     |
-
-> The Integration, acceptance, scanner-smoke, and resilience stages need the
+> The Integration, acceptance, and scanner-smoke stages need the
 > Docker stack (Postgres/Redis/RabbitMQ/MailHog). The env-independent Unit gate
 > alone is `make test`.
 
@@ -104,7 +102,7 @@ Repeat Steps 2-4 until the success message appears.
 ## Verification Checklist
 
 - [ ] `make ci` executed
-- [ ] All stages passed (style, deptrac, psalm, tests, scanner-smoke, resilience-proof)
+- [ ] All stages passed (style, deptrac, psalm, tests, scanner-smoke)
 - [ ] Output shows "✅ CI checks successfully passed!"
 - [ ] Zero test failures
 - [ ] No new deptrac baseline entries

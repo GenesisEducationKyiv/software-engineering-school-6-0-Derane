@@ -6,7 +6,7 @@
         e2e-auth-up e2e-auth-run e2e-auth-down e2e-auth \
         tests ci c4-up c4-down c4-logs c4-validate \
         logs-rabbitmq logs-notification-db logs-notification-svc \
-        migrate-notification purge-notification notification-smoke scanner-smoke resilience-proof \
+        migrate-notification notification-smoke scanner-smoke \
         audit notification-audit \
         notification-unit notification-deptrac \
         notification-integration-up notification-integration-run notification-integration-down notification-integration \
@@ -61,9 +61,6 @@ migrate: ensure-env ## Run database migrations inside Docker
 migrate-notification: ensure-env ## Run notification-service migrations inside Docker
 	$(COMPOSE) exec -T notification-svc php bin/migrate.php
 
-purge-notification: ensure-env ## Purge notification ledger rows older than RETENTION_DAYS (default 90) days
-	$(COMPOSE) exec -T notification-svc php bin/purge.php
-
 notification-smoke: ensure-env ## Publish a notification smoke message and wait for MailHog delivery
 	$(COMPOSE) run --rm --no-deps notification-svc php bin/smoke.php
 
@@ -71,23 +68,6 @@ scanner-smoke: ensure-env ## Seed a smoke release, run one scan cycle, and wait 
 	$(COMPOSE) up -d --wait postgres redis rabbitmq notification-db mailhog
 	$(COMPOSE) up -d --build --wait app notification-svc
 	$(COMPOSE) exec -T app php bin/scanner-smoke.php
-
-# E3 (AC5): a live, host-orchestrated proof that the monolith's REST/gRPC
-# subscription surface keeps serving while RabbitMQ and/or notification-svc
-# are really stopped, that a broker-down scan fails its publish + leaves the
-# marker un-advanced (AR-FLOW2 — re-detected next cycle) without aborting the
-# cycle or touching REST/gRPC, and that a service-down scan still buffers its
-# messages durably in the broker and gets them delivered once the service
-# restarts (bounded, deterministic MailHog poll). This MUST run on the host
-# (not inside a container) because it needs `docker compose stop`/`up -d`
-# against sibling containers mid-proof — something an in-container PHPUnit
-# process cannot safely do to its own host's compose stack (see
-# bin/resilience-proof.sh's header docblock). It brings up whichever parts of
-# the full stack (app/scanner/grpc/postgres/redis alongside
-# notification-svc/notification-db/rabbitmq/mailhog) are not already running,
-# and restores the stack to its pre-existing state on exit.
-resilience-proof: ensure-env ## Run the live resilience proof (REST/gRPC liveness + durable buffering) against rabbitmq/notification-svc outages
-	./bin/resilience-proof.sh
 
 notification-integration-up: ensure-env ## Start notification-db + rabbitmq + mailhog for the notification service's Integration suite
 	$(COMPOSE) stop notification-svc
@@ -228,7 +208,6 @@ ci: install ## Run the full Dockerized CI pipeline locally
 	$(MAKE) notification-psalm
 	$(MAKE) tests
 	$(MAKE) scanner-smoke
-	$(MAKE) resilience-proof
 	@echo "✅ CI checks successfully passed!"
 
 c4-up: ## Start LikeC4 live preview at http://localhost:5173

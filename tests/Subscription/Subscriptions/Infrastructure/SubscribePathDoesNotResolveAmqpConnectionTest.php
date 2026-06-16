@@ -12,21 +12,26 @@ use PHPUnit\Framework\TestCase;
 use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
- * NFR3 / AC5 resilience regression lock for the live proof in
- * bin/resilience-proof.sh (Scenario A): POST /api/subscriptions must keep
- * serving while RabbitMQ is down. That holds only because the monolith's
- * subscribe path never resolves the broker publisher — the listener callables
- * in config/container.php (~lines 250-269) are LAZY, so the RabbitMQ publisher /
- * AMQPStreamConnection is constructed solely when a scan dispatches
- * NewReleaseDetected, never while wiring/serving the HTTP subscribe path.
+ * DI lazy-wiring invariant: POST /api/subscriptions must keep serving while
+ * RabbitMQ is down. That holds only because the monolith's subscribe path never
+ * resolves the broker publisher — the listener callables in config/container.php
+ * (~lines 250-269) are LAZY, so the RabbitMQ publisher / AMQPStreamConnection is
+ * constructed solely when a scan dispatches NewReleaseDetected, never while
+ * wiring/serving the HTTP subscribe path.
+ *
+ * Guards a real past regression: an earlier eager listener map built the
+ * publisher (and opened a live AMQPStreamConnection) the instant the
+ * EventDispatcher was resolved, which made POST /api/subscriptions return 500
+ * whenever rabbitmq was down. Keep this green to keep the subscribe path
+ * broker-free.
  *
  * Deterministic by construction — no Docker, DB, broker, DNS or socket:
  * RabbitConnection::class is rebound to a tripwire that throws a distinctive
  * sentinel the instant it is resolved (it stands in for "an AMQP socket was
  * opened"), and the rabbitmq settings point at an unroutable port as defence
- * in depth. The asymmetry the proof relies on is then asserted directly:
- * dispatching SubscriptionCreated never touches the tripwire, while resolving
- * the publisher the NewReleaseDetected listener depends on always does.
+ * in depth. The asymmetry is then asserted directly: dispatching
+ * SubscriptionCreated never touches the tripwire, while resolving the publisher
+ * the NewReleaseDetected listener depends on always does.
  */
 final class SubscribePathDoesNotResolveAmqpConnectionTest extends TestCase
 {

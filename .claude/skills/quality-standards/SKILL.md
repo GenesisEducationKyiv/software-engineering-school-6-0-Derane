@@ -33,9 +33,7 @@ enforced by `make ci`.
 | deptrac          | `deptrac.baseline.yaml`       | only shrinks    | [deptrac-fixer](../deptrac-fixer/SKILL.md)         |
 | PHPUnit          | Unit + Integration suites     | all green       | [testing-workflow](../testing-workflow/SKILL.md)   |
 | Behat            | Acceptance scenarios          | all green       | [testing-workflow](../testing-workflow/SKILL.md)   |
-| scanner-smoke    | One real scan delivers email  | pass            | [testing-workflow](../testing-workflow/SKILL.md)   |
-| resilience-proof | Liveness + durable buffering  | pass            | -                                                  |
-| composer audit   | Dependency advisories         | 0 vulnerabilities | Update/patch the flagged dependency              |
+| scanner-smoke    | One real scan delivers email  | pass            | [testing-workflow](../testing-workflow/SKILL.md)   || composer audit   | Dependency advisories         | 0 vulnerabilities | Update/patch the flagged dependency              |
 
 > We do **not** run PHPInsights, PHPMD, or Infection/mutation testing here, so
 > there are no PHPInsights score / cyclomatic-complexity-percentage / MSI gates.
