@@ -8,7 +8,7 @@ use App\Sending\Application\MessageProcessingStatsRecorder;
 use App\Sending\Application\NotificationInFlightException;
 use App\Sending\Application\SendReleaseEmailHandler;
 use App\Sending\Domain\NotificationLedger;
-use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
+use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use PhpAmqpLib\Message\AMQPMessage;
 use Psr\Log\LoggerInterface;
 
@@ -48,7 +48,7 @@ final readonly class SendReleaseEmailConsumer
     public const MAX_REDELIVERIES = 3;
 
     public function __construct(
-        private RabbitConsumer $consumer,
+        private MessageConsumer $consumer,
         private SendReleaseEmailHandler $handler,
         private SendReleaseEmailMessageMapper $mapper,
         private MessageProcessingStatsRecorder $stats,
@@ -63,13 +63,13 @@ final readonly class SendReleaseEmailConsumer
 
     public function handleDelivery(AMQPMessage $message): void
     {
-        $this->stats->recordConsumed();
+        $this->record(fn() => $this->stats->recordConsumed());
 
         try {
             $releaseEmail = $this->mapper->fromJson($message->getBody());
         } catch (MalformedReleaseEmailMessageException $e) {
             $this->logger->error('Malformed release email message routed to DLQ', ['error' => $e->getMessage()]);
-            $this->stats->recordDlq();
+            $this->record(fn() => $this->stats->recordDlq());
             $this->consumer->nack($message, requeue: false);
             return;
         }
@@ -77,35 +77,48 @@ final readonly class SendReleaseEmailConsumer
         $context = [
             'event_id' => $releaseEmail->eventId,
             'subscription_id' => $releaseEmail->subscriptionId,
-            'repository' => $releaseEmail->repository,
-            'tag' => $releaseEmail->tagName,
+            'repository' => $releaseEmail->repository->value(),
+            'tag' => $releaseEmail->tagName->value(),
         ];
 
         try {
             $this->handler->handle($releaseEmail);
             $this->consumer->ack($message);
         } catch (NotificationInFlightException) {
-            $this->logger->info(
-                'Release email claim held by another worker — parked for the lease window',
-                $context,
-            );
-            $this->stats->recordContention();
+            $this->record(fn() => $this->stats->recordContention());
+            // Log only AFTER the park actually succeeds — a fail-closed
+            // RetryPublishFailedException here must not leave a "parked" log behind.
             $this->consumer->requeueWithoutRetryIncrement(
                 $message,
                 self::RETRY_QUEUE,
                 NotificationLedger::CLAIM_LEASE_SECONDS,
             );
+            $this->logger->info(
+                'Release email claim held by another worker — parked for the lease window',
+                $context,
+            );
         } catch (\Throwable $e) {
-            $this->stats->recordFailed();
+            $this->record(fn() => $this->stats->recordFailed());
             $context['error'] = $e->getMessage();
             if ($this->consumer->shouldRouteToDlq($message, self::MAX_REDELIVERIES)) {
                 $this->logger->error('Release email failed after final retry — routed to DLQ', $context);
-                $this->stats->recordDlq();
+                $this->record(fn() => $this->stats->recordDlq());
                 $this->consumer->nack($message, requeue: false);
             } else {
-                $this->logger->warning('Release email failed — requeued for delayed retry', $context);
+                // Log only AFTER the requeue is confirmed — see the park branch above.
                 $this->consumer->requeueWithRetry($message, self::RETRY_QUEUE);
+                $this->logger->warning('Release email failed — requeued for delayed retry', $context);
             }
+        }
+    }
+
+    /** Metrics are best-effort: a recorder failure must never crash the consume loop. */
+    private function record(callable $record): void
+    {
+        try {
+            $record();
+        } catch (\Throwable $e) {
+            $this->logger->warning('Failed to record consumer metric', ['error' => $e->getMessage()]);
         }
     }
 }

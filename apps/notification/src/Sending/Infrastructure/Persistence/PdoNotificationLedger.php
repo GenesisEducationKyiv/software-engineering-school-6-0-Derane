@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Sending\Infrastructure\Persistence;
 
 use App\Sending\Domain\ClaimResult;
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\NotificationKey;
 use App\Sending\Domain\NotificationLedger;
 
@@ -30,7 +31,7 @@ final readonly class PdoNotificationLedger implements NotificationLedger
     }
 
     #[\Override]
-    public function claim(NotificationKey $key, string $email): ClaimResult
+    public function claim(NotificationKey $key, EmailAddress $email): ClaimResult
     {
         $token = bin2hex(random_bytes(16));
 
@@ -49,9 +50,9 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         ));
         $stmt->execute([
             ':sub' => $key->subscriptionId,
-            ':tag' => $key->tagName,
-            ':repo' => $key->repository,
-            ':email' => $email,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+            ':email' => $email->value(),
             ':token' => $token,
         ]);
 
@@ -63,7 +64,7 @@ final readonly class PdoNotificationLedger implements NotificationLedger
     }
 
     #[\Override]
-    public function markSent(NotificationKey $key, string $email, string $claimToken): void
+    public function markSent(NotificationKey $key, EmailAddress $email, string $claimToken): bool
     {
         $stmt = $this->pdo->prepare(
             'UPDATE release_notifications
@@ -75,16 +76,23 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         );
         $stmt->execute([
             ':sub' => $key->subscriptionId,
-            ':tag' => $key->tagName,
-            ':repo' => $key->repository,
-            ':email' => $email,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+            ':email' => $email->value(),
             ':token' => $claimToken,
         ]);
+
+        // 0 rows ⇒ the token no longer matches (lease taken over) ⇒ fenced.
+        return $stmt->rowCount() > 0;
     }
 
     #[\Override]
-    public function recordFailedAttempt(NotificationKey $key, string $email, string $error, string $claimToken): void
-    {
+    public function recordFailedAttempt(
+        NotificationKey $key,
+        EmailAddress $email,
+        string $error,
+        string $claimToken
+    ): void {
         $stmt = $this->pdo->prepare(
             'UPDATE release_notifications
              SET claimed_at = NULL, claim_token = NULL, email = :email,
@@ -95,9 +103,9 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         );
         $stmt->execute([
             ':sub' => $key->subscriptionId,
-            ':tag' => $key->tagName,
-            ':repo' => $key->repository,
-            ':email' => $email,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+            ':email' => $email->value(),
             ':error' => $error,
             ':token' => $claimToken,
         ]);
@@ -112,8 +120,8 @@ final readonly class PdoNotificationLedger implements NotificationLedger
         );
         $stmt->execute([
             ':sub' => $key->subscriptionId,
-            ':tag' => $key->tagName,
-            ':repo' => $key->repository,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
         ]);
 
         return (int) ($stmt->fetchColumn() ?: 0) > 0;

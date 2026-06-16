@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Tests\Unit\Sending\Infrastructure\Persistence;
 
 use App\Sending\Domain\ClaimOutcome;
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\NotificationKey;
+use App\Sending\Domain\ReleaseTag;
+use App\Sending\Domain\RepositoryName;
 use App\Sending\Infrastructure\Persistence\PdoNotificationLedger;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -34,7 +37,7 @@ final class PdoNotificationLedgerTest extends TestCase
 
     private function key(): NotificationKey
     {
-        return new NotificationKey(42, 'v2.0.0', 'acme/app');
+        return new NotificationKey(42, new ReleaseTag('v2.0.0'), new RepositoryName('acme/app'));
     }
 
     public function testClaimReturnsClaimedWithTheStoredFencingTokenWhenTheUpsertReturnsARow(): void
@@ -56,7 +59,7 @@ final class PdoNotificationLedgerTest extends TestCase
             });
         $this->stmt->method('fetchColumn')->willReturn('7');
 
-        $result = $this->ledger->claim($this->key(), 'alice@example.com');
+        $result = $this->ledger->claim($this->key(), new EmailAddress('alice@example.com'));
 
         self::assertSame(ClaimOutcome::Claimed, $result->outcome);
         self::assertSame(42, $executedParams[':sub']);
@@ -80,7 +83,7 @@ final class PdoNotificationLedgerTest extends TestCase
 
         $this->pdo->method('prepare')->willReturnOnConsecutiveCalls($claimStmt, $sentStmt);
 
-        $result = $this->ledger->claim($this->key(), 'alice@example.com');
+        $result = $this->ledger->claim($this->key(), new EmailAddress('alice@example.com'));
 
         self::assertSame(ClaimOutcome::AlreadySent, $result->outcome);
     }
@@ -97,7 +100,7 @@ final class PdoNotificationLedgerTest extends TestCase
 
         $this->pdo->method('prepare')->willReturnOnConsecutiveCalls($claimStmt, $sentStmt);
 
-        $result = $this->ledger->claim($this->key(), 'alice@example.com');
+        $result = $this->ledger->claim($this->key(), new EmailAddress('alice@example.com'));
 
         self::assertSame(ClaimOutcome::InFlight, $result->outcome);
         $this->expectException(\LogicException::class);
@@ -116,7 +119,7 @@ final class PdoNotificationLedgerTest extends TestCase
         $this->stmt->method('execute')->willReturn(true);
         $this->stmt->method('fetchColumn')->willReturn('7');
 
-        $this->ledger->claim($this->key(), 'alice@example.com');
+        $this->ledger->claim($this->key(), new EmailAddress('alice@example.com'));
 
         self::assertStringContainsString('sent_at IS NULL', $capturedSql);
         self::assertStringContainsString('claimed_at IS NULL', $capturedSql);
@@ -144,7 +147,7 @@ final class PdoNotificationLedgerTest extends TestCase
             ])
             ->willReturn(true);
 
-        $this->ledger->markSent($this->key(), 'alice@example.com', 'fence-token');
+        $this->ledger->markSent($this->key(), new EmailAddress('alice@example.com'), 'fence-token');
 
         self::assertStringContainsString('sent_at = NOW()', $capturedSql);
         self::assertStringContainsString('claimed_at = NULL', $capturedSql);
@@ -176,7 +179,12 @@ final class PdoNotificationLedgerTest extends TestCase
             ])
             ->willReturn(true);
 
-        $this->ledger->recordFailedAttempt($this->key(), 'alice@example.com', 'SMTP timeout', 'fence-token');
+        $this->ledger->recordFailedAttempt(
+            $this->key(),
+            new EmailAddress('alice@example.com'),
+            'SMTP timeout',
+            'fence-token',
+        );
 
         self::assertStringContainsString('claimed_at = NULL', $capturedSql);
         self::assertStringContainsString('claim_token = NULL', $capturedSql);

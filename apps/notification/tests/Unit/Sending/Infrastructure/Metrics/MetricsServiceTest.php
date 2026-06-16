@@ -29,6 +29,7 @@ final class MetricsServiceTest extends TestCase
         $this->reader->method('failedCount')->willReturn(2);
         $this->reader->method('contentionCount')->willReturn(5);
         $this->reader->method('dlqCount')->willReturn(1);
+        $this->reader->method('supersededCount')->willReturn(4);
 
         $service = new MetricsService($this->reader, new PrometheusFormatter());
         $output = $service->collect();
@@ -39,5 +40,6 @@ final class MetricsServiceTest extends TestCase
         self::assertStringContainsString('notification_failed_total 2', $output);
         self::assertStringContainsString('notification_contention_total 5', $output);
         self::assertStringContainsString('notification_dlq_total 1', $output);
+        self::assertStringContainsString('notification_superseded_total 4', $output);
     }
 }

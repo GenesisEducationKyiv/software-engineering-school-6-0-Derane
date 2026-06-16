@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Tests\Integration\Sending\Infrastructure;
 
 use App\Sending\Domain\ClaimOutcome;
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\NotificationKey;
 use App\Sending\Domain\NotificationLedger;
+use App\Sending\Domain\ReleaseTag;
+use App\Sending\Domain\RepositoryName;
 use PDO;
 use Tests\Integration\IntegrationTestCase;
 
@@ -30,15 +33,19 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
 
     private function key(): NotificationKey
     {
-        return new NotificationKey(7001, 'v1.0.0-' . bin2hex(random_bytes(4)), 'claim/proof-repo');
+        return new NotificationKey(
+            7001,
+            new ReleaseTag('v1.0.0-' . bin2hex(random_bytes(4))),
+            new RepositoryName('claim/proof-repo'),
+        );
     }
 
     public function testSecondClaimerLosesWhileTheFirstClaimIsLive(): void
     {
         $key = $this->key();
 
-        $first = $this->ledger->claim($key, 'a@example.test');
-        $second = $this->ledger->claim($key, 'b@example.test');
+        $first = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        $second = $this->ledger->claim($key, new EmailAddress('b@example.test'));
 
         self::assertSame(ClaimOutcome::Claimed, $first->outcome);
         self::assertSame(ClaimOutcome::InFlight, $second->outcome);
@@ -49,10 +56,10 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $claim = $this->ledger->claim($key, 'a@example.test');
-        $this->ledger->recordFailedAttempt($key, 'a@example.test', 'SMTP timeout', $claim->token());
+        $claim = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        $this->ledger->recordFailedAttempt($key, new EmailAddress('a@example.test'), 'SMTP timeout', $claim->token());
 
-        $retry = $this->ledger->claim($key, 'a@example.test');
+        $retry = $this->ledger->claim($key, new EmailAddress('a@example.test'));
 
         self::assertSame(ClaimOutcome::Claimed, $retry->outcome);
         self::assertNotSame($claim->token(), $retry->token(), 'a re-claim must mint a fresh fencing token');
@@ -62,16 +69,16 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $failed = $this->ledger->claim($key, 'a@example.test');
-        $this->ledger->recordFailedAttempt($key, 'a@example.test', 'SMTP timeout', $failed->token());
+        $failed = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        $this->ledger->recordFailedAttempt($key, new EmailAddress('a@example.test'), 'SMTP timeout', $failed->token());
 
         self::assertSame(
             ['attempt_count' => 1, 'last_error' => 'SMTP timeout'],
             $this->attemptStateFor($key)
         );
 
-        $sent = $this->ledger->claim($key, 'a@example.test');
-        $this->ledger->markSent($key, 'a@example.test', $sent->token());
+        $sent = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        $this->ledger->markSent($key, new EmailAddress('a@example.test'), $sent->token());
 
         self::assertSame(
             ['attempt_count' => 2, 'last_error' => null],
@@ -83,10 +90,11 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $claim = $this->ledger->claim($key, 'a@example.test');
-        $this->ledger->markSent($key, 'a@example.test', $claim->token());
+        $claim = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        $this->ledger->markSent($key, new EmailAddress('a@example.test'), $claim->token());
 
-        self::assertSame(ClaimOutcome::AlreadySent, $this->ledger->claim($key, 'a@example.test')->outcome);
+        $repeat = $this->ledger->claim($key, new EmailAddress('a@example.test'));
+        self::assertSame(ClaimOutcome::AlreadySent, $repeat->outcome);
         self::assertSame(1, $this->rowCountFor($key));
     }
 
@@ -94,12 +102,12 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $abandoned = $this->ledger->claim($key, 'a@example.test');
+        $abandoned = $this->ledger->claim($key, new EmailAddress('a@example.test'));
         self::assertSame(ClaimOutcome::Claimed, $abandoned->outcome);
 
         $this->backdateClaim($key, NotificationLedger::CLAIM_LEASE_SECONDS + 60);
 
-        $takeover = $this->ledger->claim($key, 'a@example.test');
+        $takeover = $this->ledger->claim($key, new EmailAddress('a@example.test'));
 
         self::assertSame(ClaimOutcome::Claimed, $takeover->outcome);
         self::assertNotSame($abandoned->token(), $takeover->token());
@@ -109,22 +117,22 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $stalled = $this->ledger->claim($key, 'a@example.test');
+        $stalled = $this->ledger->claim($key, new EmailAddress('a@example.test'));
         $this->backdateClaim($key, NotificationLedger::CLAIM_LEASE_SECONDS + 60);
-        $takeover = $this->ledger->claim($key, 'a@example.test');
+        $takeover = $this->ledger->claim($key, new EmailAddress('a@example.test'));
 
         // The stalled worker resumes and reports late — must be a no-op.
-        $this->ledger->markSent($key, 'a@example.test', $stalled->token());
+        $this->ledger->markSent($key, new EmailAddress('a@example.test'), $stalled->token());
 
         self::assertNull($this->sentAtFor($key), 'a fenced markSent must not flip the row to sent');
         self::assertSame(
             ClaimOutcome::InFlight,
-            $this->ledger->claim($key, 'b@example.test')->outcome,
+            $this->ledger->claim($key, new EmailAddress('b@example.test'))->outcome,
             'the takeover claim must still be live after the fenced write',
         );
 
         // The legitimate holder's write still applies.
-        $this->ledger->markSent($key, 'a@example.test', $takeover->token());
+        $this->ledger->markSent($key, new EmailAddress('a@example.test'), $takeover->token());
         self::assertNotNull($this->sentAtFor($key));
     }
 
@@ -132,15 +140,15 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
     {
         $key = $this->key();
 
-        $stalled = $this->ledger->claim($key, 'a@example.test');
+        $stalled = $this->ledger->claim($key, new EmailAddress('a@example.test'));
         $this->backdateClaim($key, NotificationLedger::CLAIM_LEASE_SECONDS + 60);
-        $this->ledger->claim($key, 'a@example.test');
+        $this->ledger->claim($key, new EmailAddress('a@example.test'));
 
-        $this->ledger->recordFailedAttempt($key, 'a@example.test', 'late failure', $stalled->token());
+        $this->ledger->recordFailedAttempt($key, new EmailAddress('a@example.test'), 'late failure', $stalled->token());
 
         self::assertSame(
             ClaimOutcome::InFlight,
-            $this->ledger->claim($key, 'b@example.test')->outcome,
+            $this->ledger->claim($key, new EmailAddress('b@example.test'))->outcome,
             'a fenced failure report must not free the live claim',
         );
     }
@@ -155,8 +163,8 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
         $stmt->execute([
             ':secs' => $seconds,
             ':sub' => $key->subscriptionId,
-            ':tag' => $key->tagName,
-            ':repo' => $key->repository,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
         ]);
         self::assertSame(1, $stmt->rowCount(), 'expected exactly one claim row to backdate');
     }
@@ -167,7 +175,11 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
             'SELECT COUNT(*) FROM release_notifications
              WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo'
         );
-        $stmt->execute([':sub' => $key->subscriptionId, ':tag' => $key->tagName, ':repo' => $key->repository]);
+        $stmt->execute([
+            ':sub' => $key->subscriptionId,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+        ]);
 
         return (int) ($stmt->fetchColumn() ?: 0);
     }
@@ -178,7 +190,11 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
             'SELECT sent_at FROM release_notifications
              WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo'
         );
-        $stmt->execute([':sub' => $key->subscriptionId, ':tag' => $key->tagName, ':repo' => $key->repository]);
+        $stmt->execute([
+            ':sub' => $key->subscriptionId,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+        ]);
 
         $value = $stmt->fetchColumn();
 
@@ -193,7 +209,11 @@ final class PdoNotificationLedgerClaimTest extends IntegrationTestCase
              FROM release_notifications
              WHERE subscription_id = :sub AND tag_name = :tag AND repository = :repo'
         );
-        $stmt->execute([':sub' => $key->subscriptionId, ':tag' => $key->tagName, ':repo' => $key->repository]);
+        $stmt->execute([
+            ':sub' => $key->subscriptionId,
+            ':tag' => $key->tagName->value(),
+            ':repo' => $key->repository->value(),
+        ]);
 
         /** @var array{attempt_count: int|string, last_error: ?string}|false $row */
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

@@ -32,14 +32,24 @@ interface NotificationLedger
      */
     public const CLAIM_LEASE_SECONDS = 300;
 
-    public function claim(NotificationKey $key, string $email): ClaimResult;
+    public function claim(NotificationKey $key, EmailAddress $email): ClaimResult;
 
-    /** Mark a claimed notification as delivered; a stale token is a fenced no-op. */
-    public function markSent(NotificationKey $key, string $email, string $claimToken): void;
+    /**
+     * Mark a claimed notification as delivered. Returns true when the row was
+     * updated; returns false when the presented token no longer matches the row
+     * — a fenced no-op, meaning this worker's lease expired and another worker
+     * took over the claim, so this worker's send was a superseded duplicate.
+     */
+    public function markSent(NotificationKey $key, EmailAddress $email, string $claimToken): bool;
 
     /**
      * Record a failed attempt and release the claim so a redelivery can
      * retry; a stale token is a fenced no-op.
      */
-    public function recordFailedAttempt(NotificationKey $key, string $email, string $error, string $claimToken): void;
+    public function recordFailedAttempt(
+        NotificationKey $key,
+        EmailAddress $email,
+        string $error,
+        string $claimToken
+    ): void;
 }

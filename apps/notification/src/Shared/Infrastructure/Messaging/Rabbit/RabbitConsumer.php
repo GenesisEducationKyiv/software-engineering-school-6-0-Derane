@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Messaging\Rabbit;
 
+use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
 
@@ -41,12 +42,25 @@ use PhpAmqpLib\Wire\AMQPTable;
  *
  * @psalm-api
  */
-final readonly class RabbitConsumer
+final readonly class RabbitConsumer implements MessageConsumer
 {
     private const RETRY_HEADER = 'x-retry-count';
 
     /** First retry delay; doubles with each subsequent attempt (5s, 10s, 20s…). */
     private const BASE_RETRY_DELAY_SECONDS = 5;
+
+    /** Per-publish broker-confirm wait for the retry/park copy. */
+    private const CONFIRM_TIMEOUT_SECONDS = 5.0;
+
+    /**
+     * Bounded prefetch: the broker hands at most this many unacked messages to
+     * one consumer at a time. Without it the whole queue is pushed into the
+     * worker's socket buffer on startup/backlog, and each claim-contended
+     * message that parks triggers a retry-queue republish — turning a burst
+     * into an unbounded memory + confirm round-trip storm. A small window keeps
+     * memory flat and lets multiple workers share the load fairly.
+     */
+    private const PREFETCH_COUNT = 10;
 
     public function __construct(private RabbitConnection $connection)
     {
@@ -55,9 +69,12 @@ final readonly class RabbitConsumer
     /**
      * @param callable(AMQPMessage): void $callback
      */
+    #[\Override]
     public function consume(string $queue, callable $callback): void
     {
-        $this->connection->channel()->basic_consume(
+        $channel = $this->connection->channel();
+        $channel->basic_qos(0, self::PREFETCH_COUNT, false);
+        $channel->basic_consume(
             $queue,
             '',
             false,
@@ -68,11 +85,13 @@ final readonly class RabbitConsumer
         );
     }
 
+    #[\Override]
     public function ack(AMQPMessage $message): void
     {
         $message->ack();
     }
 
+    #[\Override]
     public function nack(AMQPMessage $message, bool $requeue): void
     {
         $message->nack($requeue);
@@ -84,6 +103,7 @@ final readonly class RabbitConsumer
      * Original message properties (content_type, …) are preserved; only the
      * retry header, persistence and the per-message TTL are overridden.
      */
+    #[\Override]
     public function requeueWithRetry(AMQPMessage $message, string $retryQueue): void
     {
         $newCount = $this->retryCountFor($message) + 1;
@@ -100,6 +120,7 @@ final readonly class RabbitConsumer
      * only happens on claim contention, which needs a concurrent worker or
      * a crashed predecessor to occur at all.
      */
+    #[\Override]
     public function requeueWithoutRetryIncrement(AMQPMessage $message, string $retryQueue, int $delaySeconds): void
     {
         $this->republishDelayed($message, $retryQueue, $this->retryCountFor($message), $delaySeconds);
@@ -111,19 +132,6 @@ final readonly class RabbitConsumer
         int $retryCount,
         int $delaySeconds
     ): void {
-        $channel = $this->connection->channel();
-        $channel->confirm_select();
-        // Must register the nack handler BEFORE publishing. In php-amqplib,
-        // wait_for_pending_acks() removes nacked messages from its tracking
-        // map and calls the nack_handler — it does NOT throw on its own.
-        // Without this handler, a broker nack silently completes the wait and
-        // the original is acked, dropping the notification permanently.
-        $channel->set_nack_handler(function (): void {
-            throw new \RuntimeException(
-                'Broker nacked retry publish — original message remains unacked for redelivery.',
-            );
-        });
-
         $properties = $message->get_properties();
         $properties['application_headers'] = new AMQPTable(
             array_merge($this->applicationHeadersOf($message), [self::RETRY_HEADER => $retryCount]),
@@ -131,15 +139,46 @@ final readonly class RabbitConsumer
         $properties['delivery_mode'] = 2;
         $properties['expiration'] = (string) ($delaySeconds * 1000);
 
-        $channel->basic_publish(
-            new AMQPMessage($message->getBody(), $properties),
-            '',
-            $retryQueue,
-        );
-        $channel->wait_for_pending_acks(5.0);
+        $connection = $this->connection->channel()->getConnection();
+        if ($connection === null) {
+            // No live connection to publish the copy on. Fail closed: do NOT ack
+            // the original — it stays unacked for redelivery.
+            throw RetryPublishFailedException::noConnection($retryQueue);
+        }
+
+        // Publish the delayed copy on a DEDICATED confirm-mode channel so the
+        // long-lived consume channel is never flipped into publisher-confirm mode
+        // nor has its deliveries buffered behind this confirm-wait.
+        $publishChannel = $connection->channel();
+        try {
+            $publishChannel->confirm_select();
+            // Register the nack handler BEFORE publishing: wait_for_pending_acks()
+            // invokes it on a broker nack rather than throwing, so without it a
+            // nacked copy would be treated as confirmed and the original acked —
+            // dropping the notification permanently. Throwing keeps it unacked.
+            $publishChannel->set_nack_handler(static function () use ($retryQueue): void {
+                throw RetryPublishFailedException::brokerNacked($retryQueue);
+            });
+            $publishChannel->basic_publish(new AMQPMessage($message->getBody(), $properties), '', $retryQueue);
+            $publishChannel->wait_for_pending_acks(self::CONFIRM_TIMEOUT_SECONDS);
+        } catch (AMQPTimeoutException $e) {
+            // Broker did not confirm in time (slow but alive — the exact case the
+            // retry machinery exists to survive). Fail closed: do NOT ack the
+            // original. A dedicated exception type stops the consumer poll loop
+            // from swallowing this as an idle-poll timeout.
+            throw RetryPublishFailedException::confirmTimedOut($retryQueue, self::CONFIRM_TIMEOUT_SECONDS, $e);
+        } finally {
+            try {
+                $publishChannel->close();
+            } catch (\Throwable) {
+                // best-effort close; the connection may already be gone
+            }
+        }
+
         $message->ack();
     }
 
+    #[\Override]
     public function shouldRouteToDlq(AMQPMessage $message, int $maxRedeliveries): bool
     {
         return $this->retryCountFor($message) >= $maxRedeliveries;

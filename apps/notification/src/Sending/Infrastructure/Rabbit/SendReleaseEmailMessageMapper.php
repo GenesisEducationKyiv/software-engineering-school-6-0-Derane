@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Sending\Infrastructure\Rabbit;
 
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\ReleaseEmail;
+use App\Sending\Domain\ReleaseTag;
+use App\Sending\Domain\RepositoryName;
 
 /**
  * Maps a `SendReleaseEmail/v1` wire-format JSON message body to a `ReleaseEmail`.
@@ -49,16 +52,44 @@ final readonly class SendReleaseEmailMessageMapper
 
         $release = $this->requireObject($payload, 'release');
 
+        // Extract every primitive first (these throw MalformedReleaseEmailMessageException
+        // and propagate), preserving field evaluation order, so the only code inside the
+        // value-object try below is VO construction — a future bug elsewhere in this
+        // method can never be silently reclassified as a poison message.
+        $eventId = $this->requireString($payload, 'eventId');
+        $subscriptionId = $this->requireInt($payload, 'subscriptionId');
+        $email = $this->requireString($payload, 'email');
+        $repository = $this->requireString($payload, 'repository');
+        $tagName = $this->requireString($release, 'release.tagName', 'tagName');
+        $releaseName = $this->requireString($release, 'release.name', 'name');
+        $releaseBody = $this->optionalString($release, 'body');
+        $releaseUrl = $this->requireHttpUrl($release, 'release.htmlUrl', 'htmlUrl');
+        $publishedAt = $this->requireString($release, 'release.publishedAt', 'publishedAt');
+
+        // A self-validating VO rejecting a present-but-invalid value (bad email,
+        // malformed repo, empty tag) is just another flavour of poison message —
+        // translate ONLY that to MalformedReleaseEmailMessageException.
+        try {
+            $recipientEmail = new EmailAddress($email);
+            $repositoryName = new RepositoryName($repository);
+            $releaseTag = new ReleaseTag($tagName);
+        } catch (\InvalidArgumentException $e) {
+            throw new MalformedReleaseEmailMessageException(
+                'SendReleaseEmail/v1 message has an invalid field: ' . $e->getMessage(),
+                previous: $e,
+            );
+        }
+
         return new ReleaseEmail(
-            eventId: $this->requireString($payload, 'eventId'),
-            subscriptionId: $this->requireInt($payload, 'subscriptionId'),
-            recipientEmail: $this->requireString($payload, 'email'),
-            repository: $this->requireString($payload, 'repository'),
-            tagName: $this->requireString($release, 'release.tagName', 'tagName'),
-            releaseName: $this->requireString($release, 'release.name', 'name'),
-            releaseBody: $this->optionalString($release, 'body'),
-            releaseUrl: $this->requireHttpUrl($release, 'release.htmlUrl', 'htmlUrl'),
-            publishedAt: $this->requireString($release, 'release.publishedAt', 'publishedAt'),
+            eventId: $eventId,
+            subscriptionId: $subscriptionId,
+            recipientEmail: $recipientEmail,
+            repository: $repositoryName,
+            tagName: $releaseTag,
+            releaseName: $releaseName,
+            releaseBody: $releaseBody,
+            releaseUrl: $releaseUrl,
+            publishedAt: $publishedAt,
         );
     }
 

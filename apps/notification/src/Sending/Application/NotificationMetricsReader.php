@@ -17,4 +17,6 @@ interface NotificationMetricsReader
     public function contentionCount(): int;
 
     public function dlqCount(): int;
+
+    public function supersededCount(): int;
 }

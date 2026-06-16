@@ -12,7 +12,7 @@ final readonly class PrometheusFormatter
         $output = '';
         foreach ($metrics as $metric) {
             $output .= "# HELP {$metric->name} {$metric->help}\n";
-            $output .= "# TYPE {$metric->name} {$metric->type}\n";
+            $output .= "# TYPE {$metric->name} {$metric->type->value}\n";
             $output .= $this->formatSample($metric);
         }
 

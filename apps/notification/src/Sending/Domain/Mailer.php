@@ -6,5 +6,5 @@ namespace App\Sending\Domain;
 
 interface Mailer
 {
-    public function send(string $toEmail, RenderedEmail $rendered): void;
+    public function send(EmailAddress $toEmail, RenderedEmail $rendered): void;
 }

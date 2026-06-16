@@ -8,12 +8,15 @@ use App\Sending\Application\NotificationInFlightException;
 use App\Sending\Application\SendReleaseEmailHandler;
 use App\Sending\Application\DeliveryOutcomeRecorder;
 use App\Sending\Domain\ClaimResult;
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
 use App\Sending\Domain\NotificationKey;
 use App\Sending\Domain\NotificationLedger;
 use App\Sending\Domain\ReleaseEmail;
+use App\Sending\Domain\ReleaseTag;
 use App\Sending\Domain\RenderedEmail;
+use App\Sending\Domain\RepositoryName;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -42,9 +45,9 @@ final class SendReleaseEmailHandlerTest extends TestCase
         return new ReleaseEmail(
             eventId: '11111111-1111-4111-8111-111111111111',
             subscriptionId: 42,
-            recipientEmail: 'subscriber@example.com',
-            repository: 'owner/repo',
-            tagName: 'v1.2.3',
+            recipientEmail: $this->recipient(),
+            repository: new RepositoryName('owner/repo'),
+            tagName: new ReleaseTag('v1.2.3'),
             releaseName: 'Release name',
             releaseBody: 'Release description text.',
             releaseUrl: 'https://github.com/owner/repo/releases/tag/v1.2.3',
@@ -54,7 +57,12 @@ final class SendReleaseEmailHandlerTest extends TestCase
 
     private function key(): NotificationKey
     {
-        return new NotificationKey(42, 'v1.2.3', 'owner/repo');
+        return new NotificationKey(42, new ReleaseTag('v1.2.3'), new RepositoryName('owner/repo'));
+    }
+
+    private function recipient(): EmailAddress
+    {
+        return new EmailAddress('subscriber@example.com');
     }
 
     public function testSkipsAlreadySentEmailAsDedupe(): void
@@ -63,7 +71,7 @@ final class SendReleaseEmailHandlerTest extends TestCase
 
         $this->ledger->expects(self::once())
             ->method('claim')
-            ->with($this->key(), 'subscriber@example.com')
+            ->with($this->key(), $this->recipient())
             ->willReturn(ClaimResult::alreadySent());
 
         $this->renderer->expects(self::never())->method('render');
@@ -102,7 +110,7 @@ final class SendReleaseEmailHandlerTest extends TestCase
 
         $this->ledger->expects(self::once())
             ->method('claim')
-            ->with($this->key(), 'subscriber@example.com')
+            ->with($this->key(), $this->recipient())
             ->willReturn(ClaimResult::claimed(self::CLAIM_TOKEN));
 
         $this->renderer->expects(self::once())
@@ -112,12 +120,40 @@ final class SendReleaseEmailHandlerTest extends TestCase
 
         $this->mailer->expects(self::once())
             ->method('send')
-            ->with('subscriber@example.com', $rendered);
+            ->with($this->recipient(), $rendered);
 
         $this->ledger->expects(self::once())
             ->method('markSent')
-            ->with($this->key(), 'subscriber@example.com', self::CLAIM_TOKEN);
+            ->with($this->key(), $this->recipient(), self::CLAIM_TOKEN)
+            ->willReturn(true);
         $this->outcomes->expects(self::once())->method('recordDelivered');
+        $this->outcomes->expects(self::never())->method('recordDeduped');
+        $this->outcomes->expects(self::never())->method('recordSuperseded');
+
+        $this->handler->handle($email);
+    }
+
+    public function testRecordsSupersededWhenMarkSentIsFenced(): void
+    {
+        $email = $this->email();
+        $rendered = new RenderedEmail('New Release: owner/repo v1.2.3', '<p>html</p>', 'text');
+
+        $this->ledger->method('claim')->willReturn(ClaimResult::claimed(self::CLAIM_TOKEN));
+        $this->renderer->method('render')->willReturn($rendered);
+        $this->mailer->expects(self::once())
+            ->method('send')
+            ->with($this->recipient(), $rendered);
+
+        // Lease taken over mid-send: markSent matches no row (fenced no-op).
+        $this->ledger->expects(self::once())
+            ->method('markSent')
+            ->with($this->key(), $this->recipient(), self::CLAIM_TOKEN)
+            ->willReturn(false);
+
+        // The send still happened (a superseded duplicate), so it is counted as
+        // superseded — never as a fresh delivery.
+        $this->outcomes->expects(self::once())->method('recordSuperseded');
+        $this->outcomes->expects(self::never())->method('recordDelivered');
         $this->outcomes->expects(self::never())->method('recordDeduped');
 
         $this->handler->handle($email);
@@ -137,7 +173,7 @@ final class SendReleaseEmailHandlerTest extends TestCase
 
         $this->ledger->expects(self::once())
             ->method('recordFailedAttempt')
-            ->with($this->key(), 'subscriber@example.com', 'SMTP timeout', self::CLAIM_TOKEN);
+            ->with($this->key(), $this->recipient(), 'SMTP timeout', self::CLAIM_TOKEN);
 
         $this->ledger->expects(self::never())->method('markSent');
         $this->outcomes->expects(self::never())->method('recordDelivered');

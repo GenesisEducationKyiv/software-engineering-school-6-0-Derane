@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Sending\Infrastructure\Mail;
 
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\ReleaseEmail;
+use App\Sending\Domain\ReleaseTag;
+use App\Sending\Domain\RepositoryName;
 use App\Sending\Infrastructure\Mail\ReleaseEmailRenderer;
 use PHPUnit\Framework\TestCase;
 
@@ -23,9 +26,9 @@ final class ReleaseEmailRendererTest extends TestCase
         return new ReleaseEmail(
             eventId: '11111111-1111-4111-8111-111111111111',
             subscriptionId: 42,
-            recipientEmail: 'subscriber@example.com',
-            repository: 'owner/repo',
-            tagName: 'v1.2.3',
+            recipientEmail: new EmailAddress('subscriber@example.com'),
+            repository: new RepositoryName('owner/repo'),
+            tagName: new ReleaseTag('v1.2.3'),
             releaseName: 'Shiny New Release',
             releaseBody: 'This release fixes several bugs and adds new features.',
             releaseUrl: 'https://github.com/owner/repo/releases/tag/v1.2.3',
@@ -72,13 +75,16 @@ final class ReleaseEmailRendererTest extends TestCase
 
     public function testEscapesHtmlSpecialCharactersInHtmlBody(): void
     {
+        // repository/tagName are now format-constrained value objects and cannot
+        // carry HTML, so the only free-text attack surface is the release name and
+        // body — assert those are escaped.
         $email = new ReleaseEmail(
             eventId: '11111111-1111-4111-8111-111111111111',
             subscriptionId: 1,
-            recipientEmail: 'a@b.c',
-            repository: '<script>alert(1)</script>',
-            tagName: 'v1',
-            releaseName: 'Name & "Quotes"',
+            recipientEmail: new EmailAddress('a@b.c'),
+            repository: new RepositoryName('owner/repo'),
+            tagName: new ReleaseTag('v1'),
+            releaseName: '<script>alert(1)</script>',
             releaseBody: '<b>bold</b> & notes',
             releaseUrl: 'https://example.com/?a=1&b=2',
             publishedAt: '2026-06-07T11:00:00+00:00',

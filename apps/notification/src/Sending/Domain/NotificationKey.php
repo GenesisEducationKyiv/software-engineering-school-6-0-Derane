@@ -14,8 +14,8 @@ final readonly class NotificationKey
 {
     public function __construct(
         public int $subscriptionId,
-        public string $tagName,
-        public string $repository,
+        public ReleaseTag $tagName,
+        public RepositoryName $repository,
     ) {
     }
 }

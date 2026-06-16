@@ -48,7 +48,17 @@ final readonly class SendReleaseEmailHandler
             throw $e;
         }
 
-        $this->ledger->markSent($key, $email->recipientEmail, $claim->token());
-        $this->outcomes->recordDelivered();
+        if ($this->ledger->markSent($key, $email->recipientEmail, $claim->token())) {
+            $this->outcomes->recordDelivered();
+
+            return;
+        }
+
+        // Fenced: our lease was taken over mid-send, so the email we just sent is
+        // a superseded duplicate — the new claim holder owns the ledger row and
+        // records its own delivery. Count it separately rather than inflating
+        // delivered_total. Returning normally still acks; retrying would only
+        // send a third copy.
+        $this->outcomes->recordSuperseded();
     }
 }

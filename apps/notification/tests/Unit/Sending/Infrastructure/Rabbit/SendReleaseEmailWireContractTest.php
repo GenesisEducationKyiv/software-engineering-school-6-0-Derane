@@ -24,9 +24,9 @@ final class SendReleaseEmailWireContractTest extends TestCase
 
         self::assertSame('11111111-2222-4333-8444-555555555555', $email->eventId);
         self::assertSame(123, $email->subscriptionId);
-        self::assertSame('user@example.com', $email->recipientEmail);
-        self::assertSame('owner/repo', $email->repository);
-        self::assertSame('v1.2.3', $email->tagName);
+        self::assertSame('user@example.com', $email->recipientEmail->value());
+        self::assertSame('owner/repo', $email->repository->value());
+        self::assertSame('v1.2.3', $email->tagName->value());
         self::assertSame('Release v1.2.3', $email->releaseName);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
         self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);

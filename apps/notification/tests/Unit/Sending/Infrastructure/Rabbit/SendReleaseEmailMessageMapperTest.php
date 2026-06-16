@@ -42,9 +42,9 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
 
         self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
         self::assertSame(42, $email->subscriptionId);
-        self::assertSame('subscriber@example.com', $email->recipientEmail);
-        self::assertSame('owner/repo', $email->repository);
-        self::assertSame('v1.2.3', $email->tagName);
+        self::assertSame('subscriber@example.com', $email->recipientEmail->value());
+        self::assertSame('owner/repo', $email->repository->value());
+        self::assertSame('v1.2.3', $email->tagName->value());
         self::assertSame('Release name', $email->releaseName);
         self::assertSame('Release body text.', $email->releaseBody);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
@@ -144,6 +144,38 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
         $this->mapper->fromJson($json);
     }
 
+    /**
+     * Fields that are the right type but fail value-object validation are still
+     * poison messages — the self-validating VO rejection is translated to the
+     * mapper's exception so the consumer routes them to the DLQ.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidValueFieldProvider(): iterable
+    {
+        yield 'email present but malformed' => [self::jsonWith(['email' => 'not-an-email'])];
+        yield 'repository present but not owner/repo' => [self::jsonWith(['repository' => 'no-slash-here'])];
+        yield 'release.tagName present but blank' => [self::jsonWithReleaseField('tagName', '   ')];
+    }
+
+    /** @dataProvider invalidValueFieldProvider */
+    public function testThrowsOnFieldFailingValueObjectValidation(string $json): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    public function testValueObjectRejectionIsChainedAsPreviousForDiagnosis(): void
+    {
+        try {
+            $this->mapper->fromJson(self::jsonWith(['email' => 'not-an-email']));
+            self::fail('expected MalformedReleaseEmailMessageException');
+        } catch (MalformedReleaseEmailMessageException $e) {
+            self::assertInstanceOf(\InvalidArgumentException::class, $e->getPrevious());
+        }
+    }
+
     public function testIgnoresUnknownExtraFields(): void
     {
         $payload = self::validPayload();
@@ -158,9 +190,9 @@ final class SendReleaseEmailMessageMapperTest extends TestCase
 
         self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
         self::assertSame(42, $email->subscriptionId);
-        self::assertSame('subscriber@example.com', $email->recipientEmail);
-        self::assertSame('owner/repo', $email->repository);
-        self::assertSame('v1.2.3', $email->tagName);
+        self::assertSame('subscriber@example.com', $email->recipientEmail->value());
+        self::assertSame('owner/repo', $email->repository->value());
+        self::assertSame('v1.2.3', $email->tagName->value());
         self::assertSame('Release name', $email->releaseName);
         self::assertSame('Release body text.', $email->releaseBody);
         self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);

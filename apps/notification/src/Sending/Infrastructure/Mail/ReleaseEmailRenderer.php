@@ -14,7 +14,7 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
     public function render(ReleaseEmail $email): RenderedEmail
     {
         return new RenderedEmail(
-            "New Release: {$email->repository} {$email->tagName}",
+            "New Release: {$email->repository->value()} {$email->tagName->value()}",
             $this->buildHtmlBody($email),
             $this->buildTextBody($email),
         );
@@ -22,8 +22,8 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
 
     private function buildHtmlBody(ReleaseEmail $email): string
     {
-        $escapedRepo = htmlspecialchars($email->repository);
-        $escapedTag = htmlspecialchars($email->tagName);
+        $escapedRepo = htmlspecialchars($email->repository->value());
+        $escapedTag = htmlspecialchars($email->tagName->value());
         $escapedName = htmlspecialchars($email->releaseName);
         $escapedUrl = htmlspecialchars($email->releaseUrl);
         $escapedBody = nl2br(htmlspecialchars($email->releaseBody));
@@ -48,9 +48,9 @@ final readonly class ReleaseEmailRenderer implements EmailRenderer
     private function buildTextBody(ReleaseEmail $email): string
     {
         return <<<TEXT
-        New Release for {$email->repository}
+        New Release for {$email->repository->value()}
 
-        Version: {$email->tagName}
+        Version: {$email->tagName->value()}
         Name: {$email->releaseName}
 
         {$email->releaseBody}

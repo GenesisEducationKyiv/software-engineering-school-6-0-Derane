@@ -8,6 +8,12 @@ use PDO;
 
 final readonly class Migrator
 {
+    /**
+     * Advisory-lock identity. acquireLock() and releaseLock() must hash the
+     * exact same string or the lock is never released — keep it single-sourced.
+     */
+    private const ADVISORY_LOCK_KEY = 'github-release-notifier:notification:migrations';
+
     public function __construct(
         private PDO $pdo,
         private string $migrationsPath,
@@ -96,11 +102,11 @@ final readonly class Migrator
 
     private function acquireLock(): void
     {
-        $this->pdo->query("SELECT pg_advisory_lock(hashtext('github-release-notifier:notification:migrations'))");
+        $this->pdo->query(sprintf("SELECT pg_advisory_lock(hashtext('%s'))", self::ADVISORY_LOCK_KEY));
     }
 
     private function releaseLock(): void
     {
-        $this->pdo->query("SELECT pg_advisory_unlock(hashtext('github-release-notifier:notification:migrations'))");
+        $this->pdo->query(sprintf("SELECT pg_advisory_unlock(hashtext('%s'))", self::ADVISORY_LOCK_KEY));
     }
 }

@@ -30,6 +30,7 @@ use App\Sending\Infrastructure\Persistence\PdoNotificationLedger;
 use App\Sending\Infrastructure\Persistence\PdoNotificationMetricsStore;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
+use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use DI\Container;
@@ -61,11 +62,21 @@ return static function (array $settings): Container {
                 $settings['rabbitmq']['port'],
                 $settings['rabbitmq']['user'],
                 $settings['rabbitmq']['password'],
-                $settings['rabbitmq']['vhost']
+                $settings['rabbitmq']['vhost'],
+                // The long-lived consumer pairs this heartbeat with a
+                // PCNTLHeartbeatSender (see bin/consumer.php) so the broker never
+                // drops the connection for missed heartbeats while a delivery is
+                // being processed, and a dead connection surfaces within the
+                // heartbeat window instead of hanging. read_write_timeout must
+                // stay above both the heartbeat and the retry confirm-wait (5s);
+                // php-amqplib defaults it to 3s.
+                heartbeat: 60,
+                read_write_timeout: 130,
+                keepalive: true,
             );
             return new RabbitConnection($connection->channel());
         },
-        RabbitConsumer::class => static fn($c) => new RabbitConsumer(
+        MessageConsumer::class => static fn($c) => new RabbitConsumer(
             $c->get(RabbitConnection::class),
         ),
 
@@ -99,7 +110,7 @@ return static function (array $settings): Container {
         ),
 
         SendReleaseEmailConsumer::class => static fn($c) => new SendReleaseEmailConsumer(
-            $c->get(RabbitConsumer::class),
+            $c->get(MessageConsumer::class),
             $c->get(SendReleaseEmailHandler::class),
             $c->get(SendReleaseEmailMessageMapper::class),
             $c->get(MessageProcessingStatsRecorder::class),

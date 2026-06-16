@@ -10,7 +10,7 @@ final readonly class Metric
     public function __construct(
         public string $name,
         public string $help,
-        public string $type,
+        public MetricType $type,
         public int $value,
         public array $labels = [],
     ) {

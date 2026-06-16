@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Sending\Infrastructure\Mail;
 
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\RenderedEmail;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
@@ -36,7 +37,7 @@ final class PhpMailerMailerTest extends TestCase
         $phpMailer->expects(self::once())->method('send');
 
         $mailer = new PhpMailerMailer($config, $factory);
-        $mailer->send('subscriber@example.com', new RenderedEmail('Subject', '<p>html</p>', 'text'));
+        $mailer->send(new EmailAddress('subscriber@example.com'), new RenderedEmail('Subject', '<p>html</p>', 'text'));
 
         self::assertSame('smtp.example.com', $phpMailer->Host);
         self::assertSame(587, $phpMailer->Port);
@@ -65,7 +66,7 @@ final class PhpMailerMailerTest extends TestCase
         $factory = $this->mailerFactory($phpMailer);
 
         $mailer = new PhpMailerMailer($config, $factory);
-        $mailer->send('subscriber@example.com', new RenderedEmail('Subject', '<p>html</p>', 'text'));
+        $mailer->send(new EmailAddress('subscriber@example.com'), new RenderedEmail('Subject', '<p>html</p>', 'text'));
 
         self::assertNotTrue($phpMailer->SMTPAuth);
         self::assertFalse($phpMailer->SMTPAutoTLS);

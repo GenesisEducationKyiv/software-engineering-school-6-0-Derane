@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sending\Infrastructure\Mail;
 
+use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\Mailer;
 use App\Sending\Domain\RenderedEmail;
 
@@ -16,7 +17,7 @@ final readonly class PhpMailerMailer implements Mailer
     }
 
     #[\Override]
-    public function send(string $toEmail, RenderedEmail $rendered): void
+    public function send(EmailAddress $toEmail, RenderedEmail $rendered): void
     {
         $mail = $this->mailerFactory->create();
 
@@ -24,7 +25,7 @@ final readonly class PhpMailerMailer implements Mailer
         $mail->Host = $this->config->host;
         $mail->Port = $this->config->port;
         $mail->setFrom($this->config->from, 'GitHub Release Notifier');
-        $mail->addAddress($toEmail);
+        $mail->addAddress($toEmail->value());
 
         if ($this->config->hasAuth()) {
             $mail->SMTPAuth = true;
