@@ -7,6 +7,7 @@ namespace App\Notification\Publishing\Infrastructure;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublisher;
 use Psr\Log\LoggerInterface;
 
@@ -25,8 +26,8 @@ final readonly class RabbitReleaseNotificationPublisher implements ReleaseNotifi
     public function publishAll(array $messages): void
     {
         $this->publisher->publishBatch(
-            'notifications',
-            'release.email',
+            RabbitConnection::EXCHANGE_NOTIFICATIONS,
+            RabbitConnection::ROUTING_KEY_RELEASE_EMAIL,
             array_map($this->serializer->toJson(...), $messages),
             ['content_type' => 'application/json', 'delivery_mode' => 2],
         );

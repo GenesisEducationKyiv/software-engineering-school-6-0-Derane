@@ -95,18 +95,34 @@ final readonly class RabbitPublisher
         try {
             $this->channel->wait_for_pending_acks($this->confirmTimeoutSeconds);
         } catch (AMQPTimeoutException) {
+            // Release this chunk's tracking refs before failing so the long-lived
+            // publisher never leaks AMQPMessage objects in the ack/nack maps.
+            $this->releaseTracking($messages);
             throw RabbitPublishFailedException::confirmTimedOut($exchange, $routingKey, $this->confirmTimeoutSeconds);
         }
 
         $anyNacked = false;
         foreach ($messages as $message) {
             $anyNacked = $anyNacked || $this->nackedMessages->contains($message);
-            $this->ackedMessages->detach($message);
-            $this->nackedMessages->detach($message);
         }
+        $this->releaseTracking($messages);
 
         if ($anyNacked) {
             throw RabbitPublishFailedException::nacked($exchange, $routingKey);
+        }
+    }
+
+    /**
+     * Drops this chunk's messages from both confirm-tracking maps so the
+     * SplObjectStorage does not grow without bound in a long-lived publisher.
+     *
+     * @param list<AMQPMessage> $messages
+     */
+    private function releaseTracking(array $messages): void
+    {
+        foreach ($messages as $message) {
+            $this->ackedMessages->detach($message);
+            $this->nackedMessages->detach($message);
         }
     }
 }

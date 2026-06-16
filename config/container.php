@@ -20,6 +20,7 @@ use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseHandl
 use App\Releases\Sourcing\Application\FetchLatestRelease\FetchLatestReleaseQuery;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsHandler;
 use App\Releases\Sourcing\Application\RepositoryExists\RepositoryExistsQuery;
+use App\Releases\Sourcing\Domain\Release;
 use App\Releases\Sourcing\Domain\ReleaseSource;
 use App\Releases\Sourcing\Infrastructure\Cache\GitHubCacheInterface;
 use App\Releases\Sourcing\Infrastructure\Cache\GitHubReleaseCache;
@@ -53,6 +54,7 @@ use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;
 use App\Shared\Domain\Clock;
+use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Shared\Infrastructure\Bus\InMemoryCommandBus;
 use App\Shared\Infrastructure\Bus\InMemoryQueryBus;
 use App\Shared\Infrastructure\Clock\SystemClock;
@@ -146,7 +148,19 @@ return static function (array $settings): Container {
                 $settings['rabbitmq']['port'],
                 $settings['rabbitmq']['user'],
                 $settings['rabbitmq']['password'],
-                $settings['rabbitmq']['vhost']
+                $settings['rabbitmq']['vhost'],
+                // read_write_timeout must exceed the publisher's confirm-wait (5s)
+                // so a healthy-but-slow confirm is not killed by the socket
+                // timeout — php-amqplib defaults read_write_timeout to 3s, which
+                // is *below* that wait. keepalive lets the OS detect a dead peer
+                // across the scanner's idle gaps. No app-level heartbeat here:
+                // the scanner publishes lazily then sleeps between cycles with no
+                // heartbeat sender, so a negotiated heartbeat would make the
+                // broker drop the idle connection. Connection-loss recovery is by
+                // supervised restart (restart: unless-stopped); a reconnecting
+                // connection factory for the publisher is tracked as follow-up.
+                read_write_timeout: 60,
+                keepalive: true,
             );
             return new RabbitConnection($connection->channel());
         },
@@ -177,17 +191,16 @@ return static function (array $settings): Container {
         ),
         ReleaseSource::class => static function ($c) use ($settings) {
             if ($settings['github']['smoke']) {
-                $publishedAt = $_ENV['GITHUB_SMOKE_PUBLISHED_AT']
-                    ?? (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339);
-
-                return new SmokeGitHubReleaseSource([
-                    'repository' => $settings['github']['smoke_repository'],
-                    'tag_name' => $settings['github']['smoke_tag_name'],
-                    'name' => $settings['github']['smoke_name'],
-                    'html_url' => $settings['github']['smoke_html_url'],
-                    'published_at' => $publishedAt,
-                    'body' => $settings['github']['smoke_body'],
-                ]);
+                return new SmokeGitHubReleaseSource(
+                    new RepositoryName($settings['github']['smoke_repository']),
+                    new Release(
+                        $settings['github']['smoke_tag_name'],
+                        $settings['github']['smoke_name'],
+                        $settings['github']['smoke_html_url'],
+                        $settings['github']['smoke_published_at'],
+                        $settings['github']['smoke_body'],
+                    ),
+                );
             }
 
             if ($settings['github']['stub']) {

@@ -3,13 +3,9 @@
 declare(strict_types=1);
 
 use App\Migration\Migrator;
-use App\RepositoryTracking\Repositories\Domain\TrackedRepositoryRegistrar;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Shared\Domain\Bus\Command\CommandBus;
-use App\Shared\Domain\ValueObject\EmailAddress;
-use App\Shared\Domain\ValueObject\RepositoryName;
-use App\Subscription\Subscriptions\Domain\Subscription;
-use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
+use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -36,14 +32,16 @@ $container = $buildContainer($settings);
 
 $container->get(Migrator::class)->migrate();
 
-$container->get(TrackedRepositoryRegistrar::class)->ensureExists($repository);
-$container->get(SubscriptionRepository::class)->create(
-    Subscription::subscribe(
-        new EmailAddress($email),
-        new RepositoryName($repository),
-        (new DateTimeImmutable())->format(DateTimeInterface::RFC3339)
-    )
-);
+// Purge MailHog first so this run starts from a clean mailbox and the delivery
+// assertion below cannot false-pass on a message left by a previous run.
+@file_get_contents('http://mailhog:8025/api/v1/messages', false, stream_context_create([
+    'http' => ['method' => 'DELETE', 'timeout' => 2, 'ignore_errors' => true],
+]));
+
+// Drive the real Subscribe use-case through the bus (validation, repository-exists
+// guard, tracked-repository registration, and SubscriptionCreated dispatch) instead
+// of hand-building the aggregate and reaching across context boundaries.
+$container->get(CommandBus::class)->dispatch(new SubscribeCommand($email, $repository));
 
 $container->get(CommandBus::class)->dispatch(new ScanReleasesCommand());
 

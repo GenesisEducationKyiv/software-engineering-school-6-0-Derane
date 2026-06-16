@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace App\RepositoryTracking\Repositories\Domain;
 
-use App\Shared\Domain\Aggregate\AggregateRoot;
-
 /**
- * Not readonly: PHP forbids readonly child classes of non-readonly parents;
- * AggregateRoot is non-readonly.
+ * Read-model snapshot of a tracked repository's scan progress. It has identity
+ * (fullName) but no behaviour: the scan write path advances progress through the
+ * ScanProgressWriter port (CRUD), so this type is only ever reconstituted for
+ * reads (ReleaseDetector). It is deliberately NOT an aggregate root — there is no
+ * command that mutates it and records domain events.
  *
  * @psalm-api
  */
-final class RepositoryStatus extends AggregateRoot
+final readonly class RepositoryStatus
 {
     private function __construct(
-        private readonly string $fullName,
+        private string $fullName,
         private ?string $lastSeenTag,
         private ?string $lastCheckedAt,
     ) {
@@ -32,17 +33,6 @@ final class RepositoryStatus extends AggregateRoot
     public static function existing(string $fullName): self
     {
         return new self($fullName, null, null);
-    }
-
-    public function markReleaseSeen(string $tag): void
-    {
-        $this->lastSeenTag = $tag;
-        $this->recordThat(new ReleaseSeenAdvanced($this->fullName, $tag, new \DateTimeImmutable()));
-    }
-
-    public function markChecked(): void
-    {
-        $this->recordThat(new RepositoryChecked($this->fullName, new \DateTimeImmutable()));
     }
 
     public function fullName(): string

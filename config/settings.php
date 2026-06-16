@@ -32,6 +32,8 @@ return [
         'smoke_tag_name' => $_ENV['GITHUB_SMOKE_TAG_NAME'] ?? 'v0-smoke',
         'smoke_name' => $_ENV['GITHUB_SMOKE_NAME'] ?? 'Smoke Release',
         'smoke_html_url' => $_ENV['GITHUB_SMOKE_HTML_URL'] ?? 'https://example.test/releases/smoke',
+        'smoke_published_at' => $_ENV['GITHUB_SMOKE_PUBLISHED_AT']
+            ?? (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339),
         'smoke_body' => $_ENV['GITHUB_SMOKE_BODY'] ?? 'Smoke release body',
     ],
     'api_key' => $_ENV['API_KEY'] ?? '',

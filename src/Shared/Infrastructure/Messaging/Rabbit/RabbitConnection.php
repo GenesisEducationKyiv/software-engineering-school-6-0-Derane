@@ -24,12 +24,14 @@ use PhpAmqpLib\Channel\AMQPChannel;
  */
 final readonly class RabbitConnection
 {
-    private const EXCHANGE_NOTIFICATIONS = 'notifications';
+    // Public so the publisher targets the same exchange/routing key this class
+    // declares and binds — one source of truth for the publish topology.
+    public const EXCHANGE_NOTIFICATIONS = 'notifications';
+    public const ROUTING_KEY_RELEASE_EMAIL = 'release.email';
     private const EXCHANGE_DLX = 'notifications.dlx';
     private const QUEUE_SEND_EMAIL = 'notifications.send-email';
     private const QUEUE_SEND_EMAIL_RETRY = 'notifications.send-email.retry';
     private const QUEUE_SEND_EMAIL_DLQ = 'notifications.send-email.dlq';
-    private const ROUTING_KEY_RELEASE_EMAIL = 'release.email';
 
     public function __construct(private AMQPChannel $channel)
     {
