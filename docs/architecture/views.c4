@@ -66,13 +66,27 @@ views {
     view notificationServiceComponents of notifier.notificationSvc {
         title "Component View — Notification Service"
         description "
-            Consumer, handler, ledger, renderer, and mailer inside apps/notification.
+            Release + welcome consumers, handlers, ledgers, renderers, mailer,
+            and the welcome-outcome publisher inside apps/notification.
         "
         include
             *,
             notifier.rabbitmq,
             notifier.notificationDb,
             notifier.mailhog
+    }
+
+    view sagaWorkerComponents of notifier.sagaWorker {
+        title "Component View — Saga Worker"
+        description "
+            Outbox relay, reply consumer + orchestrator, and timeout sweeper
+            inside the monolith saga-worker; saga state in the monolith
+            PostgreSQL.
+        "
+        include
+            *,
+            notifier.db,
+            notifier.rabbitmq
     }
 
     dynamic view createSubscriptionFlow {
@@ -122,5 +136,50 @@ views {
         notifier.notificationSvc.mailer -> notifier.mailhog "SMTP delivery"
         notifier.scanner.scanHandler -> notifier.scanner.scannerRepo "updateLastSeenTag(repo, tag) (only after publish succeeds)"
         notifier.scanner.scannerRepo -> notifier.db "UPDATE repositories.last_seen_tag"
+    }
+
+    dynamic view confirmSubscriptionSagaFlow {
+        title "Dynamic — Confirmed-Subscription Saga"
+        description "
+            Orchestrated saga: POST subscription starts a STARTED saga atomically,
+            the relay publishes SendWelcomeEmail, the notification service sends the
+            welcome email and replies WelcomeEmailOutcome, and the saga-worker
+            confirms (CONFIRMED) or compensates (CANCELLED).
+        "
+
+        user -> notifier.httpApi.middleware "POST /api/subscriptions with X-API-Key"
+        notifier.httpApi.middleware -> notifier.httpApi.subscriptionCtrl "Authenticated, forward to controller"
+        notifier.httpApi.subscriptionCtrl -> notifier.httpApi.commandBus "dispatch SubscribeCommand"
+        notifier.httpApi.commandBus -> notifier.httpApi.subscriptionRepo "create(...) + start saga in ONE transaction"
+        notifier.httpApi.subscriptionRepo -> notifier.db "INSERT subscriptions(status=pending) + INSERT enrollment_sagas(state=started)"
+        notifier.httpApi.subscriptionCtrl -> user "201 { ..., status: pending } (never blocks on broker)"
+
+        notifier.sagaWorker.sagaLoop -> notifier.sagaWorker.relayUseCase "relay tick"
+        notifier.sagaWorker.relayUseCase -> notifier.sagaWorker.sagaRepo "SELECT sagas WHERE state=started"
+        notifier.sagaWorker.relayUseCase -> notifier.sagaWorker.welcomeRelay "publish(SendWelcomeEmail)"
+        notifier.sagaWorker.welcomeRelay -> notifier.rabbitmq "Publish SendWelcomeEmail/v1 to subscription.welcome-email (confirmed)"
+        notifier.sagaWorker.relayUseCase -> notifier.sagaWorker.sagaRepo "UPDATE saga state=awaiting_confirmation WHERE state=started"
+
+        notifier.rabbitmq -> notifier.notificationSvc.welcomeConsumer "deliver SendWelcomeEmail/v1"
+        notifier.notificationSvc.welcomeConsumer -> notifier.notificationSvc.welcomeHandler "invoke(message)"
+        notifier.notificationSvc.welcomeHandler -> notifier.notificationSvc.welcomeLedger "claim(subscriptionId) — atomic ON CONFLICT"
+        notifier.notificationSvc.welcomeLedger -> notifier.notificationDb "INSERT welcome_notifications"
+        notifier.notificationSvc.welcomeHandler -> notifier.notificationSvc.welcomeRenderer "render welcome email"
+        notifier.notificationSvc.welcomeHandler -> notifier.notificationSvc.mailer "send welcome email"
+        notifier.notificationSvc.mailer -> notifier.mailhog "SMTP delivery"
+        notifier.notificationSvc.welcomeHandler -> notifier.notificationSvc.welcomeLedger "markSent"
+        notifier.notificationSvc.welcomeHandler -> notifier.notificationSvc.outcomePublisher "publish WelcomeEmailOutcome{sent|failed}"
+        notifier.notificationSvc.outcomePublisher -> notifier.rabbitmq "Publish WelcomeEmailOutcome/v1 to subscription.welcome-email.reply"
+
+        notifier.rabbitmq -> notifier.sagaWorker.outcomeConsumer "deliver WelcomeEmailOutcome/v1"
+        notifier.sagaWorker.outcomeConsumer -> notifier.sagaWorker.sagaCommandBus "dispatch HandleWelcomeEmailOutcomeCommand"
+        notifier.sagaWorker.sagaCommandBus -> notifier.sagaWorker.outcomeHandler "handle reply (ONE transaction)"
+        notifier.sagaWorker.outcomeHandler -> notifier.sagaWorker.confirmationWriter "confirm/cancel WHERE status=pending"
+        notifier.sagaWorker.confirmationWriter -> notifier.db "UPDATE subscriptions SET status=confirmed|cancelled"
+        notifier.sagaWorker.outcomeHandler -> notifier.sagaWorker.sagaRepo "complete/compensate WHERE state IN (started,awaiting_confirmation)"
+        notifier.sagaWorker.sagaRepo -> notifier.db "UPDATE enrollment_sagas SET state=completed|compensated"
+
+        notifier.sagaWorker.sagaLoop -> notifier.sagaWorker.sweepUseCase "sweep timed-out sagas (no reply by T → compensate)"
+        notifier.sagaWorker.sweepUseCase -> notifier.sagaWorker.confirmationWriter "cancel swept subscription"
     }
 }

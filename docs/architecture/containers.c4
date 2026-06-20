@@ -29,11 +29,25 @@ model {
             technology "PHP 8.4 CLI, long-running loop"
         }
 
+        sagaWorker = container "Saga Worker" {
+            description "
+                Orchestrated-saga worker (monolith image). One supervised
+                loop runs three responsibilities: the outbox relay
+                (publishes SendWelcomeEmail/v1 for STARTED sagas with
+                publisher confirms), the WelcomeEmailOutcome reply consumer
+                (confirms or compensates the saga + subscription status),
+                and the timeout sweeper. Saga state lives in the existing
+                monolith PostgreSQL — no new database.
+            "
+            technology "PHP 8.4 CLI, long-running loop"
+        }
+
         notificationSvc = container "Notification Service" {
             description "
-                Queue consumer for SendReleaseEmail/v1.
+                Queue consumer for SendReleaseEmail/v1 and SendWelcomeEmail/v1.
                 Dedupes delivery in its own database, renders email,
-                and sends via MailHog/SMTP.
+                sends via MailHog/SMTP, and publishes WelcomeEmailOutcome/v1
+                replies back to the monolith saga worker.
             "
             technology "PHP 8.2 CLI worker"
         }
@@ -95,7 +109,10 @@ model {
     scanner -> github "Polls release metadata" "HTTPS"
     scanner -> rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"
 
-    notificationSvc -> rabbitmq "Consumes notifications.send-email / DLQ" "AMQP"
-    notificationSvc -> notificationDb "Reads/writes delivery ledger + metrics" "SQL/TCP"
+    sagaWorker -> db "Reads/writes enrollment_sagas + subscription status" "SQL/TCP"
+    sagaWorker -> rabbitmq "Publishes SendWelcomeEmail/v1, consumes WelcomeEmailOutcome/v1" "AMQP"
+
+    notificationSvc -> rabbitmq "Consumes notifications.send-email + welcome-email / DLQ; publishes WelcomeEmailOutcome/v1" "AMQP"
+    notificationSvc -> notificationDb "Reads/writes delivery + welcome ledgers + metrics" "SQL/TCP"
     notificationSvc -> mailhog "Sends email in local dev" "SMTP"
 }

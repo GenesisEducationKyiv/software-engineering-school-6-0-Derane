@@ -170,10 +170,15 @@ still sees their own `pending`/`cancelled` rows.
   stale row with no new saga, and the welcome ledger's `UNIQUE(subscription_id)`
   would block a second welcome for a reused id. A re-confirm / resurrection path is
   future work, not in this phase.
-- **Deferred docker end-to-end + LikeC4 sync.** The `saga-worker` compose service,
-  the additive JSON/gRPC `status` field, and the end-to-end happy-path +
-  compensation demo are a later docker-enabled pass; the LikeC4 model in
-  `docs/architecture/` (the `saga-worker` container, the `Saga / Enrollment`
-  context, the two messages + topology, the welcome consumer + outcome publisher,
-  and the `welcome_notifications` store) is synced in that same pass.
+- **LikeC4 model (done).** The model in `docs/architecture/` is synced with the HW9
+  saga: the `saga-worker` container + deployment node, the `Saga / Enrollment`
+  context (outbox relay, `WelcomeEmailOutcome` reply consumer + orchestrator,
+  timeout sweeper, `enrollment_sagas` store), the two integration messages and their
+  flow (`SendWelcomeEmail/v1` on `subscription.welcome-email`, `WelcomeEmailOutcome/v1`
+  on `subscription.welcome-email.reply`), the notification-side welcome consumer +
+  `WelcomeOutcome` publisher + `welcome_notifications` ledger, and a
+  `confirmSubscriptionSagaFlow` dynamic view. `make c4-validate` is green.
+- **Deferred docker end-to-end.** The `saga-worker` compose service, the additive
+  JSON/gRPC `status` field, and the end-to-end happy-path + compensation demo remain
+  a later docker-enabled pass.
 - Keep the two welcome contracts additive-only, as with `SendReleaseEmail/v1`.

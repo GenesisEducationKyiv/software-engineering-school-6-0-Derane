@@ -74,7 +74,9 @@ abstract class IntegrationTestCase extends TestCase
     private function truncateDataTables(): void
     {
         $this->c->get(PDO::class)->exec(
-            'TRUNCATE subscriptions, repositories RESTART IDENTITY CASCADE'
+            // HW9: enrollment_sagas + saga_metrics must reset between tests so
+            // the saga-repo and metrics-store Integration tests start from zero.
+            'TRUNCATE subscriptions, repositories, enrollment_sagas, saga_metrics RESTART IDENTITY CASCADE'
         );
     }
 

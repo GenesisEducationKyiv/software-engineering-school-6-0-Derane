@@ -44,6 +44,25 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # HW9: the saga orchestrator worker — the monolith's first long-lived consumer.
+  # Runs the outbox relay (publishes SendWelcomeEmail), the reply consumer
+  # (WelcomeEmailOutcome -> confirm/cancel) and the timeout sweeper. Same monolith
+  # image; saga state lives in the existing `postgres` (Postgres A), no new DB.
+  saga-worker:
+    build: .
+    command: php bin/saga-worker.php
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 10s
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
