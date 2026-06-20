@@ -88,7 +88,9 @@ final class ReleaseNotifierServiceTest extends TestCase
 
         $this->queryBus->expects($this->once())
             ->method('ask')
-            ->willReturn(new SubscriptionResponse(7, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'));
+            ->willReturn(
+                new SubscriptionResponse(7, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z', 'pending')
+            );
 
         $reply = $this->service->CreateSubscription($this->context, new CreateSubscriptionRequest([
             'email' => 'grpc@example.com',
@@ -112,7 +114,7 @@ final class ReleaseNotifierServiceTest extends TestCase
                 && $q->pagination->limit === 20
                 && $q->pagination->offset === 5))
             ->willReturn(new SubscriptionPageResponse([
-                new SubscriptionResponse(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z'),
+                new SubscriptionResponse(1, 'grpc@example.com', 'docker/compose', '2026-04-12T00:00:00Z', 'pending'),
             ]));
 
         $reply = $this->service->ListSubscriptions($this->context, new ListSubscriptionsRequest([
@@ -131,7 +133,7 @@ final class ReleaseNotifierServiceTest extends TestCase
             ->method('ask')
             ->with($this->callback(static fn(Query $q): bool =>
                 $q instanceof FindSubscriptionByIdQuery && $q->id === 4))
-            ->willReturn(new SubscriptionResponse(4, 'g@h.com', 'docker/compose', '2026-04-12T00:00:00Z'));
+            ->willReturn(new SubscriptionResponse(4, 'g@h.com', 'docker/compose', '2026-04-12T00:00:00Z', 'pending'));
 
         $reply = $this->service->GetSubscription($this->context, new GetSubscriptionRequest(['id' => 4]));
 

@@ -54,4 +54,21 @@ final class SubscriptionTest extends TestCase
 
         $this->assertNull($subscription->id());
     }
+
+    public function testSubscribeDefaultsStatusToPending(): void
+    {
+        // Create path (no DB read): the response carries status even before re-read.
+        $subscription = SubscriptionMother::subscribing();
+
+        $this->assertSame('pending', $subscription->status());
+    }
+
+    public function testReconstituteThreadsTheRowStatus(): void
+    {
+        $confirmed = SubscriptionMother::reconstituted(7, 'a@b.com', 'php/p', '2026-04-12T00:00:00Z', 'confirmed');
+        $cancelled = SubscriptionMother::reconstituted(8, 'c@d.com', 'php/p', '2026-04-12T00:00:00Z', 'cancelled');
+
+        $this->assertSame('confirmed', $confirmed->status());
+        $this->assertSame('cancelled', $cancelled->status());
+    }
 }

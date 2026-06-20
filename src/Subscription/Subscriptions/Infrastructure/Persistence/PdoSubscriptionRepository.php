@@ -38,7 +38,7 @@ final readonly class PdoSubscriptionRepository implements
         $stmt = $this->pdo->prepare(
             'INSERT INTO subscriptions (email, repository) VALUES (:email, :repository)
              ON CONFLICT (email, repository) DO NOTHING
-             RETURNING id, email, repository, created_at'
+             RETURNING id, email, repository, created_at, status'
         );
         $stmt->execute(['email' => $email, 'repository' => $repository]);
         /** @var array<string, mixed>|false $row */
@@ -49,7 +49,7 @@ final readonly class PdoSubscriptionRepository implements
         }
 
         $stmt = $this->pdo->prepare(
-            'SELECT id, email, repository, created_at FROM subscriptions '
+            'SELECT id, email, repository, created_at, status FROM subscriptions '
             . 'WHERE email = :email AND repository = :repository'
         );
         $stmt->execute(['email' => $email, 'repository' => $repository]);
@@ -66,7 +66,9 @@ final readonly class PdoSubscriptionRepository implements
     #[\Override]
     public function findById(int $id): ?Subscription
     {
-        $stmt = $this->pdo->prepare('SELECT id, email, repository, created_at FROM subscriptions WHERE id = :id');
+        $stmt = $this->pdo->prepare(
+            'SELECT id, email, repository, created_at, status FROM subscriptions WHERE id = :id'
+        );
         $stmt->execute(['id' => $id]);
         /** @var array<string, mixed>|false $row */
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -78,7 +80,7 @@ final readonly class PdoSubscriptionRepository implements
     public function findByEmailAndRepository(string $email, string $repository): ?Subscription
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, email, repository, created_at FROM subscriptions '
+            'SELECT id, email, repository, created_at, status FROM subscriptions '
             . 'WHERE email = :email AND repository = :repository'
         );
         $stmt->execute(['email' => $email, 'repository' => $repository]);
@@ -92,7 +94,7 @@ final readonly class PdoSubscriptionRepository implements
     public function findByEmail(string $email, Pagination $pagination): SubscriptionPage
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, email, repository, created_at FROM subscriptions
+            'SELECT id, email, repository, created_at, status FROM subscriptions
              WHERE email = :email
              ORDER BY id
              LIMIT :limit OFFSET :offset'
@@ -116,7 +118,7 @@ final readonly class PdoSubscriptionRepository implements
     public function findAll(Pagination $pagination): SubscriptionPage
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, email, repository, created_at FROM subscriptions
+            'SELECT id, email, repository, created_at, status FROM subscriptions
              ORDER BY id
              LIMIT :limit OFFSET :offset'
         );
@@ -145,8 +147,14 @@ final readonly class PdoSubscriptionRepository implements
     #[\Override]
     public function findSubscribersByRepository(RepositoryName $repository): SubscriberCollection
     {
+        // Recipient resolution (FR14 / AC6a): release emails go ONLY to CONFIRMED
+        // subscribers. This is the ONE filtered SELECT — read/list projections stay
+        // unfiltered so owners still see their own pending/cancelled rows. Served by
+        // idx_subscriptions_repository_status (migration 004).
         $stmt = $this->pdo->prepare(
-            'SELECT id, email FROM subscriptions WHERE repository = :repository ORDER BY id'
+            "SELECT id, email FROM subscriptions
+             WHERE repository = :repository AND status = 'confirmed'
+             ORDER BY id"
         );
         $stmt->execute(['repository' => $repository->value()]);
         /** @var list<array<string, mixed>> $rows */

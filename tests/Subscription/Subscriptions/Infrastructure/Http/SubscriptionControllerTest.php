@@ -84,7 +84,7 @@ final class SubscriptionControllerTest extends TestCase
                 $q instanceof FindSubscriptionByEmailAndRepositoryQuery
                 && $q->email === 'a@b.com'
                 && $q->repository === 'golang/go'))
-            ->willReturn(new SubscriptionResponse(9, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z'));
+            ->willReturn(new SubscriptionResponse(9, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z', 'pending'));
 
         $request = (new RequestFactory())
             ->createRequest('POST', '/api/subscriptions')
@@ -106,7 +106,7 @@ final class SubscriptionControllerTest extends TestCase
             ->method('ask')
             ->with($this->callback(static fn(Query $q): bool =>
                 $q instanceof FindSubscriptionByIdQuery && $q->id === 3))
-            ->willReturn(new SubscriptionResponse(3, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z'));
+            ->willReturn(new SubscriptionResponse(3, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z', 'pending'));
 
         $request = (new RequestFactory())->createRequest('GET', '/api/subscriptions/3');
         $response = (new ResponseFactory())->createResponse();
@@ -147,7 +147,7 @@ final class SubscriptionControllerTest extends TestCase
     public function testListReturnsArrayOfFrozenShape(): void
     {
         $this->queryBus->method('ask')->willReturn(new SubscriptionPageResponse([
-            new SubscriptionResponse(1, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z'),
+            new SubscriptionResponse(1, 'a@b.com', 'golang/go', '2026-04-12T00:00:00Z', 'pending'),
         ]));
 
         $request = (new RequestFactory())->createRequest('GET', '/api/subscriptions');

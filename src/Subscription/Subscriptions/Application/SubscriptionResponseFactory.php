@@ -17,6 +17,7 @@ final readonly class SubscriptionResponseFactory implements SubscriptionResponse
             $subscription->email(),
             $subscription->repository(),
             $subscription->createdAt(),
+            $subscription->status(),
         );
     }
 }

@@ -10,18 +10,21 @@ use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Subscription\Subscriptions\Domain\Subscription;
 use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
+use PDO;
 use Tests\Integration\IntegrationTestCase;
 
 final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
 {
     private SubscriptionRepository $repo;
     private SubscriptionCountPort $counts;
+    private PDO $pdo;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->repo = $this->c->get(SubscriptionRepository::class);
         $this->counts = $this->c->get(SubscriptionCountPort::class);
+        $this->pdo = $this->c->get(PDO::class);
     }
 
     public function testCreatePersistsRow(): void
@@ -35,6 +38,31 @@ final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
         $this->assertSame($repository, $subscription->repository());
         $this->assertGreaterThan(0, (int) $subscription->id());
         $this->assertNotEmpty($subscription->createdAt());
+    }
+
+    public function testCreateReReadCarriesCommittedPendingStatus(): void
+    {
+        // B4 / AC1: the committed row is readable with status 'pending' immediately,
+        // never a stale pre-insert state. Surfaced on every read path below.
+        $email = $this->faker->safeEmail();
+        $repository = $this->repoName();
+
+        $created = $this->subscribe($email, $repository);
+        $this->assertSame('pending', $created->status());
+
+        $byId = $this->repo->findById((int) $created->id());
+        $this->assertNotNull($byId);
+        $this->assertSame('pending', $byId->status());
+
+        $byPair = $this->repo->findByEmailAndRepository($email, $repository);
+        $this->assertNotNull($byPair);
+        $this->assertSame('pending', $byPair->status());
+
+        $byEmail = $this->repo->findByEmail($email, new Pagination(10, 0));
+        $this->assertSame('pending', $byEmail->items[0]->status());
+
+        $all = $this->repo->findAll(new Pagination(10, 0));
+        $this->assertSame('pending', $all->items[0]->status());
     }
 
     public function testCreateIsIdempotentOnDuplicate(): void
@@ -140,12 +168,19 @@ final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
         $this->assertFalse($this->repo->delete($this->faker->numberBetween(1_000_000, 9_999_999)));
     }
 
-    public function testFindSubscribersByRepositoryReturnsCollection(): void
+    public function testFindSubscribersByRepositoryReturnsConfirmedCollection(): void
     {
+        // Recipient resolution is CONFIRMED-only (FR14 / AC6a, Story E1). Subscribers
+        // are created PENDING, so they must be confirmed before they resolve as
+        // recipients; the same-status filter is covered in depth by
+        // PdoSubscriberFinderConfirmedOnlyTest.
         $repository = $this->repoName();
         $first = $this->subscribe($this->faker->safeEmail(), $repository);
         $second = $this->subscribe($this->faker->safeEmail(), $repository);
         $this->subscribe($this->faker->safeEmail(), $this->repoName());
+
+        $this->confirm((int) $first->id());
+        $this->confirm((int) $second->id());
 
         $subscribers = $this->repo->findSubscribersByRepository(new RepositoryName($repository));
 
@@ -173,6 +208,12 @@ final class PdoSubscriptionRepositoryTest extends IntegrationTestCase
             new RepositoryName($repository),
             (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM)
         ));
+    }
+
+    private function confirm(int $id): void
+    {
+        $stmt = $this->pdo->prepare("UPDATE subscriptions SET status = 'confirmed' WHERE id = :id");
+        $stmt->execute([':id' => $id]);
     }
 
     private function repoName(): string
