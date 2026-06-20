@@ -60,5 +60,54 @@ final class PdoNotificationMetricsStoreTest extends TestCase
         self::assertSame(0, $this->store->contentionCount());
         self::assertSame(0, $this->store->dlqCount());
         self::assertSame(0, $this->store->supersededCount());
+        self::assertSame(0, $this->store->welcomeConsumedCount());
+        self::assertSame(0, $this->store->welcomeSentCount());
+        self::assertSame(0, $this->store->welcomeDedupedCount());
+        self::assertSame(0, $this->store->welcomeFailedCount());
+        self::assertSame(0, $this->store->welcomeReplyPublishedCount());
+    }
+
+    /**
+     * @return iterable<string, array{callable(PdoNotificationMetricsStore): void, string}>
+     */
+    public static function welcomeRecorders(): iterable
+    {
+        yield 'consumed' => [
+            static fn(PdoNotificationMetricsStore $s) => $s->recordWelcomeConsumed(),
+            'welcome_consumed_total',
+        ];
+        yield 'sent' => [
+            static fn(PdoNotificationMetricsStore $s) => $s->recordWelcomeSent(),
+            'welcome_sent_total',
+        ];
+        yield 'deduped' => [
+            static fn(PdoNotificationMetricsStore $s) => $s->recordWelcomeDeduped(),
+            'welcome_deduped_total',
+        ];
+        yield 'failed' => [
+            static fn(PdoNotificationMetricsStore $s) => $s->recordWelcomeFailed(),
+            'welcome_failed_total',
+        ];
+        yield 'reply' => [
+            static fn(PdoNotificationMetricsStore $s) => $s->recordWelcomeReplyPublished(),
+            'welcome_reply_published_total',
+        ];
+    }
+
+    /**
+     * @param callable(PdoNotificationMetricsStore): void $record
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('welcomeRecorders')]
+    public function testWelcomeRecordersUseTheExactMetricName(callable $record, string $expectedMetric): void
+    {
+        $this->pdo->expects(self::once())
+            ->method('prepare')
+            ->with(self::stringContains('ON CONFLICT'))
+            ->willReturn($this->stmt);
+        $this->stmt->expects(self::once())
+            ->method('execute')
+            ->with([':metric' => $expectedMetric]);
+
+        $record($this->store);
     }
 }

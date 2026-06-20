@@ -42,4 +42,22 @@ final class MetricsServiceTest extends TestCase
         self::assertStringContainsString('notification_dlq_total 1', $output);
         self::assertStringContainsString('notification_superseded_total 4', $output);
     }
+
+    public function testCollectExposesAllFiveWelcomeFunnelSpellingsExactly(): void
+    {
+        $this->reader->method('welcomeConsumedCount')->willReturn(9);
+        $this->reader->method('welcomeSentCount')->willReturn(8);
+        $this->reader->method('welcomeDedupedCount')->willReturn(2);
+        $this->reader->method('welcomeFailedCount')->willReturn(1);
+        $this->reader->method('welcomeReplyPublishedCount')->willReturn(6);
+
+        $service = new MetricsService($this->reader, new PrometheusFormatter());
+        $output = $service->collect();
+
+        self::assertStringContainsString('welcome_consumed_total 9', $output);
+        self::assertStringContainsString('welcome_sent_total 8', $output);
+        self::assertStringContainsString('welcome_deduped_total 2', $output);
+        self::assertStringContainsString('welcome_failed_total 1', $output);
+        self::assertStringContainsString('welcome_reply_published_total 6', $output);
+    }
 }

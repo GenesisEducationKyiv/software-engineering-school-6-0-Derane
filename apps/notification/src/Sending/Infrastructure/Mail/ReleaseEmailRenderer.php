@@ -6,13 +6,20 @@ namespace App\Sending\Infrastructure\Mail;
 
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\ReleaseEmail;
+use App\Sending\Domain\RenderableEmail;
 use App\Sending\Domain\RenderedEmail;
 
 final readonly class ReleaseEmailRenderer implements EmailRenderer
 {
     #[\Override]
-    public function render(ReleaseEmail $email): RenderedEmail
+    public function render(RenderableEmail $email): RenderedEmail
     {
+        if (!$email instanceof ReleaseEmail) {
+            throw new \InvalidArgumentException(
+                'ReleaseEmailRenderer can only render a ReleaseEmail, got ' . $email::class,
+            );
+        }
+
         return new RenderedEmail(
             "New Release: {$email->repository->value()} {$email->tagName->value()}",
             $this->buildHtmlBody($email),

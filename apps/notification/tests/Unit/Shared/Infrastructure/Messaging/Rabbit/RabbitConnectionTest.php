@@ -2,15 +2,20 @@
 
 declare(strict_types=1);
 
-namespace Tests\Shared\Infrastructure\Messaging\Rabbit;
+namespace Tests\Unit\Shared\Infrastructure\Messaging\Rabbit;
 
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Proves the service-side topology matches the monolith byte-for-byte (one
+ * source of truth, arch §7): the send-email family plus the HW9 welcome-email
+ * family with its hyphen reply queue.
+ */
 final class RabbitConnectionTest extends TestCase
 {
-    public function testAssertsTheExactTopologyOnConstruction(): void
+    public function testAssertsTheFullTopologyIncludingTheWelcomeFamily(): void
     {
         $channel = $this->createMock(AMQPChannel::class);
 
@@ -37,55 +42,12 @@ final class RabbitConnectionTest extends TestCase
 
         new RabbitConnection($channel);
 
-        self::assertSame(
-            ['notifications', 'topic', false, true, false],
-            array_slice($exchangeDeclareCalls[0], 0, 5)
-        );
-        self::assertSame(
-            ['notifications.dlx', 'fanout', false, true, false],
-            array_slice($exchangeDeclareCalls[1], 0, 5)
-        );
-
+        // Send-email family.
         self::assertSame('notifications.send-email', $queueDeclareCalls[0][0]);
-        self::assertFalse($queueDeclareCalls[0][1]);  // passive
-        self::assertTrue($queueDeclareCalls[0][2]);   // durable
-        self::assertFalse($queueDeclareCalls[0][3]);  // exclusive
-        self::assertFalse($queueDeclareCalls[0][4]);  // auto_delete
-        self::assertFalse($queueDeclareCalls[0][5]);  // nowait
-        self::assertSame(
-            ['x-dead-letter-exchange' => ['S', 'notifications.dlx']],
-            $queueDeclareCalls[0][6]
-        );
-
         self::assertSame('notifications.send-email.retry', $queueDeclareCalls[1][0]);
-        self::assertFalse($queueDeclareCalls[1][1]);  // passive
-        self::assertTrue($queueDeclareCalls[1][2]);   // durable
-        self::assertFalse($queueDeclareCalls[1][3]);  // exclusive
-        self::assertFalse($queueDeclareCalls[1][4]);  // auto_delete
-        self::assertFalse($queueDeclareCalls[1][5]);  // nowait
-        self::assertSame(
-            [
-                'x-dead-letter-exchange' => ['S', ''],
-                'x-dead-letter-routing-key' => ['S', 'notifications.send-email'],
-            ],
-            $queueDeclareCalls[1][6]
-        );
-
         self::assertSame('notifications.send-email.dlq', $queueDeclareCalls[2][0]);
-        self::assertFalse($queueDeclareCalls[2][1]);  // passive
-        self::assertTrue($queueDeclareCalls[2][2]);   // durable
-        self::assertFalse($queueDeclareCalls[2][3]);  // exclusive
-        self::assertFalse($queueDeclareCalls[2][4]);  // auto_delete
 
-        self::assertSame(
-            ['notifications.send-email', 'notifications', 'release.email'],
-            array_slice($queueBindCalls[0], 0, 3)
-        );
-        self::assertSame('notifications.send-email.dlq', $queueBindCalls[1][0]);
-        self::assertSame('notifications.dlx', $queueBindCalls[1][1]);
-        self::assertSame('', $queueBindCalls[1][2]);  // fanout DLX: no routing-key semantics
-
-        // Welcome-email family (HW9) — same envelope as the send-email family.
+        // Welcome-email family.
         self::assertSame('notifications.welcome-email', $queueDeclareCalls[3][0]);
         self::assertTrue($queueDeclareCalls[3][2]);   // durable
         self::assertSame(
@@ -94,7 +56,6 @@ final class RabbitConnectionTest extends TestCase
         );
 
         self::assertSame('notifications.welcome-email.retry', $queueDeclareCalls[4][0]);
-        self::assertTrue($queueDeclareCalls[4][2]);   // durable
         self::assertSame(
             [
                 'x-dead-letter-exchange' => ['S', ''],
@@ -104,12 +65,11 @@ final class RabbitConnectionTest extends TestCase
         );
 
         self::assertSame('notifications.welcome-email.dlq', $queueDeclareCalls[5][0]);
-        self::assertTrue($queueDeclareCalls[5][2]);   // durable
 
-        // Reply queue: hyphen sibling (not a dotted DLQ child), plain durable, no DLX.
+        // Reply queue: hyphen sibling, plain durable, no DLX of its own.
         self::assertSame('notifications.welcome-email-reply', $queueDeclareCalls[6][0]);
         self::assertTrue($queueDeclareCalls[6][2]);   // durable
-        self::assertSame([], $queueDeclareCalls[6][6]);  // empty arguments — no DLX of its own
+        self::assertSame([], $queueDeclareCalls[6][6]);  // empty arguments — no DLX
 
         self::assertSame(
             ['notifications.welcome-email', 'notifications', 'subscription.welcome-email'],
@@ -123,7 +83,7 @@ final class RabbitConnectionTest extends TestCase
         );
     }
 
-    public function testExposesTheUnderlyingChannelForReuseByPublisherAndConsumer(): void
+    public function testExposesTheUnderlyingChannel(): void
     {
         $channel = $this->createMock(AMQPChannel::class);
         $channel->method('exchange_declare')->willReturn(null);

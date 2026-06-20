@@ -6,5 +6,5 @@ namespace App\Sending\Domain;
 
 interface EmailRenderer
 {
-    public function render(ReleaseEmail $email): RenderedEmail;
+    public function render(RenderableEmail $email): RenderedEmail;
 }

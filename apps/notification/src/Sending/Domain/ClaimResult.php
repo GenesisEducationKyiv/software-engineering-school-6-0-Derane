@@ -32,6 +32,11 @@ final readonly class ClaimResult
         return new self(ClaimOutcome::InFlight, null);
     }
 
+    public static function alreadyFailed(): self
+    {
+        return new self(ClaimOutcome::AlreadyFailed, null);
+    }
+
     public function token(): string
     {
         if ($this->token === null) {

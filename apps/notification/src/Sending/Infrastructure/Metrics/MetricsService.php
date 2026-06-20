@@ -60,6 +60,36 @@ final readonly class MetricsService implements MetricsServiceInterface
                 MetricType::Counter,
                 $this->reader->supersededCount()
             ),
+            new Metric(
+                'welcome_consumed_total',
+                'Welcome messages consumed by the notification service',
+                MetricType::Counter,
+                $this->reader->welcomeConsumedCount()
+            ),
+            new Metric(
+                'welcome_sent_total',
+                'Welcome emails successfully sent',
+                MetricType::Counter,
+                $this->reader->welcomeSentCount()
+            ),
+            new Metric(
+                'welcome_deduped_total',
+                'Welcome messages skipped by idempotency checks',
+                MetricType::Counter,
+                $this->reader->welcomeDedupedCount()
+            ),
+            new Metric(
+                'welcome_failed_total',
+                'Welcome emails that failed terminally',
+                MetricType::Counter,
+                $this->reader->welcomeFailedCount()
+            ),
+            new Metric(
+                'welcome_reply_published_total',
+                'WelcomeEmailOutcome replies published back to the orchestrator',
+                MetricType::Counter,
+                $this->reader->welcomeReplyPublishedCount()
+            ),
         ]);
     }
 }
