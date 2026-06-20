@@ -88,6 +88,23 @@ deptrac:
           value: src/Scanning/Scanner/Infrastructure/.*
 
     # ---------------------------------------------------------------------
+    # Saga\Enrollment context (NEW, HW9) — the monolith orchestrator. Unlike
+    # Scanning it DOES have a Domain layer (the EnrollmentSaga aggregate + ports).
+    # ---------------------------------------------------------------------
+    - name: Saga.Domain
+      collectors:
+        - type: directory
+          value: src/Saga/Enrollment/Domain/.*
+    - name: Saga.Application
+      collectors:
+        - type: directory
+          value: src/Saga/Enrollment/Application/.*
+    - name: Saga.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Saga/Enrollment/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
     # Notification\Publishing context (monolith publisher side)
     # ---------------------------------------------------------------------
     - name: NotificationPublishing.Domain
@@ -149,6 +166,8 @@ deptrac:
       - Subscription.Domain         # B5: ExceptionStatusMap references SubscriptionNotFoundException; MetricsService uses SubscriptionCountPort
       - Releases.Domain             # B5: ExceptionStatusMap references RateLimitException
       - RepositoryTracking.Domain   # B5: MetricsService uses RepositoryCountPort
+      - Saga.Domain                 # HW9: ExceptionStatusMap references SagaNotFoundException (A4 arm); MetricsService uses EnrollmentSagaCountPort (state gauges)
+      - Saga.Application            # HW9 D5: MetricsService reads the SagaMetricsReader port (event-count gauges off the 006 saga_metrics read-model)
 
     # ===== Subscription
     Subscription.Domain:
@@ -159,6 +178,7 @@ deptrac:
       - Shared.Application
       - Releases.Domain               # B1 grant: repositoryExists() port (GitHubServiceInterface)
       - RepositoryTracking.Domain     # B1 grant: ensureExists() port (TrackedRepositoryRegistrar)
+      - Saga.Domain                   # HW9: SubscribeCommandHandler starts the saga atomically via EnrollmentSagaStarter
     Subscription.Infrastructure:
       - Subscription.Domain
       - Subscription.Application
@@ -210,6 +230,27 @@ deptrac:
       - Shared.Application
       - Shared.Infrastructure
 
+    # ===== Saga\Enrollment (NEW, HW9). The orchestrator context. Saga.Domain depends
+    # on Shared.Domain ONLY — it never references a Subscription value object; the
+    # correlation key crossing contexts is the primitive int $subscriptionId. This
+    # mutual independence of Saga.Domain and Subscription.Domain is the acyclicity
+    # invariant that keeps the two opposite-direction port edges below
+    # (Subscription.Application -> Saga.Domain for start; Saga.Application ->
+    # Subscription.Domain for confirm/cancel) free of a Domain<->Domain cycle.
+    Saga.Domain:
+      - Shared.Domain                 # HW9: SagaId VO, DomainEvent, EmailAddress/RepositoryName on SendWelcomeEmail — nothing else
+    Saga.Application:
+      - Saga.Domain
+      - Shared.Domain
+      - Shared.Application
+      - Subscription.Domain           # HW9 grant: HandleWelcomeEmailOutcomeHandler confirms/cancels via SubscriptionConfirmationWriter
+    Saga.Infrastructure:
+      - Saga.Application
+      - Saga.Domain
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure          # HW9: RabbitPublisher/RabbitConnection/RabbitConsumer + PDO::class adapters
+
     # ===== Notification\Publishing. Its Domain stays free of cross-context edges:
     # SendReleaseEmail/ReleaseSnapshot are deliberately decoupled from Releases so the
     # wire message can cross the queue boundary. Cross-context *port* edges:
@@ -253,6 +294,9 @@ deptrac:
       - Releases.Infrastructure
       - Scanning.Application
       - Scanning.Infrastructure
+      - Saga.Domain
+      - Saga.Application
+      - Saga.Infrastructure
       - NotificationPublishing.Domain
       - NotificationPublishing.Application
       - NotificationPublishing.Infrastructure
