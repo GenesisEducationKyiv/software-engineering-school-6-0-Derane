@@ -101,6 +101,7 @@ final class ReleaseNotifierServiceTest extends TestCase
         $this->assertSame('grpc@example.com', $reply->getEmail());
         $this->assertSame('docker/compose', $reply->getRepository());
         $this->assertSame('2026-04-12T00:00:00Z', $reply->getCreatedAt());
+        $this->assertSame('pending', $reply->getStatus());
     }
 
     public function testListSubscriptionsPassesPagination(): void
@@ -125,6 +126,7 @@ final class ReleaseNotifierServiceTest extends TestCase
 
         $this->assertCount(1, $reply->getSubscriptions());
         $this->assertSame('docker/compose', $reply->getSubscriptions()[0]->getRepository());
+        $this->assertSame('pending', $reply->getSubscriptions()[0]->getStatus());
     }
 
     public function testGetSubscriptionAsksByIdAndMapsReply(): void
@@ -138,6 +140,7 @@ final class ReleaseNotifierServiceTest extends TestCase
         $reply = $this->service->GetSubscription($this->context, new GetSubscriptionRequest(['id' => 4]));
 
         $this->assertSame(4, $reply->getId());
+        $this->assertSame('pending', $reply->getStatus());
     }
 
     public function testGetSubscriptionMapsNotFoundToGrpcNotFound(): void

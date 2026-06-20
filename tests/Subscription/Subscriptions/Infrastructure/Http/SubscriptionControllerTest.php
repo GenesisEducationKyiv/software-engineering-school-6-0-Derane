@@ -17,12 +17,14 @@ use App\Subscription\Subscriptions\Application\List\ListSubscriptionsQuery;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
 use App\Subscription\Subscriptions\Application\SubscriptionPageResponse;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
+use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\RequestFactory;
 use Slim\Psr7\Factory\ResponseFactory;
+use Tests\Subscription\Subscriptions\Domain\SubscriptionMother;
 
 final class SubscriptionControllerTest extends TestCase
 {
@@ -95,9 +97,38 @@ final class SubscriptionControllerTest extends TestCase
 
         $this->assertSame(201, $result->getStatusCode());
         $this->assertSame(
-            ['id' => 9, 'email' => 'a@b.com', 'repository' => 'golang/go', 'created_at' => '2026-04-12T00:00:00Z'],
+            [
+                'id' => 9,
+                'email' => 'a@b.com',
+                'repository' => 'golang/go',
+                'created_at' => '2026-04-12T00:00:00Z',
+                'status' => 'pending',
+            ],
             json_decode((string) $result->getBody(), true)
         );
+    }
+
+    public function testCreateSerializesFreshlyCreatedSubscriptionWithPendingStatus(): void
+    {
+        // A freshly-created subscription (create path) carries the 'pending' default;
+        // assert it survives all the way onto the serialized JSON wire (additive E3 field).
+        $response = (new SubscriptionResponseFactory())->fromAggregate(SubscriptionMother::subscribing(
+            'fresh@example.com',
+            'golang/go',
+            '2026-04-12T00:00:00Z'
+        ));
+        $this->queryBus->method('ask')->willReturn($response);
+
+        $request = (new RequestFactory())
+            ->createRequest('POST', '/api/subscriptions')
+            ->withParsedBody(['email' => 'fresh@example.com', 'repository' => 'golang/go']);
+        $httpResponse = (new ResponseFactory())->createResponse();
+
+        $result = $this->controller->create($request, $httpResponse);
+        $decoded = json_decode((string) $result->getBody(), true);
+
+        $this->assertIsArray($decoded);
+        $this->assertSame('pending', $decoded['status']);
     }
 
     public function testGetAsksByIdAndReturns200(): void
@@ -115,7 +146,13 @@ final class SubscriptionControllerTest extends TestCase
 
         $this->assertSame(200, $result->getStatusCode());
         $this->assertSame(
-            ['id' => 3, 'email' => 'a@b.com', 'repository' => 'golang/go', 'created_at' => '2026-04-12T00:00:00Z'],
+            [
+                'id' => 3,
+                'email' => 'a@b.com',
+                'repository' => 'golang/go',
+                'created_at' => '2026-04-12T00:00:00Z',
+                'status' => 'pending',
+            ],
             json_decode((string) $result->getBody(), true)
         );
     }
@@ -156,7 +193,15 @@ final class SubscriptionControllerTest extends TestCase
         $result = $this->controller->list($request, $response);
 
         $this->assertSame(
-            [['id' => 1, 'email' => 'a@b.com', 'repository' => 'golang/go', 'created_at' => '2026-04-12T00:00:00Z']],
+            [
+                [
+                    'id' => 1,
+                    'email' => 'a@b.com',
+                    'repository' => 'golang/go',
+                    'created_at' => '2026-04-12T00:00:00Z',
+                    'status' => 'pending',
+                ],
+            ],
             json_decode((string) $result->getBody(), true)
         );
     }

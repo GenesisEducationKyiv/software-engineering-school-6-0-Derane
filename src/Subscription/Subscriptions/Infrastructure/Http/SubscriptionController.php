@@ -89,7 +89,7 @@ final readonly class SubscriptionController
         return $response->withStatus(StatusCodeInterface::STATUS_NO_CONTENT);
     }
 
-    /** @return array{id: int, email: string, repository: string, created_at: string} */
+    /** @return array{id: int, email: string, repository: string, created_at: string, status: string} */
     private function toArray(SubscriptionResponse $subscription): array
     {
         return [
@@ -97,6 +97,7 @@ final readonly class SubscriptionController
             'email' => $subscription->email,
             'repository' => $subscription->repository,
             'created_at' => $subscription->createdAt,
+            'status' => $subscription->status,
         ];
     }
 

@@ -16,7 +16,7 @@ class ReleaseNotifier
         }
         $pool->internalAddGeneratedFile(
             '
-˝
+ç	
 proto/release_notifier.protorelease_notifier.v1"
 HealthCheckRequest"%
 HealthCheckResponse
@@ -34,7 +34,7 @@ repository (	"H
 id ("\'
 DeleteSubscriptionRequest
 
-id ("V
+id ("f
 SubscriptionReply
 
 id (
@@ -42,7 +42,8 @@ repository (	"H
 
 repository (	
 
-created_at (	"W
+created_at (	
+status (	"W
 ListSubscriptionsReply=
 subscriptions (2&.release_notifier.v1.SubscriptionReply"*
 DeleteSubscriptionReply

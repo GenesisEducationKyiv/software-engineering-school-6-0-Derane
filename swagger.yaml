@@ -198,6 +198,10 @@ components:
         created_at:
           type: string
           format: date-time
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled]
+          example: pending
 
     Error:
       type: object
