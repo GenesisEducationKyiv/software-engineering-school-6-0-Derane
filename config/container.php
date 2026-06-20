@@ -48,12 +48,33 @@ use App\RepositoryTracking\Repositories\Infrastructure\Persistence\PdoTrackedRep
 use App\Scanning\Scanner\Application\ReleaseDetector;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
+use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
+use App\Saga\Enrollment\Domain\EnrollmentSagaStarter;
+use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
+use App\Saga\Enrollment\Domain\WelcomeEmailMessageFactory;
+use App\Saga\Enrollment\Domain\WelcomeEmailRelay;
+use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeCommand;
+use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeHandler;
+use App\Saga\Enrollment\Application\Relay\RelayPendingWelcomeEmails;
+use App\Saga\Enrollment\Application\Sweep\SweepTimedOutSagas;
+use App\Saga\Enrollment\Domain\EnrollmentSagaCountPort;
+use App\Saga\Enrollment\Infrastructure\Persistence\PdoEnrollmentSagaRepository;
+use App\Saga\Enrollment\Infrastructure\Persistence\PdoWelcomeEmailMessageFactory;
+use App\Saga\Enrollment\Infrastructure\Rabbit\RabbitWelcomeEmailRelay;
+use App\Saga\Enrollment\Infrastructure\Rabbit\SendWelcomeEmailSerializer;
+use App\Saga\Enrollment\Infrastructure\Rabbit\WelcomeEmailOutcomeConsumer;
+use App\Saga\Enrollment\Infrastructure\Rabbit\WelcomeEmailOutcomeMessageMapper;
+use App\Saga\Enrollment\Application\SagaMetricsReader;
+use App\Saga\Enrollment\Application\SagaMetricsRecorder;
+use App\Saga\Enrollment\Infrastructure\Persistence\PdoSagaMetricsStore;
+use App\Saga\Enrollment\Infrastructure\Worker\SagaWorker;
 use App\Scanning\Scanner\Infrastructure\Cli\ScannerCliRunner;
 use App\Shared\Application\Pagination\PaginationFactory;
 use App\Shared\Application\Pagination\PaginationFactoryInterface;
 use App\Shared\Domain\Bus\Command\CommandBus;
 use App\Shared\Domain\Bus\Query\QueryBus;
 use App\Shared\Domain\Clock;
+use App\Shared\Domain\TransactionManager;
 use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Shared\Infrastructure\Bus\InMemoryCommandBus;
 use App\Shared\Infrastructure\Bus\InMemoryQueryBus;
@@ -61,11 +82,14 @@ use App\Shared\Infrastructure\Clock\SystemClock;
 use App\Shared\Infrastructure\Error\ExceptionStatusMap;
 use App\Shared\Infrastructure\Event\InMemoryEventDispatcher;
 use App\Shared\Infrastructure\Event\ListenerProvider;
+use App\Shared\Infrastructure\Persistence\PdoTransactionManager;
 use App\Shared\Infrastructure\Health\DatabaseHealthCheck;
 use App\Shared\Infrastructure\Health\HealthCheckInterface;
 use App\Shared\Infrastructure\Http\ApiKeyMiddleware;
 use App\Shared\Infrastructure\Http\ErrorHandlerMiddleware;
+use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
+use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use App\Shared\Infrastructure\Metrics\MetricsService;
 use App\Shared\Infrastructure\Metrics\MetricsServiceInterface;
 use App\Shared\Infrastructure\Metrics\PrometheusFormatter;
@@ -82,6 +106,7 @@ use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommandHandler
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommandHandler;
 use App\Subscription\Subscriptions\Domain\SubscriberFinder;
+use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
 use App\Subscription\Subscriptions\Domain\SubscriptionCountPort;
 use App\Subscription\Subscriptions\Domain\SubscriptionCreated;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
@@ -91,6 +116,7 @@ use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactory;
 use App\Subscription\Subscriptions\Infrastructure\Factory\SubscriptionFactoryInterface;
 use App\Subscription\Subscriptions\Infrastructure\Http\SubscriptionController;
 use App\Subscription\Subscriptions\Infrastructure\Listener\WhenSubscriptionCreatedThenLog;
+use App\Subscription\Subscriptions\Infrastructure\Persistence\PdoSubscriptionConfirmationWriter;
 use App\Subscription\Subscriptions\Infrastructure\Persistence\PdoSubscriptionRepository;
 use App\Migration\Migrator;
 use DI\Container;
@@ -236,6 +262,104 @@ return static function (array $settings): Container {
         SubscriberFinder::class => static fn($c) => $c->get(SubscriptionRepository::class),
         SubscriptionCountPort::class => static fn($c) => $c->get(SubscriptionRepository::class),
 
+        // HW9 B3: the conditional confirm/cancel writer (Saga.Application ->
+        // Subscription.Domain edge), on the same shared PDO::class.
+        SubscriptionConfirmationWriter::class => static fn($c) => new PdoSubscriptionConfirmationWriter(
+            $c->get(PDO::class)
+        ),
+
+        // HW9 B2: the single explicit DB-transaction boundary over the SAME shared
+        // PDO::class the saga repo and subscription repo receive, so they enlist in
+        // the one transaction it opens (atomic start, FR2/FR3).
+        TransactionManager::class => static fn($c) => new PdoTransactionManager(
+            $c->get(PDO::class)
+        ),
+
+        // HW9 B1: the durable saga state store. ISP-alias the Reader/Writer narrow
+        // ports to the one Starter instance (per-consumer ISP).
+        EnrollmentSagaStarter::class => static fn($c) => new PdoEnrollmentSagaRepository(
+            $c->get(PDO::class),
+            $c->get(Clock::class)
+        ),
+        EnrollmentSagaReader::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
+        EnrollmentSagaWriter::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
+        EnrollmentSagaCountPort::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
+
+        // HW9 D5: the monolith saga-metrics counter table (006 saga_metrics),
+        // incremented at the D1 relay / D3 reply consumer / D4 sweeper call-sites
+        // and read back as Gauges by MetricsService.
+        SagaMetricsRecorder::class => static fn($c) => new PdoSagaMetricsStore(
+            $c->get(PDO::class)
+        ),
+        SagaMetricsReader::class => static fn($c) => $c->get(SagaMetricsRecorder::class),
+        PdoSagaMetricsStore::class => static fn($c) => $c->get(SagaMetricsRecorder::class),
+
+        // HW9 D1: the outbox relay's publish adapter + serializer + the message
+        // factory that resolves (email, repository) for a due saga's subscription.
+        SendWelcomeEmailSerializer::class => static fn() => new SendWelcomeEmailSerializer(),
+        // H1: the relay opens its OWN dedicated confirm-mode channel on the shared
+        // RabbitConnection — it must NOT reuse RabbitPublisher (whose channel is the
+        // worker's long-lived consume channel; confirm_select on it corrupts wait()).
+        WelcomeEmailRelay::class => static fn($c) => new RabbitWelcomeEmailRelay(
+            $c->get(RabbitConnection::class),
+            $c->get(SendWelcomeEmailSerializer::class),
+            $c->get(LoggerInterface::class),
+        ),
+        WelcomeEmailMessageFactory::class => static fn($c) => new PdoWelcomeEmailMessageFactory(
+            $c->get(PDO::class),
+            $c->get(Clock::class),
+        ),
+
+        // HW9 D2: the monolith's first runtime consumer port -> the verbatim live
+        // RabbitConsumer (M4 fence). The saga worker consumes the reply queue here.
+        MessageConsumer::class => static fn($c) => new RabbitConsumer(
+            $c->get(RabbitConnection::class)
+        ),
+
+        // HW9 D2/D3/D4: the relay/reply/sweep use-cases the worker drives per tick.
+        RelayPendingWelcomeEmails::class => static fn($c) => new RelayPendingWelcomeEmails(
+            $c->get(EnrollmentSagaReader::class),
+            $c->get(WelcomeEmailMessageFactory::class),
+            $c->get(WelcomeEmailRelay::class),
+            $c->get(EnrollmentSagaWriter::class),
+            $c->get(SagaMetricsRecorder::class),
+            $c->get(LoggerInterface::class),
+        ),
+        SweepTimedOutSagas::class => static fn($c) => new SweepTimedOutSagas(
+            $c->get(EnrollmentSagaReader::class),
+            $c->get(EnrollmentSagaWriter::class),
+            $c->get(SubscriptionConfirmationWriter::class),
+            $c->get(TransactionManager::class),
+            $c->get(Clock::class),
+            $c->get(SagaMetricsRecorder::class),
+        ),
+        HandleWelcomeEmailOutcomeHandler::class => static fn($c) => new HandleWelcomeEmailOutcomeHandler(
+            $c->get(TransactionManager::class),
+            $c->get(EnrollmentSagaWriter::class),
+            $c->get(SubscriptionConfirmationWriter::class),
+            $c->get(SagaMetricsRecorder::class),
+        ),
+        WelcomeEmailOutcomeMessageMapper::class => static fn() => new WelcomeEmailOutcomeMessageMapper(),
+        WelcomeEmailOutcomeConsumer::class => static fn($c) => new WelcomeEmailOutcomeConsumer(
+            $c->get(MessageConsumer::class),
+            $c->get(WelcomeEmailOutcomeMessageMapper::class),
+            $c->get(CommandBus::class),
+            $c->get(SagaMetricsRecorder::class),
+            $c->get(LoggerInterface::class),
+        ),
+        SagaWorker::class => static fn($c) => new SagaWorker(
+            $c->get(RelayPendingWelcomeEmails::class),
+            $c->get(WelcomeEmailOutcomeConsumer::class),
+            $c->get(SweepTimedOutSagas::class),
+            $c->get(RabbitConnection::class),
+            $c->get(LoggerInterface::class),
+            $settings['saga']['relay_batch_size'],
+            $settings['saga']['timeout_seconds'],
+            $settings['saga']['start_timeout_seconds'],
+            $settings['saga']['worker_wait_seconds'],
+            $settings['saga']['sweep_every_ticks'],
+        ),
+
         RepositoryStatusReader::class => static fn($c) => new PdoTrackedRepositoryReader(
             $c->get(PDO::class),
             $c->get(RepositoryStatusFactoryInterface::class)
@@ -280,7 +404,9 @@ return static function (array $settings): Container {
             $c->get(ReleaseSource::class),
             $c->get(TrackedRepositoryRegistrar::class),
             $c->get(EventDispatcherInterface::class),
-            $c->get(Clock::class)
+            $c->get(Clock::class),
+            $c->get(EnrollmentSagaStarter::class),
+            $c->get(TransactionManager::class)
         ),
         UnsubscribeCommandHandler::class => static fn($c) => new UnsubscribeCommandHandler(
             $c->get(SubscriptionRepository::class),
@@ -305,6 +431,8 @@ return static function (array $settings): Container {
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
             ScanReleasesCommand::class => $c->get(ScanReleasesHandler::class),
+            // HW9 D3: the reply-path orchestrator (T3 confirm / C1 compensate).
+            HandleWelcomeEmailOutcomeCommand::class => $c->get(HandleWelcomeEmailOutcomeHandler::class),
         ]),
         QueryBus::class => static fn($c) => new InMemoryQueryBus([
             FindSubscriptionByIdQuery::class => $c->get(FindSubscriptionByIdHandler::class),
@@ -319,6 +447,8 @@ return static function (array $settings): Container {
         MetricsServiceInterface::class => static fn($c) => new MetricsService(
             $c->get(SubscriptionCountPort::class),
             $c->get(RepositoryCountPort::class),
+            $c->get(EnrollmentSagaCountPort::class),
+            $c->get(SagaMetricsReader::class),
             $c->get(PrometheusFormatter::class)
         ),
 

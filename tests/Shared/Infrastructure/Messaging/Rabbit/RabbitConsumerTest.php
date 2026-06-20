@@ -6,138 +6,188 @@ namespace Tests\Shared\Infrastructure\Messaging\Rabbit;
 
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
+use App\Shared\Infrastructure\Messaging\Rabbit\RetryPublishFailedException;
 use PhpAmqpLib\Channel\AMQPChannel;
+use PhpAmqpLib\Connection\AbstractConnection;
+use PhpAmqpLib\Exception\AMQPTimeoutException;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 /**
- * `RabbitConsumer` exposes generic ack/nack/requeue primitives and routes
- * over-redelivered messages to the DLQ via bounded `x-death` inspection —
- * proven against fixture `AMQPMessage`s with synthetic `x-death` headers
- * (no live broker).
+ * Monolith RabbitConsumer is now the verbatim copy of the live notification
+ * consumer (M4 fence): bounded prefetch, `x-retry-count`-header retry/park on a
+ * DEDICATED confirm-mode channel, fail-closed (no-ack) on an unconfirmed copy, and
+ * the `>=` DLQ bound. The mechanics are exercised against a mocked AMQPChannel
+ * (RabbitConsumer/RabbitConnection are final readonly and cannot be doubled).
  */
 final class RabbitConsumerTest extends TestCase
 {
-    private const QUEUE = 'notifications.send-email';
+    private const RETRY_QUEUE = 'notifications.welcome-email.retry';
+    private const VALID_JSON = '{"schema":"WelcomeEmailOutcome/v1"}';
+    private const CLAIM_LEASE_SECONDS = 300;
 
-    public function testRegistersTheCallbackAgainstTheGivenQueue(): void
+    public function testConsumeSetsBoundedPrefetchThenStartsConsuming(): void
     {
-        $channel = $this->createMock(AMQPChannel::class);
-        $callback = static function (AMQPMessage $message): void {
-        };
-
+        $channel = $this->channel();
+        $channel->expects(self::once())->method('basic_qos')->with(0, 10, false);
         $channel->expects(self::once())
             ->method('basic_consume')
-            ->with(self::QUEUE, '', false, false, false, false, $callback);
+            ->with('the-queue', '', false, false, false, false, self::anything());
 
-        $consumer = new RabbitConsumer($this->connectionWrapping($channel));
-        $consumer->consume(self::QUEUE, $callback);
+        $this->consumer($channel)->consume('the-queue', static fn(AMQPMessage $m): null => null);
     }
 
-    public function testAckDelegatesToTheMessagesOwnAcknowledgement(): void
+    public function testRequeueWithRetryRepublishesADelayedCopyPreservingPropertiesAndIncrementingTheCount(): void
     {
-        $channel = $this->createMock(AMQPChannel::class);
-        $channel->expects(self::once())->method('basic_ack')->with(7, false);
+        $published = [];
+        $acked = [];
+        $channel = $this->channel($acked, $this->publishChannel($published));
+        $message = $this->message($channel, deliveryTag: 7, retryCount: 1);
 
-        $message = $this->deliveredMessage($channel, deliveryTag: 7);
+        $this->consumer($channel)->requeueWithRetry($message, self::RETRY_QUEUE);
 
-        (new RabbitConsumer($this->connectionWrapping($channel)))->ack($message);
+        self::assertCount(1, $published);
+        // Default exchange + queue-name routing key = direct to the retry parking queue.
+        self::assertSame('', $published[0]['exchange']);
+        self::assertSame(self::RETRY_QUEUE, $published[0]['routingKey']);
+
+        $copy = $published[0]['message'];
+        self::assertSame(self::VALID_JSON, $copy->getBody());
+        self::assertSame('application/json', $copy->get('content_type'));
+        self::assertSame(2, $copy->get('delivery_mode'));
+        // newCount = 2 → delay 5s * 2^(2-1) = 10s, in milliseconds.
+        self::assertSame('10000', $copy->get('expiration'));
+
+        $headers = $copy->get('application_headers');
+        self::assertInstanceOf(AMQPTable::class, $headers);
+        self::assertSame(2, $headers->getNativeData()['x-retry-count']);
+
+        // Original acked only after the copy is confirmed.
+        self::assertSame(7, $acked['ack'] ?? null);
     }
 
-    public function testNackWithRequeueTrueAsksTheBrokerToRedeliver(): void
+    public function testRequeueWithoutRetryIncrementParksForTheGivenDelayPreservingTheRetryCount(): void
     {
-        $channel = $this->createMock(AMQPChannel::class);
-        $channel->expects(self::once())->method('basic_nack')->with(11, false, true);
+        $published = [];
+        $acked = [];
+        $channel = $this->channel($acked, $this->publishChannel($published));
+        $message = $this->message($channel, deliveryTag: 8, retryCount: 2);
 
-        $message = $this->deliveredMessage($channel, deliveryTag: 11);
-
-        (new RabbitConsumer($this->connectionWrapping($channel)))->nack($message, requeue: true);
-    }
-
-    public function testNackWithRequeueFalseRoutesToTheDlqViaTheQueuesDeadLetterExchange(): void
-    {
-        $channel = $this->createMock(AMQPChannel::class);
-        $channel->expects(self::once())->method('basic_nack')->with(13, false, false);
-
-        $message = $this->deliveredMessage($channel, deliveryTag: 13);
-
-        (new RabbitConsumer($this->connectionWrapping($channel)))->nack($message, requeue: false);
-    }
-
-    public function testRedeliveryCountIsZeroWhenTheMessageCarriesNoXDeathHeader(): void
-    {
-        $consumer = new RabbitConsumer($this->connectionWrapping($this->createMock(AMQPChannel::class)));
-
-        $freshMessage = new AMQPMessage('{"v":1}');
-
-        self::assertSame(0, $consumer->redeliveryCountFor($freshMessage, self::QUEUE));
-        self::assertFalse($consumer->shouldRouteToDlq($freshMessage, self::QUEUE, maxRedeliveries: 3));
-    }
-
-    public function testRedeliveryCountReadsOnlyTheRecordMatchingTheTargetQueueAmongMultipleRecords(): void
-    {
-        $consumer = new RabbitConsumer($this->connectionWrapping($this->createMock(AMQPChannel::class)));
-
-        // Realistic fixture: multiple x-death records, only one (and a second,
-        // different-reason one) matching notifications.send-email — proving
-        // we sum the matching records and ignore the unrelated queue's record.
-        $message = $this->messageWithXDeath([
-            ['queue' => 'some-other-queue', 'reason' => 'expired', 'count' => 9],
-            ['queue' => self::QUEUE, 'reason' => 'rejected', 'count' => 2],
-            ['queue' => self::QUEUE, 'reason' => 'expired', 'count' => 1],
-        ]);
-
-        self::assertSame(3, $consumer->redeliveryCountFor($message, self::QUEUE));
-    }
-
-    /** @return array<array{0: int, 1: int, 2: bool}> [redeliveryCount, maxRedeliveries, expectedShouldRouteToDlq] */
-    public static function dlqRoutingBoundaryProvider(): array
-    {
-        return [
-            'below the bound -> retry/requeue path' => [2, 3, false],
-            'at the bound -> still within allowance, retry/requeue path' => [3, 3, false],
-            'one over the bound -> DLQ-routing path' => [4, 3, true],
-            'far over the bound -> DLQ-routing path' => [10, 3, true],
-        ];
-    }
-
-    /**
-     * @dataProvider dlqRoutingBoundaryProvider
-     */
-    public function testShouldRouteToDlqFiresOnlyWhenTheRedeliveryBoundIsExceeded(
-        int $redeliveryCount,
-        int $maxRedeliveries,
-        bool $expectedShouldRouteToDlq
-    ): void {
-        $consumer = new RabbitConsumer($this->connectionWrapping($this->createMock(AMQPChannel::class)));
-
-        $message = $this->messageWithXDeath([
-            ['queue' => self::QUEUE, 'reason' => 'rejected', 'count' => $redeliveryCount],
-        ]);
-
-        self::assertSame(
-            $expectedShouldRouteToDlq,
-            $consumer->shouldRouteToDlq($message, self::QUEUE, $maxRedeliveries)
+        $this->consumer($channel)->requeueWithoutRetryIncrement(
+            $message,
+            self::RETRY_QUEUE,
+            self::CLAIM_LEASE_SECONDS,
         );
+
+        self::assertCount(1, $published);
+        $copy = $published[0]['message'];
+        self::assertSame((string) (self::CLAIM_LEASE_SECONDS * 1000), $copy->get('expiration'));
+
+        $headers = $copy->get('application_headers');
+        self::assertInstanceOf(AMQPTable::class, $headers);
+        self::assertSame(2, $headers->getNativeData()['x-retry-count']);
+
+        self::assertSame(8, $acked['ack'] ?? null);
     }
 
-    /**
-     * @param array<int, array{queue: string, reason: string, count: int}> $records
-     */
-    private function messageWithXDeath(array $records): AMQPMessage
+    public function testRepublishFailsClosedAndDoesNotAckWhenTheConfirmWaitTimesOut(): void
     {
-        return new AMQPMessage('{"v":1}', [
-            'application_headers' => new AMQPTable(['x-death' => $records]),
-        ]);
+        $acked = [];
+        $publish = $this->createMock(AMQPChannel::class);
+        $publish->method('confirm_select')->willReturn(null);
+        $publish->method('set_nack_handler')->willReturn(null);
+        $publish->method('basic_publish')->willReturn(null);
+        $publish->method('wait_for_pending_acks')->willReturnCallback(static function (): void {
+            throw new AMQPTimeoutException('confirm timed out');
+        });
+        $publish->method('close')->willReturn(null);
+
+        $channel = $this->channel($acked, $publish);
+        $message = $this->message($channel, deliveryTag: 9, retryCount: 0);
+
+        try {
+            $this->consumer($channel)->requeueWithRetry($message, self::RETRY_QUEUE);
+            self::fail('expected RetryPublishFailedException');
+        } catch (RetryPublishFailedException) {
+            // expected
+        }
+
+        // Fail closed: the original is NOT acked, so the broker redelivers it.
+        self::assertArrayNotHasKey('ack', $acked);
     }
 
-    private function deliveredMessage(AMQPChannel $channel, int $deliveryTag): AMQPMessage
+    public function testRepublishFailsClosedAndDoesNotAckWhenTheBrokerNacksTheCopy(): void
     {
-        $message = new AMQPMessage('{"v":1}');
-        $message->setChannel($channel)->setDeliveryInfo($deliveryTag, false, 'notifications', 'release.email');
+        $acked = [];
+        $nackHandler = null;
+        $publish = $this->createMock(AMQPChannel::class);
+        $publish->method('confirm_select')->willReturn(null);
+        $publish->method('set_nack_handler')->willReturnCallback(
+            function (callable $handler) use (&$nackHandler): void {
+                $nackHandler = $handler;
+            }
+        );
+        $publish->method('basic_publish')->willReturn(null);
+        // wait_for_pending_acks invokes the registered nack handler on a broker nack
+        // rather than throwing; the production handler then throws.
+        $publish->method('wait_for_pending_acks')->willReturnCallback(
+            function () use (&$nackHandler): void {
+                self::assertIsCallable($nackHandler, 'nack handler must be registered before the confirm-wait');
+                ($nackHandler)();
+            }
+        );
+        $publish->method('close')->willReturn(null);
 
-        return $message;
+        $channel = $this->channel($acked, $publish);
+        $message = $this->message($channel, deliveryTag: 10, retryCount: 0);
+
+        try {
+            $this->consumer($channel)->requeueWithRetry($message, self::RETRY_QUEUE);
+            self::fail('expected RetryPublishFailedException');
+        } catch (RetryPublishFailedException) {
+            // expected
+        }
+
+        self::assertArrayNotHasKey('ack', $acked);
+    }
+
+    public function testShouldRouteToDlqIsTrueAtOrAboveTheBoundAndFalseBelow(): void
+    {
+        $channel = $this->channel();
+        $consumer = $this->consumer($channel);
+
+        self::assertFalse($consumer->shouldRouteToDlq($this->message($channel, 1, 2), 3));
+        self::assertTrue($consumer->shouldRouteToDlq($this->message($channel, 2, 3), 3));
+        self::assertTrue($consumer->shouldRouteToDlq($this->message($channel, 3, 5), 3));
+    }
+
+    public function testNackWithoutRequeueDelegatesToTheMessageForDeadLettering(): void
+    {
+        $acked = [];
+        $channel = $this->channel($acked);
+        $message = $this->message($channel, deliveryTag: 11, retryCount: 0);
+
+        $this->consumer($channel)->nack($message, requeue: false);
+
+        self::assertSame(['nack' => [11, false]], $acked);
+    }
+
+    public function testAckDelegatesToTheMessage(): void
+    {
+        $acked = [];
+        $channel = $this->channel($acked);
+        $message = $this->message($channel, deliveryTag: 12, retryCount: 0);
+
+        $this->consumer($channel)->ack($message);
+
+        self::assertSame(12, $acked['ack'] ?? null);
+    }
+
+    private function consumer(AMQPChannel $channel): RabbitConsumer
+    {
+        return new RabbitConsumer($this->connectionWrapping($channel));
     }
 
     private function connectionWrapping(AMQPChannel $channel): RabbitConnection
@@ -147,5 +197,71 @@ final class RabbitConsumerTest extends TestCase
         $channel->method('queue_bind')->willReturn(null);
 
         return new RabbitConnection($channel);
+    }
+
+    /**
+     * The consume channel: topology stubs + ack/nack capture, wired so
+     * getConnection()->channel() yields the dedicated publish channel.
+     *
+     * @param array<string, mixed> $captured by reference
+     * @return AMQPChannel&MockObject
+     */
+    private function channel(array &$captured = [], ?AMQPChannel $publishChannel = null): AMQPChannel&MockObject
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+        $channel->method('exchange_declare')->willReturn(null);
+        $channel->method('queue_declare')->willReturn(null);
+        $channel->method('queue_bind')->willReturn(null);
+        $channel->method('basic_ack')->willReturnCallback(
+            function (int $deliveryTag) use (&$captured): void {
+                $captured['ack'] = $deliveryTag;
+            }
+        );
+        $channel->method('basic_nack')->willReturnCallback(
+            function (int $deliveryTag, bool $multiple, bool $requeue) use (&$captured): void {
+                $captured = ['nack' => [$deliveryTag, $requeue]];
+            }
+        );
+
+        $connection = $this->createMock(AbstractConnection::class);
+        $connection->method('channel')->willReturn($publishChannel ?? $this->publishChannel());
+        $channel->method('getConnection')->willReturn($connection);
+
+        return $channel;
+    }
+
+    /**
+     * The dedicated publish channel used for the retry/park copy (happy path:
+     * confirm-wait succeeds). Captures published copies for assertions.
+     *
+     * @param list<array{message: AMQPMessage, exchange: string, routingKey: string}> $published by reference
+     * @return AMQPChannel&MockObject
+     */
+    private function publishChannel(array &$published = []): AMQPChannel&MockObject
+    {
+        $channel = $this->createMock(AMQPChannel::class);
+        $channel->method('confirm_select')->willReturn(null);
+        $channel->method('set_nack_handler')->willReturn(null);
+        $channel->method('basic_publish')->willReturnCallback(
+            function (AMQPMessage $message, string $exchange = '', string $routingKey = '') use (&$published): void {
+                $published[] = ['message' => $message, 'exchange' => $exchange, 'routingKey' => $routingKey];
+            }
+        );
+        $channel->method('wait_for_pending_acks')->willReturn(null);
+        $channel->method('close')->willReturn(null);
+
+        return $channel;
+    }
+
+    private function message(AMQPChannel $channel, int $deliveryTag, int $retryCount): AMQPMessage
+    {
+        $message = new AMQPMessage(self::VALID_JSON, [
+            'content_type' => 'application/json',
+            'application_headers' => new AMQPTable(['x-retry-count' => $retryCount]),
+        ]);
+        $message->setChannel($channel)
+            ->setDeliveryInfo($deliveryTag, true, 'notifications', 'subscription.welcome-email.reply');
+
+        return $message;
     }
 }

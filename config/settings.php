@@ -36,6 +36,19 @@ return [
             ?? (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339),
         'smoke_body' => $_ENV['GITHUB_SMOKE_BODY'] ?? 'Smoke release body',
     ],
+    'saga' => [
+        // Primary sweep deadline T: AwaitingConfirmation sagas past
+        // awaiting_since + T are compensated. Single source of truth, must exceed
+        // the retry+claim envelope (arch §11).
+        'timeout_seconds' => (int) ($_ENV['SAGA_TIMEOUT_SECONDS'] ?? 900),
+        // Secondary start-sweep deadline T_start (>= T): never-published STARTED
+        // sagas past created_at + T_start (the broker-down backstop, NFR3).
+        'start_timeout_seconds' => (int) ($_ENV['SAGA_START_TIMEOUT_SECONDS'] ?? 900),
+        // The saga-worker tick cadence and how often (in ticks) it runs the sweep.
+        'worker_wait_seconds' => (int) ($_ENV['SAGA_WORKER_WAIT_SECONDS'] ?? 1),
+        'sweep_every_ticks' => (int) ($_ENV['SAGA_SWEEP_EVERY_TICKS'] ?? 60),
+        'relay_batch_size' => (int) ($_ENV['SAGA_RELAY_BATCH_SIZE'] ?? 50),
+    ],
     'api_key' => $_ENV['API_KEY'] ?? '',
     'bootstrap' => [
         'run_migrations_on_boot' => filter_var(
