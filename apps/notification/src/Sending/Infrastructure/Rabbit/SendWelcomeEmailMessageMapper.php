@@ -28,11 +28,22 @@ final readonly class SendWelcomeEmailMessageMapper
 {
     private const EXPECTED_SCHEMA = 'SendWelcomeEmail/v1';
 
+    private JsonMessageReader $reader;
+
+    public function __construct()
+    {
+        $this->reader = new JsonMessageReader(
+            self::EXPECTED_SCHEMA,
+            static fn (string $message, ?\Throwable $previous): \RuntimeException
+                => new MalformedWelcomeEmailMessageException($message, previous: $previous),
+        );
+    }
+
     public function fromJson(string $json): WelcomeEmail
     {
-        $payload = $this->decode($json);
+        $payload = $this->reader->decode($json);
 
-        $schema = $this->requireString($payload, 'schema');
+        $schema = $this->reader->requireString($payload, 'schema');
         if ($schema !== self::EXPECTED_SCHEMA) {
             throw new MalformedWelcomeEmailMessageException(sprintf(
                 'SendWelcomeEmail/v1 message has unknown schema "%s"; expected "%s".',
@@ -44,10 +55,10 @@ final readonly class SendWelcomeEmailMessageMapper
         // Extract every primitive first (these throw and propagate), so the only
         // code inside the value-object try below is VO construction — a future bug
         // elsewhere can never be silently reclassified as a poison message.
-        $sagaId = $this->requireString($payload, 'sagaId');
-        $subscriptionId = $this->requireInt($payload, 'subscriptionId');
-        $email = $this->requireString($payload, 'email');
-        $repository = $this->requireString($payload, 'repository');
+        $sagaId = $this->reader->requireString($payload, 'sagaId');
+        $subscriptionId = $this->reader->requireInt($payload, 'subscriptionId');
+        $email = $this->reader->requireString($payload, 'email');
+        $repository = $this->reader->requireString($payload, 'repository');
 
         // A self-validating VO rejecting a present-but-invalid value (bad email,
         // malformed repo) is just another flavour of poison message — translate
@@ -68,54 +79,5 @@ final readonly class SendWelcomeEmailMessageMapper
             recipientEmail: $recipientEmail,
             repository: $repositoryName,
         );
-    }
-
-    /** @return array<array-key, mixed> */
-    private function decode(string $json): array
-    {
-        try {
-            $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new MalformedWelcomeEmailMessageException(
-                'SendWelcomeEmail/v1 message body is not valid JSON: ' . $e->getMessage(),
-                previous: $e,
-            );
-        }
-
-        if (!is_array($decoded)) {
-            throw new MalformedWelcomeEmailMessageException(
-                'SendWelcomeEmail/v1 message body must decode to a JSON object, got ' . get_debug_type($decoded) . '.'
-            );
-        }
-
-        return $decoded;
-    }
-
-    /** @param array<array-key, mixed> $payload */
-    private function requireInt(array $payload, string $field): int
-    {
-        $value = $payload[$field] ?? null;
-
-        if (!is_int($value)) {
-            throw new MalformedWelcomeEmailMessageException(
-                "SendWelcomeEmail/v1 message is missing required integer field \"{$field}\" or it has the wrong type."
-            );
-        }
-
-        return $value;
-    }
-
-    /** @param array<array-key, mixed> $payload */
-    private function requireString(array $payload, string $field): string
-    {
-        $value = $payload[$field] ?? null;
-
-        if (!is_string($value)) {
-            throw new MalformedWelcomeEmailMessageException(
-                "SendWelcomeEmail/v1 message is missing required string field \"{$field}\" or it has the wrong type."
-            );
-        }
-
-        return $value;
     }
 }

@@ -37,9 +37,20 @@ final readonly class SendReleaseEmailMessageMapper
 {
     private const EXPECTED_SCHEMA = 'SendReleaseEmail/v1';
 
+    private JsonMessageReader $reader;
+
+    public function __construct()
+    {
+        $this->reader = new JsonMessageReader(
+            self::EXPECTED_SCHEMA,
+            static fn (string $message, ?\Throwable $previous): \RuntimeException
+                => new MalformedReleaseEmailMessageException($message, previous: $previous),
+        );
+    }
+
     public function fromJson(string $json): ReleaseEmail
     {
-        $payload = $this->decode($json);
+        $payload = $this->reader->decode($json);
 
         $schema = $this->requireString($payload, 'schema');
         if ($schema !== self::EXPECTED_SCHEMA) {
@@ -57,7 +68,7 @@ final readonly class SendReleaseEmailMessageMapper
         // value-object try below is VO construction — a future bug elsewhere in this
         // method can never be silently reclassified as a poison message.
         $eventId = $this->requireString($payload, 'eventId');
-        $subscriptionId = $this->requireInt($payload, 'subscriptionId');
+        $subscriptionId = $this->reader->requireInt($payload, 'subscriptionId');
         $email = $this->requireString($payload, 'email');
         $repository = $this->requireString($payload, 'repository');
         $tagName = $this->requireString($release, 'release.tagName', 'tagName');
@@ -93,27 +104,6 @@ final readonly class SendReleaseEmailMessageMapper
         );
     }
 
-    /** @return array<array-key, mixed> */
-    private function decode(string $json): array
-    {
-        try {
-            $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new MalformedReleaseEmailMessageException(
-                'SendReleaseEmail/v1 message body is not valid JSON: ' . $e->getMessage(),
-                previous: $e,
-            );
-        }
-
-        if (!is_array($decoded)) {
-            throw new MalformedReleaseEmailMessageException(
-                'SendReleaseEmail/v1 message body must decode to a JSON object, got ' . get_debug_type($decoded) . '.'
-            );
-        }
-
-        return $decoded;
-    }
-
     /**
      * @param array<array-key, mixed> $payload
      * @return array<array-key, mixed>
@@ -131,24 +121,21 @@ final readonly class SendReleaseEmailMessageMapper
         return $value;
     }
 
-    /** @param array<array-key, mixed> $payload */
-    private function requireInt(array $payload, string $field): int
-    {
-        $value = $payload[$field] ?? null;
-
-        if (!is_int($value)) {
-            throw new MalformedReleaseEmailMessageException(
-                "SendReleaseEmail/v1 message is missing required integer field \"{$field}\" or it has the wrong type."
-            );
-        }
-
-        return $value;
-    }
-
-    /** @param array<array-key, mixed> $payload */
+    /**
+     * Nested-key variant kept local to this mapper: when reading a field from a
+     * nested object the wire path (`$field`, reported in errors) differs from the
+     * lookup key (`$key`). The simple single-field case delegates to the shared
+     * reader so the type-guard text stays byte-identical.
+     *
+     * @param array<array-key, mixed> $payload
+     */
     private function requireString(array $payload, string $field, ?string $key = null): string
     {
-        $value = $payload[$key ?? $field] ?? null;
+        if ($key === null) {
+            return $this->reader->requireString($payload, $field);
+        }
+
+        $value = $payload[$key] ?? null;
 
         if (!is_string($value)) {
             throw new MalformedReleaseEmailMessageException(
