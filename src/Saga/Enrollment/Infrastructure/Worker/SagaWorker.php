@@ -8,7 +8,6 @@ use App\Saga\Enrollment\Application\Relay\RelayPendingWelcomeEmails;
 use App\Saga\Enrollment\Application\Sweep\SweepTimedOutSagas;
 use App\Saga\Enrollment\Infrastructure\Rabbit\WelcomeEmailOutcomeConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
-use App\Shared\Infrastructure\Messaging\Rabbit\RetryPublishFailedException;
 use PhpAmqpLib\Connection\Heartbeat\PCNTLHeartbeatSender;
 use PhpAmqpLib\Exception\AMQPConnectionClosedException;
 use PhpAmqpLib\Exception\AMQPHeartbeatMissedException;
@@ -122,13 +121,6 @@ final readonly class SagaWorker
         } catch (AMQPConnectionClosedException | AMQPIOException | AMQPHeartbeatMissedException $e) {
             $heartbeat?->unregister();
             $this->logger->error('Saga worker connection lost — exiting for supervised restart', [
-                'error' => $e->getMessage(),
-            ]);
-
-            return 1;
-        } catch (RetryPublishFailedException $e) {
-            $heartbeat?->unregister();
-            $this->logger->error('Saga worker retry publish unconfirmed — exiting for supervised restart', [
                 'error' => $e->getMessage(),
             ]);
 

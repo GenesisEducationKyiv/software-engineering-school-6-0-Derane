@@ -98,8 +98,9 @@ final class EnrollmentSaga extends AggregateRoot
     }
 
     /**
-     * Started|AwaitingConfirmation -> Compensated (via Compensating), on a
-     * terminal failure or a timeout sweep.
+     * Started|AwaitingConfirmation -> Compensated, on a terminal failure or a
+     * timeout sweep. Single-step: the PRD-lifecycle Compensating phase is
+     * documentation only (see SagaState), never a persisted intermediate.
      */
     public function compensate(): void
     {
