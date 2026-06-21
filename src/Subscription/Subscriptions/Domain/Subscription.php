@@ -16,17 +16,21 @@ use App\Shared\Domain\ValueObject\RepositoryName;
  */
 final class Subscription extends AggregateRoot
 {
+    /** The create-path default, matching the migration-004 column default. */
+    private const string DEFAULT_STATUS = 'pending';
+
     private function __construct(
         private readonly ?int $id,
         private readonly EmailAddress $email,
         private readonly RepositoryName $repository,
-        private readonly string $createdAt
+        private readonly string $createdAt,
+        private readonly string $status
     ) {
     }
 
     public static function subscribe(EmailAddress $email, RepositoryName $repository, string $createdAt): self
     {
-        $subscription = new self(null, $email, $repository, $createdAt);
+        $subscription = new self(null, $email, $repository, $createdAt, self::DEFAULT_STATUS);
         $subscription->recordThat(new SubscriptionCreated(
             (string) $email,
             (string) $repository,
@@ -40,9 +44,10 @@ final class Subscription extends AggregateRoot
         int $id,
         EmailAddress $email,
         RepositoryName $repository,
-        string $createdAt
+        string $createdAt,
+        string $status
     ): self {
-        return new self($id, $email, $repository, $createdAt);
+        return new self($id, $email, $repository, $createdAt, $status);
     }
 
     public function id(): ?int
@@ -63,5 +68,10 @@ final class Subscription extends AggregateRoot
     public function createdAt(): string
     {
         return $this->createdAt;
+    }
+
+    public function status(): string
+    {
+        return $this->status;
     }
 }

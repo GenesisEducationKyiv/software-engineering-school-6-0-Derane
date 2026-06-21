@@ -19,4 +19,14 @@ interface NotificationMetricsReader
     public function dlqCount(): int;
 
     public function supersededCount(): int;
+
+    public function welcomeConsumedCount(): int;
+
+    public function welcomeSentCount(): int;
+
+    public function welcomeDedupedCount(): int;
+
+    public function welcomeFailedCount(): int;
+
+    public function welcomeReplyPublishedCount(): int;
 }

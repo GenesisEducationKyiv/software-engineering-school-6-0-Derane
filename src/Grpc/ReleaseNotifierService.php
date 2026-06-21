@@ -130,6 +130,7 @@ final readonly class ReleaseNotifierService implements ReleaseNotifierServiceInt
             'email' => $subscription->email,
             'repository' => $subscription->repository,
             'created_at' => $subscription->createdAt,
+            'status' => $subscription->status,
         ]);
     }
 

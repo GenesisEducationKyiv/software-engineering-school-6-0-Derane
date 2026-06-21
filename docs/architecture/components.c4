@@ -174,6 +174,107 @@ model {
     notifier.scanner.scannerRepo -> notifier.db "SQL" "TCP"
     notifier.scanner.rabbitPublisher -> notifier.rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"
 
+    extend notifier.sagaWorker {
+        sagaLoop = component "SagaWorker" {
+            description "
+                Supervised loop (bin/saga-worker.php). Each tick relays
+                pending welcome emails, waits to consume WelcomeEmailOutcome,
+                and periodically sweeps timed-out sagas. exit(1) on connection
+                loss for restart-driven re-derivation from the durable rows.
+            "
+            technology "PHP CLI, AMQP"
+        }
+
+        relayUseCase = component "RelayPendingWelcomeEmails" {
+            description "
+                Outbox relay use-case: selects STARTED sagas and publishes
+                one SendWelcomeEmail/v1 each with publisher confirms, advancing
+                the saga to AWAITING_CONFIRMATION only after a confirmed publish.
+            "
+            technology "PHP"
+        }
+
+        welcomeRelay = component "RabbitWelcomeEmailRelay" {
+            description "
+                Publishes SendWelcomeEmail/v1 to RabbitMQ with publisher
+                confirms; throws on an unconfirmed publish so the saga is
+                not advanced (retried next tick).
+            "
+            technology "PHP, AMQP"
+        }
+
+        outcomeConsumer = component "WelcomeEmailOutcomeConsumer" {
+            description "
+                Reply consumer: validates WelcomeEmailOutcome/v1 against the
+                expected schema and dispatches HandleWelcomeEmailOutcomeCommand.
+                Acks-and-drops malformed or no-op replies (no DLX).
+            "
+            technology "PHP, AMQP"
+        }
+
+        sagaCommandBus = component "CommandBus" {
+            description "
+                In-memory command bus for the reply path. Separate runtime
+                instance from HTTP/gRPC, same bus pattern.
+            "
+            technology "PHP"
+        }
+
+        outcomeHandler = component "HandleWelcomeEmailOutcomeHandler" {
+            description "
+                Orchestrator: in one Postgres-A transaction applies the paired
+                conditional UPDATEs — subscription status (confirm/cancel) and
+                saga state (complete/compensate). rowCount()=0 on both is an
+                idempotent no-op (ack-and-drop).
+            "
+            technology "PHP"
+        }
+
+        sweepUseCase = component "SweepTimedOutSagas" {
+            description "
+                Timeout sweeper: compensates AWAITING_CONFIRMATION sagas past
+                awaiting_since + T, and STARTED sagas past created_at + T_start
+                (the broker-down backstop) so every saga converges.
+            "
+            technology "PHP"
+        }
+
+        sagaRepo = component "PdoEnrollmentSagaRepository" {
+            description "
+                PDO adapter implementing the EnrollmentSaga Starter/Reader/Writer
+                ports over the enrollment_sagas store; conditional UPDATEs guard
+                every state transition.
+            "
+            technology "PHP, PDO"
+        }
+
+        confirmationWriter = component "PdoSubscriptionConfirmationWriter" {
+            description "
+                Saga-side adapter for the Subscription.Domain confirmation port:
+                conditional UPDATE subscriptions SET status WHERE status='pending'
+                (confirm/cancel).
+            "
+            technology "PHP, PDO"
+        }
+
+        sagaLoop -> relayUseCase "Relays pending welcome emails each tick"
+        sagaLoop -> outcomeConsumer "Consumes WelcomeEmailOutcome/v1"
+        sagaLoop -> sweepUseCase "Sweeps timed-out sagas periodically"
+        relayUseCase -> sagaRepo "Reads STARTED sagas, marks published"
+        relayUseCase -> welcomeRelay "Publishes SendWelcomeEmail/v1 (confirmed)"
+        outcomeConsumer -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand"
+        sagaCommandBus -> outcomeHandler "Handles the reply command"
+        outcomeHandler -> sagaRepo "complete/compensate saga (conditional)"
+        outcomeHandler -> confirmationWriter "confirm/cancel subscription (conditional)"
+        sweepUseCase -> sagaRepo "Reads due sagas, compensates"
+        sweepUseCase -> confirmationWriter "Cancels swept subscriptions"
+    }
+
+    notifier.sagaWorker.sagaRepo -> notifier.db "SQL (enrollment_sagas)" "TCP"
+    notifier.sagaWorker.confirmationWriter -> notifier.db "SQL (subscriptions.status)" "TCP"
+    notifier.sagaWorker.welcomeRelay -> notifier.rabbitmq "Publishes SendWelcomeEmail/v1 (confirms)" "AMQP"
+    notifier.sagaWorker.outcomeConsumer -> notifier.rabbitmq "Consumes notifications.welcome-email-reply" "AMQP"
+
     extend notifier.notificationSvc {
         consumer = component "SendReleaseEmailConsumer" {
             description "
@@ -214,13 +315,66 @@ model {
             technology "PHP, PHPMailer"
         }
 
+        welcomeConsumer = component "SendWelcomeEmailConsumer" {
+            description "
+                Second RabbitMQ consumer (registered as a second basic_consume).
+                Validates SendWelcomeEmail/v1 and invokes the welcome handler;
+                same bounded-retry/DLQ envelope as the release consumer.
+            "
+            technology "PHP, AMQP"
+        }
+
+        welcomeHandler = component "SendWelcomeEmailHandler" {
+            description "
+                Welcome path: claim (keyed by subscriptionId) -> render ->
+                send -> markSent -> publish WelcomeEmailOutcome{sent}. On
+                terminal failure marks terminal_failed_at, publishes
+                WelcomeEmailOutcome{failed}, then DLQs (FR7).
+            "
+            technology "PHP"
+        }
+
+        welcomeLedger = component "PdoWelcomeNotificationLedger" {
+            description "
+                Welcome delivery ledger keyed by subscription_id (UNIQUE);
+                atomic INSERT … ON CONFLICT claim with terminal_failed_at
+                guard. Four ClaimOutcome cases (Claimed, InFlight, AlreadySent,
+                AlreadyFailed).
+            "
+            technology "PHP, PDO"
+        }
+
+        welcomeRenderer = component "WelcomeEmailRenderer" {
+            description "Renders the welcome email subject/body from SendWelcomeEmail/v1."
+            technology "PHP"
+        }
+
+        outcomePublisher = component "RabbitWelcomeOutcomePublisher" {
+            description "
+                The service's first publisher: a fail-closed confirm-mode
+                channel that publishes WelcomeEmailOutcome/v1 back to the
+                monolith on subscription.welcome-email.reply.
+            "
+            technology "PHP, AMQP"
+        }
+
         consumer -> sendEmailHandler "Invokes for each consumed message"
         sendEmailHandler -> ledger "Claims + records delivery"
         sendEmailHandler -> renderer "Builds subject/body"
         sendEmailHandler -> mailer "Sends email"
+
+        welcomeConsumer -> welcomeHandler "Invokes for each consumed welcome message"
+        welcomeHandler -> welcomeLedger "Claims + records welcome delivery"
+        welcomeHandler -> welcomeRenderer "Builds welcome subject/body"
+        welcomeHandler -> mailer "Sends welcome email"
+        welcomeHandler -> outcomePublisher "Publishes WelcomeEmailOutcome/v1"
     }
 
     notifier.notificationSvc.consumer -> notifier.rabbitmq "Consumes queue / routes poison messages to DLQ" "AMQP"
     notifier.notificationSvc.ledger -> notifier.notificationDb "SQL" "TCP"
     notifier.notificationSvc.mailer -> notifier.mailhog "Sends email in local dev" "SMTP"
+
+    notifier.notificationSvc.welcomeConsumer -> notifier.rabbitmq "Consumes notifications.welcome-email / DLQ" "AMQP"
+    notifier.notificationSvc.welcomeLedger -> notifier.notificationDb "SQL (welcome_notifications)" "TCP"
+    notifier.notificationSvc.outcomePublisher -> notifier.rabbitmq "Publishes WelcomeEmailOutcome/v1 (confirms)" "AMQP"
 }

@@ -19,6 +19,7 @@ final readonly class SubscriptionFactory implements SubscriptionFactoryInterface
             new EmailAddress((string) $row['email']),
             new RepositoryName((string) $row['repository']),
             (string) $row['created_at'],
+            (string) $row['status'],
         );
     }
 }

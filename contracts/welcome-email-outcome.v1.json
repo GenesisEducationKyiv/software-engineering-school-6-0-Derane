@@ -1,0 +1,8 @@
+{
+    "schema": "WelcomeEmailOutcome/v1",
+    "sagaId": "5f1c0e2a-9b3d-4c7a-8e21-7c9b0d4e1f33",
+    "subscriptionId": 123,
+    "outcome": "sent",
+    "error": null,
+    "occurredAt": "2026-06-20T12:00:03+00:00"
+}

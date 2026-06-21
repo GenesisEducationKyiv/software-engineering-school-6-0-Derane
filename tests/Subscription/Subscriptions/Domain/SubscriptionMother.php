@@ -30,13 +30,15 @@ final class SubscriptionMother
         int $id = 1,
         string $email = 'test@example.com',
         string $repository = 'golang/go',
-        string $createdAt = '2026-01-01T00:00:00+00:00'
+        string $createdAt = '2026-01-01T00:00:00+00:00',
+        string $status = 'pending'
     ): Subscription {
         return Subscription::reconstitute(
             $id,
             new EmailAddress($email),
             new RepositoryName($repository),
-            $createdAt
+            $createdAt,
+            $status
         );
     }
 }

@@ -82,7 +82,7 @@ abstract class IntegrationTestCase extends TestCase
     private function resetLedger(): void
     {
         $this->c->get(PDO::class)->exec(
-            'TRUNCATE release_notifications, notification_metrics RESTART IDENTITY CASCADE'
+            'TRUNCATE release_notifications, welcome_notifications, notification_metrics RESTART IDENTITY CASCADE'
         );
     }
 

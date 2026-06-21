@@ -5,7 +5,11 @@ declare(strict_types=1);
 use App\Migration\Migrator;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Shared\Domain\Bus\Command\CommandBus;
+use App\Shared\Domain\Bus\Query\QueryBus;
+use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByEmailAndRepositoryQuery;
+use App\Subscription\Subscriptions\Application\SubscriptionResponse;
 use App\Subscription\Subscriptions\Application\Subscribe\SubscribeCommand;
+use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -42,6 +46,17 @@ $container->get(Migrator::class)->migrate();
 // guard, tracked-repository registration, and SubscriptionCreated dispatch) instead
 // of hand-building the aggregate and reaching across context boundaries.
 $container->get(CommandBus::class)->dispatch(new SubscribeCommand($email, $repository));
+
+// HW9: subscriptions are created PENDING and only CONFIRMED subscribers receive
+// release emails (FR14 recipient filter). This smoke exercises the *release*
+// delivery flow, so confirm the subscriber directly — the welcome-email
+// confirmation saga is covered by its own unit/integration tests and e2e demo,
+// not by this scanner smoke.
+$subscription = $container->get(QueryBus::class)->ask(
+    new FindSubscriptionByEmailAndRepositoryQuery($email, $repository)
+);
+assert($subscription instanceof SubscriptionResponse);
+$container->get(SubscriptionConfirmationWriter::class)->confirm($subscription->id);
 
 $container->get(CommandBus::class)->dispatch(new ScanReleasesCommand());
 

@@ -23,10 +23,22 @@ final class StderrLogger extends AbstractLogger
     /** @var resource */
     private $stream;
 
-    /** @param resource|null $stream defaults to STDERR; injectable for tests */
+    /** @param resource|null $stream defaults to php://stderr; injectable for tests */
     public function __construct($stream = null)
     {
-        $this->stream = $stream ?? \STDERR;
+        if ($stream === null) {
+            // The STDERR constant is only defined in the CLI SAPI. Under the
+            // built-in web server (php -S, the cli-server SAPI used to serve
+            // /health + /metrics) it is undefined and `?? \STDERR` fatals.
+            // php://stderr resolves the same stream in both SAPIs.
+            $stream = \defined('STDERR') ? \STDERR : \fopen('php://stderr', 'w');
+        }
+
+        if ($stream === false) {
+            throw new \RuntimeException('Unable to open php://stderr for logging');
+        }
+
+        $this->stream = $stream;
     }
 
     /**

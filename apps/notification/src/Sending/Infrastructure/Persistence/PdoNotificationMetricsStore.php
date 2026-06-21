@@ -7,10 +7,12 @@ namespace App\Sending\Infrastructure\Persistence;
 use App\Sending\Application\DeliveryOutcomeRecorder;
 use App\Sending\Application\MessageProcessingStatsRecorder;
 use App\Sending\Application\NotificationMetricsReader;
+use App\Sending\Application\WelcomeProcessingStatsRecorder;
 
 final readonly class PdoNotificationMetricsStore implements
     DeliveryOutcomeRecorder,
     MessageProcessingStatsRecorder,
+    WelcomeProcessingStatsRecorder,
     NotificationMetricsReader
 {
     public function __construct(private \PDO $pdo)
@@ -60,6 +62,36 @@ final readonly class PdoNotificationMetricsStore implements
     }
 
     #[\Override]
+    public function recordWelcomeConsumed(): void
+    {
+        $this->increment(NotificationMetric::WelcomeConsumed);
+    }
+
+    #[\Override]
+    public function recordWelcomeSent(): void
+    {
+        $this->increment(NotificationMetric::WelcomeSent);
+    }
+
+    #[\Override]
+    public function recordWelcomeDeduped(): void
+    {
+        $this->increment(NotificationMetric::WelcomeDeduped);
+    }
+
+    #[\Override]
+    public function recordWelcomeFailed(): void
+    {
+        $this->increment(NotificationMetric::WelcomeFailed);
+    }
+
+    #[\Override]
+    public function recordWelcomeReplyPublished(): void
+    {
+        $this->increment(NotificationMetric::WelcomeReplyPublished);
+    }
+
+    #[\Override]
     public function consumedCount(): int
     {
         return $this->count(NotificationMetric::Consumed);
@@ -99,6 +131,36 @@ final readonly class PdoNotificationMetricsStore implements
     public function supersededCount(): int
     {
         return $this->count(NotificationMetric::Superseded);
+    }
+
+    #[\Override]
+    public function welcomeConsumedCount(): int
+    {
+        return $this->count(NotificationMetric::WelcomeConsumed);
+    }
+
+    #[\Override]
+    public function welcomeSentCount(): int
+    {
+        return $this->count(NotificationMetric::WelcomeSent);
+    }
+
+    #[\Override]
+    public function welcomeDedupedCount(): int
+    {
+        return $this->count(NotificationMetric::WelcomeDeduped);
+    }
+
+    #[\Override]
+    public function welcomeFailedCount(): int
+    {
+        return $this->count(NotificationMetric::WelcomeFailed);
+    }
+
+    #[\Override]
+    public function welcomeReplyPublishedCount(): int
+    {
+        return $this->count(NotificationMetric::WelcomeReplyPublished);
     }
 
     private function increment(NotificationMetric $metric): void

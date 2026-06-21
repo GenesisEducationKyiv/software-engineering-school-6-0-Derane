@@ -3,11 +3,15 @@
 declare(strict_types=1);
 
 use App\Sending\Application\SendReleaseEmailHandler;
+use App\Sending\Application\SendWelcomeEmailHandler;
 use App\Sending\Application\DeliveryOutcomeRecorder;
 use App\Sending\Domain\EmailRenderer;
 use App\Sending\Domain\Mailer;
 use App\Sending\Application\MessageProcessingStatsRecorder;
+use App\Sending\Application\WelcomeProcessingStatsRecorder;
 use App\Sending\Domain\NotificationLedger;
+use App\Sending\Domain\WelcomeNotificationLedger;
+use App\Sending\Domain\WelcomeOutcomePublisher;
 use App\Sending\Application\NotificationMetricsReader;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
 use App\Sending\Infrastructure\Health\CompositeHealthCheck;
@@ -22,14 +26,19 @@ use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
 use App\Sending\Infrastructure\Mail\PHPMailerFactory;
 use App\Sending\Infrastructure\Mail\ReleaseEmailRenderer;
+use App\Sending\Infrastructure\Mail\WelcomeEmailRenderer;
 use App\Sending\Infrastructure\Mail\SmtpConfig;
 use App\Sending\Infrastructure\Metrics\MetricsService;
 use App\Sending\Infrastructure\Metrics\MetricsServiceInterface;
 use App\Sending\Infrastructure\Metrics\PrometheusFormatter;
 use App\Sending\Infrastructure\Persistence\PdoNotificationLedger;
 use App\Sending\Infrastructure\Persistence\PdoNotificationMetricsStore;
+use App\Sending\Infrastructure\Persistence\PdoWelcomeNotificationLedger;
+use App\Sending\Infrastructure\Rabbit\RabbitWelcomeOutcomePublisher;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
+use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailConsumer;
+use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailMessageMapper;
 use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
@@ -91,10 +100,17 @@ return static function (array $settings): Container {
         MailerFactoryInterface::class => static fn() => new PHPMailerFactory(),
 
         NotificationLedger::class => static fn($c) => new PdoNotificationLedger($c->get(PDO::class)),
+        WelcomeNotificationLedger::class => static fn($c) => new PdoWelcomeNotificationLedger($c->get(PDO::class)),
         DeliveryOutcomeRecorder::class => static fn($c) => new PdoNotificationMetricsStore($c->get(PDO::class)),
         MessageProcessingStatsRecorder::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
         NotificationMetricsReader::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
         EmailRenderer::class => static fn() => new ReleaseEmailRenderer(),
+        // Two EmailRenderer implementations exist (release + welcome); only the
+        // release one can hold the shared EmailRenderer interface binding, so the
+        // welcome renderer is registered under its concrete key and injected
+        // explicitly into the welcome handler. Keeps construction uniform with the
+        // rest of the composition root (no inline `new` in the handler wiring).
+        WelcomeEmailRenderer::class => static fn() => new WelcomeEmailRenderer(),
         Mailer::class => static fn($c) => new PhpMailerMailer(
             $c->get(SmtpConfig::class),
             $c->get(MailerFactoryInterface::class),
@@ -114,6 +130,34 @@ return static function (array $settings): Container {
             $c->get(SendReleaseEmailHandler::class),
             $c->get(SendReleaseEmailMessageMapper::class),
             $c->get(MessageProcessingStatsRecorder::class),
+            $c->get(LoggerInterface::class),
+        ),
+
+        // Welcome path (HW9 saga). WelcomeProcessingStatsRecorder and the
+        // WelcomeOutcomePublisher reply publisher are aliased to their concrete
+        // implementations registered below.
+        WelcomeProcessingStatsRecorder::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
+        WelcomeOutcomePublisher::class => static fn($c) => new RabbitWelcomeOutcomePublisher(
+            $c->get(RabbitConnection::class),
+            $c->get(LoggerInterface::class),
+        ),
+        SendWelcomeEmailMessageMapper::class => static fn() => new SendWelcomeEmailMessageMapper(),
+
+        SendWelcomeEmailHandler::class => static fn($c) => new SendWelcomeEmailHandler(
+            $c->get(WelcomeNotificationLedger::class),
+            // The welcome handler renders from the welcome template specifically,
+            // not the shared EmailRenderer binding (which is the release renderer).
+            $c->get(WelcomeEmailRenderer::class),
+            $c->get(Mailer::class),
+            $c->get(WelcomeOutcomePublisher::class),
+            $c->get(WelcomeProcessingStatsRecorder::class),
+        ),
+
+        SendWelcomeEmailConsumer::class => static fn($c) => new SendWelcomeEmailConsumer(
+            $c->get(MessageConsumer::class),
+            $c->get(SendWelcomeEmailHandler::class),
+            $c->get(SendWelcomeEmailMessageMapper::class),
+            $c->get(WelcomeProcessingStatsRecorder::class),
             $c->get(LoggerInterface::class),
         ),
 

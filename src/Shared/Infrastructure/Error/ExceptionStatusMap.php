@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Shared\Infrastructure\Error;
 
 use App\Releases\Sourcing\Domain\RateLimitException;
+use App\Saga\Enrollment\Domain\SagaNotFoundException;
 use App\Shared\Domain\Exception\InvalidArgumentException;
 use App\Shared\Domain\Exception\RepositoryNotFoundException;
 use App\Shared\Domain\Exception\ValidationException;
@@ -29,7 +30,8 @@ final readonly class ExceptionStatusMap
             $e instanceof ValidationException,
             $e instanceof InvalidArgumentException => StatusCodeInterface::STATUS_BAD_REQUEST,
             $e instanceof RepositoryNotFoundException,
-            $e instanceof SubscriptionNotFoundException => StatusCodeInterface::STATUS_NOT_FOUND,
+            $e instanceof SubscriptionNotFoundException,
+            $e instanceof SagaNotFoundException => StatusCodeInterface::STATUS_NOT_FOUND,
             $e instanceof RateLimitException => StatusCodeInterface::STATUS_TOO_MANY_REQUESTS,
             default => StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR,
         };
@@ -41,7 +43,8 @@ final readonly class ExceptionStatusMap
             $e instanceof ValidationException,
             $e instanceof InvalidArgumentException => GrpcStatus::INVALID_ARGUMENT,
             $e instanceof RepositoryNotFoundException,
-            $e instanceof SubscriptionNotFoundException => GrpcStatus::NOT_FOUND,
+            $e instanceof SubscriptionNotFoundException,
+            $e instanceof SagaNotFoundException => GrpcStatus::NOT_FOUND,
             $e instanceof RateLimitException => GrpcStatus::RESOURCE_EXHAUSTED,
             default => GrpcStatus::INTERNAL,
         };
@@ -54,7 +57,8 @@ final readonly class ExceptionStatusMap
             $e instanceof ValidationException,
             $e instanceof InvalidArgumentException,
             $e instanceof RepositoryNotFoundException,
-            $e instanceof SubscriptionNotFoundException => $e->getMessage(),
+            $e instanceof SubscriptionNotFoundException,
+            $e instanceof SagaNotFoundException => $e->getMessage(),
             default => 'Internal server error',
         };
     }

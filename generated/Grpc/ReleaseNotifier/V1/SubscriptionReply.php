@@ -29,6 +29,12 @@ class SubscriptionReply extends \Google\Protobuf\Internal\Message
      * Generated from protobuf field <code>string created_at = 4;</code>
      */
     protected $created_at = '';
+    /**
+     * Additive saga state (pending|confirmed|cancelled); wire-compatible — old clients ignore it.
+     *
+     * Generated from protobuf field <code>string status = 5;</code>
+     */
+    protected $status = '';
 
     /**
      * Constructor.
@@ -40,6 +46,8 @@ class SubscriptionReply extends \Google\Protobuf\Internal\Message
      *     @type string $email
      *     @type string $repository
      *     @type string $created_at
+     *     @type string $status
+     *           Additive saga state (pending|confirmed|cancelled); wire-compatible — old clients ignore it.
      * }
      */
     public function __construct($data = NULL) {
@@ -131,6 +139,32 @@ class SubscriptionReply extends \Google\Protobuf\Internal\Message
     {
         GPBUtil::checkString($var, True);
         $this->created_at = $var;
+
+        return $this;
+    }
+
+    /**
+     * Additive saga state (pending|confirmed|cancelled); wire-compatible — old clients ignore it.
+     *
+     * Generated from protobuf field <code>string status = 5;</code>
+     * @return string
+     */
+    public function getStatus()
+    {
+        return $this->status;
+    }
+
+    /**
+     * Additive saga state (pending|confirmed|cancelled); wire-compatible — old clients ignore it.
+     *
+     * Generated from protobuf field <code>string status = 5;</code>
+     * @param string $var
+     * @return $this
+     */
+    public function setStatus($var)
+    {
+        GPBUtil::checkString($var, True);
+        $this->status = $var;
 
         return $this;
     }

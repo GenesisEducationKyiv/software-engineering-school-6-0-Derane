@@ -4,6 +4,8 @@
 declare(strict_types=1);
 
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
+use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailConsumer;
+use App\Sending\Infrastructure\Rabbit\WelcomeOutcomePublishFailedException;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RetryPublishFailedException;
 use PhpAmqpLib\Connection\Heartbeat\PCNTLHeartbeatSender;
@@ -23,6 +25,7 @@ $container = $buildContainer($settings);
 $logger = $container->get(LoggerInterface::class);
 
 $consumer = $container->get(SendReleaseEmailConsumer::class);
+$welcomeConsumer = $container->get(SendWelcomeEmailConsumer::class);
 $channel = $container->get(RabbitConnection::class)->channel();
 
 // Graceful shutdown: SIGTERM/SIGINT flip the flag; the wait() loop below
@@ -52,7 +55,12 @@ if ($connection !== null && extension_loaded('pcntl')) {
 }
 
 $consumer->start();
-$logger->info('Notification consumer started', ['queue' => SendReleaseEmailConsumer::QUEUE]);
+// Second basic_consume on the SAME channel/process: one worker, two consumers
+// (release + welcome). Both share the wait() loop below.
+$welcomeConsumer->start();
+$logger->info('Notification consumer started', [
+    'queues' => [SendReleaseEmailConsumer::QUEUE, SendWelcomeEmailConsumer::QUEUE],
+]);
 
 try {
     while ($running && $channel->is_consuming()) {
@@ -76,6 +84,19 @@ try {
     // than silently stranding it.
     $heartbeat?->unregister();
     $logger->error('Retry publish unconfirmed — exiting for supervised restart', ['error' => $e->getMessage()]);
+    exit(1);
+} catch (WelcomeOutcomePublishFailedException $e) {
+    // The terminal/redelivery `WelcomeEmailOutcome` reply could not be confirmed.
+    // The welcome ledger already holds terminal_failed_at (handleTerminal persists
+    // it before publishing; an AlreadyFailed redelivery is already terminal), so
+    // the unacked delivery is redelivered and re-emits `failed` with no re-send.
+    // Same deliberate supervised-restart path as RetryPublishFailedException —
+    // a clean exit(1) with the heartbeat unregistered, not an uncaught fatal.
+    $heartbeat?->unregister();
+    $logger->error(
+        'Welcome outcome reply unconfirmed — exiting for supervised restart',
+        ['error' => $e->getMessage()],
+    );
     exit(1);
 }
 

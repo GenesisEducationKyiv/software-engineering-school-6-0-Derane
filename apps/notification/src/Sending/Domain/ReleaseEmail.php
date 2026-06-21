@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sending\Domain;
 
-final readonly class ReleaseEmail
+final readonly class ReleaseEmail implements RenderableEmail
 {
     public function __construct(
         public string $eventId,

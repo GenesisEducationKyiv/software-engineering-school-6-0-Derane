@@ -22,14 +22,14 @@ final class RabbitConnectionTest extends TestCase
             });
 
         $queueDeclareCalls = [];
-        $channel->expects(self::exactly(3))
+        $channel->expects(self::exactly(7))
             ->method('queue_declare')
             ->willReturnCallback(function (...$args) use (&$queueDeclareCalls): void {
                 $queueDeclareCalls[] = $args;
             });
 
         $queueBindCalls = [];
-        $channel->expects(self::exactly(2))
+        $channel->expects(self::exactly(5))
             ->method('queue_bind')
             ->willReturnCallback(function (...$args) use (&$queueBindCalls): void {
                 $queueBindCalls[] = $args;
@@ -84,6 +84,43 @@ final class RabbitConnectionTest extends TestCase
         self::assertSame('notifications.send-email.dlq', $queueBindCalls[1][0]);
         self::assertSame('notifications.dlx', $queueBindCalls[1][1]);
         self::assertSame('', $queueBindCalls[1][2]);  // fanout DLX: no routing-key semantics
+
+        // Welcome-email family (HW9) — same envelope as the send-email family.
+        self::assertSame('notifications.welcome-email', $queueDeclareCalls[3][0]);
+        self::assertTrue($queueDeclareCalls[3][2]);   // durable
+        self::assertSame(
+            ['x-dead-letter-exchange' => ['S', 'notifications.dlx']],
+            $queueDeclareCalls[3][6]
+        );
+
+        self::assertSame('notifications.welcome-email.retry', $queueDeclareCalls[4][0]);
+        self::assertTrue($queueDeclareCalls[4][2]);   // durable
+        self::assertSame(
+            [
+                'x-dead-letter-exchange' => ['S', ''],
+                'x-dead-letter-routing-key' => ['S', 'notifications.welcome-email'],
+            ],
+            $queueDeclareCalls[4][6]
+        );
+
+        self::assertSame('notifications.welcome-email.dlq', $queueDeclareCalls[5][0]);
+        self::assertTrue($queueDeclareCalls[5][2]);   // durable
+
+        // Reply queue: hyphen sibling (not a dotted DLQ child), plain durable, no DLX.
+        self::assertSame('notifications.welcome-email-reply', $queueDeclareCalls[6][0]);
+        self::assertTrue($queueDeclareCalls[6][2]);   // durable
+        self::assertSame([], $queueDeclareCalls[6][6]);  // empty arguments — no DLX of its own
+
+        self::assertSame(
+            ['notifications.welcome-email', 'notifications', 'subscription.welcome-email'],
+            array_slice($queueBindCalls[2], 0, 3)
+        );
+        self::assertSame('notifications.welcome-email.dlq', $queueBindCalls[3][0]);
+        self::assertSame('notifications.dlx', $queueBindCalls[3][1]);
+        self::assertSame(
+            ['notifications.welcome-email-reply', 'notifications', 'subscription.welcome-email.reply'],
+            array_slice($queueBindCalls[4], 0, 3)
+        );
     }
 
     public function testExposesTheUnderlyingChannelForReuseByPublisherAndConsumer(): void

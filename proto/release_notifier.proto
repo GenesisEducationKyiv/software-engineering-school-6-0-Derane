@@ -42,6 +42,8 @@ message SubscriptionReply {
   string email = 2;
   string repository = 3;
   string created_at = 4;
+  // Additive saga state (pending|confirmed|cancelled); wire-compatible — old clients ignore it.
+  string status = 5;
 }
 
 message ListSubscriptionsReply {
