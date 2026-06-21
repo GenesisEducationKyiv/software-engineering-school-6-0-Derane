@@ -8,11 +8,18 @@ use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeComma
 use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeHandler;
 use App\Saga\Enrollment\Application\HandleOutcome\WelcomeOutcome;
 use App\Saga\Enrollment\Application\SagaMetricsRecorder;
+use App\Saga\Enrollment\Domain\EnrollmentSaga;
+use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
+use App\Saga\Enrollment\Domain\Event\SagaCompensated;
+use App\Saga\Enrollment\Domain\Event\SagaCompleted;
+use App\Saga\Enrollment\Domain\SagaState;
 use App\Shared\Domain\TransactionManager;
+use App\Shared\Domain\ValueObject\SagaId;
 use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
  * The reply-path orchestrator: paired conditional UPDATEs in ONE transaction
@@ -25,15 +32,19 @@ final class HandleWelcomeEmailOutcomeHandlerTest extends TestCase
 {
     private const string UUID = '5f1c0e2a-9b3d-4c7a-8e21-7c9b0d4e1f33';
 
+    private EnrollmentSagaReader&MockObject $sagaReader;
     private EnrollmentSagaWriter&MockObject $sagaWriter;
     private SubscriptionConfirmationWriter&MockObject $subscriptionWriter;
+    private EventDispatcherInterface&MockObject $dispatcher;
     private SagaMetricsRecorder&MockObject $metrics;
     private HandleWelcomeEmailOutcomeHandler $handler;
 
     protected function setUp(): void
     {
+        $this->sagaReader = $this->createMock(EnrollmentSagaReader::class);
         $this->sagaWriter = $this->createMock(EnrollmentSagaWriter::class);
         $this->subscriptionWriter = $this->createMock(SubscriptionConfirmationWriter::class);
+        $this->dispatcher = $this->createMock(EventDispatcherInterface::class);
         $this->metrics = $this->createMock(SagaMetricsRecorder::class);
 
         // A TransactionManager that simply runs the closure (no real DB) and
@@ -48,8 +59,10 @@ final class HandleWelcomeEmailOutcomeHandlerTest extends TestCase
 
         $this->handler = new HandleWelcomeEmailOutcomeHandler(
             $transactionManager,
+            $this->sagaReader,
             $this->sagaWriter,
             $this->subscriptionWriter,
+            $this->dispatcher,
             $this->metrics
         );
     }
@@ -131,5 +144,68 @@ final class HandleWelcomeEmailOutcomeHandlerTest extends TestCase
         $this->metrics->expects($this->never())->method('recordWelcomeReplyNoop');
 
         ($this->handler)(new HandleWelcomeEmailOutcomeCommand(self::UUID, 123, WelcomeOutcome::Sent));
+    }
+
+    public function testSentDispatchesSagaCompletedWhenTheSagaTransitions(): void
+    {
+        $this->sagaReader->method('findBySubscriptionId')->with(123)->willReturn($this->anAwaitingSaga());
+        $this->subscriptionWriter->method('confirm')->willReturn(true);
+        $this->sagaWriter->method('complete')->willReturn(true);
+
+        $dispatched = [];
+        $this->dispatcher->expects($this->once())->method('dispatch')
+            ->willReturnCallback(static function (object $event) use (&$dispatched): object {
+                $dispatched[] = $event;
+
+                return $event;
+            });
+
+        ($this->handler)(new HandleWelcomeEmailOutcomeCommand(self::UUID, 123, WelcomeOutcome::Sent));
+
+        $this->assertCount(1, $dispatched);
+        $this->assertInstanceOf(SagaCompleted::class, $dispatched[0]);
+    }
+
+    public function testFailedDispatchesSagaCompensatedWhenTheSagaTransitions(): void
+    {
+        $this->sagaReader->method('findBySubscriptionId')->with(123)->willReturn($this->anAwaitingSaga());
+        $this->subscriptionWriter->method('cancel')->willReturn(true);
+        $this->sagaWriter->method('compensate')->willReturn(true);
+
+        $dispatched = [];
+        $this->dispatcher->expects($this->once())->method('dispatch')
+            ->willReturnCallback(static function (object $event) use (&$dispatched): object {
+                $dispatched[] = $event;
+
+                return $event;
+            });
+
+        ($this->handler)(new HandleWelcomeEmailOutcomeCommand(self::UUID, 123, WelcomeOutcome::Failed));
+
+        $this->assertCount(1, $dispatched);
+        $this->assertInstanceOf(SagaCompensated::class, $dispatched[0]);
+    }
+
+    public function testARowCountZeroSagaTransitionDispatchesNoEvent(): void
+    {
+        // The saga row did not transition (already terminal): no domain event, even
+        // though the loaded aggregate exists.
+        $this->sagaReader->method('findBySubscriptionId')->willReturn($this->anAwaitingSaga());
+        $this->subscriptionWriter->method('confirm')->willReturn(false);
+        $this->sagaWriter->method('complete')->willReturn(false);
+
+        $this->dispatcher->expects($this->never())->method('dispatch');
+
+        ($this->handler)(new HandleWelcomeEmailOutcomeCommand(self::UUID, 123, WelcomeOutcome::Sent));
+    }
+
+    private function anAwaitingSaga(): EnrollmentSaga
+    {
+        return EnrollmentSaga::reconstitute(
+            SagaId::fromString(self::UUID),
+            123,
+            SagaState::AwaitingConfirmation,
+            new \DateTimeImmutable('2026-06-20T12:00:00+00:00')
+        );
     }
 }

@@ -22,9 +22,7 @@ final class PdoSagaMetricsStoreTest extends IntegrationTestCase
     {
         parent::setUp();
         $this->c->get(PDO::class)->exec('TRUNCATE saga_metrics');
-        /** @var PdoSagaMetricsStore $store */
-        $store = $this->c->get(PdoSagaMetricsStore::class);
-        $this->store = $store;
+        $this->store = new PdoSagaMetricsStore($this->c->get(PDO::class));
     }
 
     public function testUnseenCountersReadZero(): void

@@ -23,6 +23,7 @@ use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
 use PhpAmqpLib\Channel\AMQPChannel;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\NullLogger;
 
 /**
@@ -111,6 +112,7 @@ final class SagaWorkerTest extends TestCase
             $this->createMock(WelcomeEmailRelay::class),
             $this->createMock(EnrollmentSagaWriter::class),
             $this->createMock(SagaMetricsRecorder::class),
+            $this->createMock(EventDispatcherInterface::class),
         );
     }
 
@@ -129,6 +131,7 @@ final class SagaWorkerTest extends TestCase
             $this->createMock(EnrollmentSagaWriter::class),
             $this->createMock(SubscriptionConfirmationWriter::class),
             $this->createMock(TransactionManager::class),
+            $this->createMock(EventDispatcherInterface::class),
             $clock,
             $this->createMock(SagaMetricsRecorder::class),
         );

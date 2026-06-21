@@ -11,6 +11,7 @@ use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
 use App\Shared\Domain\Clock;
 use App\Shared\Domain\TransactionManager;
 use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
  * The timeout sweeper use-case. Compensates sagas that never received a reply,
@@ -42,6 +43,7 @@ final readonly class SweepTimedOutSagas
         private EnrollmentSagaWriter $sagaWriter,
         private SubscriptionConfirmationWriter $subscriptionWriter,
         private TransactionManager $transactionManager,
+        private EventDispatcherInterface $eventDispatcher,
         private Clock $clock,
         private SagaMetricsRecorder $metrics
     ) {
@@ -62,19 +64,31 @@ final readonly class SweepTimedOutSagas
 
     private function compensate(EnrollmentSaga $saga): void
     {
-        // $compensated = at least one of the paired conditional UPDATEs took effect.
-        $compensated = $this->transactionManager->transactional(
-            function () use ($saga): bool {
-                // Same orchestrator path as the reply-side C1: the subscription
-                // `status='pending'` guard is the true single-writer lock.
+        // Same orchestrator path as the reply-side C1: the subscription
+        // `status='pending'` guard is the true single-writer lock. changed = at least
+        // one paired UPDATE took effect; sagaChanged = the saga row transitioned.
+        $result = $this->transactionManager->transactional(
+            function () use ($saga): array {
                 $subscriptionChanged = $this->subscriptionWriter->cancel($saga->subscriptionId());
                 $sagaChanged = $this->sagaWriter->compensate($saga->id());
 
-                return $subscriptionChanged || $sagaChanged;
+                return [
+                    'changed' => $subscriptionChanged || $sagaChanged,
+                    'sagaChanged' => $sagaChanged,
+                ];
             }
         );
 
-        if ($compensated) {
+        if ($result['sagaChanged']) {
+            // Mirror the transition on the aggregate to emit SagaCompensated on the
+            // in-process plane (only when the saga row actually moved).
+            $saga->compensate();
+            foreach ($saga->pullDomainEvents() as $event) {
+                $this->eventDispatcher->dispatch($event);
+            }
+        }
+
+        if ($result['changed']) {
             // Only count a saga this sweep actually drove to `compensated`. If a
             // just-arrived `sent` reply completed it between dueForSweep reading the
             // row and this tx committing, both UPDATEs are rowCount()=0 no-ops and

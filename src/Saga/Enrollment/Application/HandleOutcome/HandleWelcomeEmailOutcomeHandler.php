@@ -5,28 +5,33 @@ declare(strict_types=1);
 namespace App\Saga\Enrollment\Application\HandleOutcome;
 
 use App\Saga\Enrollment\Application\SagaMetricsRecorder;
+use App\Saga\Enrollment\Domain\EnrollmentSaga;
+use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;
 use App\Shared\Domain\TransactionManager;
 use App\Shared\Domain\ValueObject\SagaId;
 use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
  * The reply-path orchestrator. Wraps ONE Postgres-A transaction (via the
  * Shared.Domain TransactionManager port) and applies the paired conditional
  * UPDATEs: the subscription status transition (the true single-writer lock) and
- * the saga-row transition (advisory).
+ * the saga-row transition (advisory). The conditional UPDATE is the atomic
+ * concurrency guard; the loaded aggregate is the domain-logic guard and the source
+ * of the domain event dispatched on the in-process plane.
  *
- * `sent  -> T3`: subscription pending -> confirmed, saga -> completed.
- * `failed -> C1`: subscription pending -> cancelled, saga -> compensated.
+ * `sent  -> T3`: subscription pending -> confirmed, saga -> completed (SagaCompleted).
+ * `failed -> C1`: subscription pending -> cancelled, saga -> compensated (SagaCompensated).
  *
- * When both conditional UPDATEs return rowCount() = 0 (already applied, or
- * terminally moot) the transition was a no-op (a redelivery or a sent-after-cancel,
- * FR9): the handler increments welcome_reply_noop_total so the no-op is observable,
- * and returns success — the reply consumer then ack-and-drops the no-op reply. This
- * is the sole cross-context edge Saga.Application -> Subscription.Domain
- * (confirm/cancel).
+ * The saga domain event is emitted only when the saga row actually transitioned
+ * (`sagaChanged`), so a redelivery whose UPDATE is a rowCount()=0 no-op emits nothing.
+ * When BOTH UPDATEs are no-ops (already applied, or terminally moot — a redelivery or
+ * a sent-after-cancel, FR9) the handler increments welcome_reply_noop_total so the
+ * no-op is observable, and returns success — the reply consumer then ack-and-drops the
+ * reply. This is the sole cross-context edge Saga.Application -> Subscription.Domain.
  *
  * @implements CommandHandler<HandleWelcomeEmailOutcomeCommand>
  * @psalm-api
@@ -35,8 +40,10 @@ final readonly class HandleWelcomeEmailOutcomeHandler implements CommandHandler
 {
     public function __construct(
         private TransactionManager $transactionManager,
+        private EnrollmentSagaReader $sagaReader,
         private EnrollmentSagaWriter $sagaWriter,
         private SubscriptionConfirmationWriter $subscriptionWriter,
+        private EventDispatcherInterface $eventDispatcher,
         private SagaMetricsRecorder $metrics
     ) {
     }
@@ -48,37 +55,51 @@ final readonly class HandleWelcomeEmailOutcomeHandler implements CommandHandler
         $subscriptionId = $command->subscriptionId;
         $outcome = $command->outcome;
 
-        // $changed = at least one of the paired conditional UPDATEs took effect.
-        $changed = $this->transactionManager->transactional(
-            fn (): bool => match ($outcome) {
-                WelcomeOutcome::Sent => $this->confirm($sagaId, $subscriptionId),
-                WelcomeOutcome::Failed => $this->compensate($sagaId, $subscriptionId),
+        // Pre-state aggregate, loaded so a confirmed transition can be mirrored on it
+        // (validate + source the domain event). The UPDATEs below remain the guard.
+        $saga = $this->sagaReader->findBySubscriptionId($subscriptionId);
+
+        $result = $this->transactionManager->transactional(
+            fn (): array => match ($outcome) {
+                WelcomeOutcome::Sent => $this->applyTransition(
+                    $this->subscriptionWriter->confirm($subscriptionId),
+                    $this->sagaWriter->complete($sagaId),
+                ),
+                WelcomeOutcome::Failed => $this->applyTransition(
+                    $this->subscriptionWriter->cancel($subscriptionId),
+                    $this->sagaWriter->compensate($sagaId),
+                ),
             }
         );
 
-        if (!$changed) {
-            // Both UPDATEs were rowCount()=0 — a redelivered/late reply (FR9). The
-            // bounded sent-after-cancel email is observable rather than silently
-            // swallowed (arch §5/§7).
+        if ($result['sagaChanged'] && $saga !== null) {
+            $this->mirrorAndDispatch($saga, $outcome);
+        }
+
+        if (!$result['changed']) {
             $this->metrics->recordWelcomeReplyNoop();
         }
     }
 
-    private function confirm(SagaId $sagaId, int $subscriptionId): bool
+    /**
+     * @return array{changed: bool, sagaChanged: bool}
+     */
+    private function applyTransition(bool $subscriptionChanged, bool $sagaChanged): array
     {
-        // Paired guarded UPDATEs; both rowCount()=0 is a successful no-op (FR9).
-        // The subscription `status='pending'` guard is the true single-writer lock.
-        $subscriptionChanged = $this->subscriptionWriter->confirm($subscriptionId);
-        $sagaChanged = $this->sagaWriter->complete($sagaId);
-
-        return $subscriptionChanged || $sagaChanged;
+        // changed = at least one paired UPDATE took effect (drives the no-op metric);
+        // sagaChanged = the saga row actually transitioned (gates the domain event).
+        return ['changed' => $subscriptionChanged || $sagaChanged, 'sagaChanged' => $sagaChanged];
     }
 
-    private function compensate(SagaId $sagaId, int $subscriptionId): bool
+    private function mirrorAndDispatch(EnrollmentSaga $saga, WelcomeOutcome $outcome): void
     {
-        $subscriptionChanged = $this->subscriptionWriter->cancel($subscriptionId);
-        $sagaChanged = $this->sagaWriter->compensate($sagaId);
+        match ($outcome) {
+            WelcomeOutcome::Sent => $saga->complete(),
+            WelcomeOutcome::Failed => $saga->compensate(),
+        };
 
-        return $subscriptionChanged || $sagaChanged;
+        foreach ($saga->pullDomainEvents() as $event) {
+            $this->eventDispatcher->dispatch($event);
+        }
     }
 }

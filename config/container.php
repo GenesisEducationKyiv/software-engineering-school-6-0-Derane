@@ -50,14 +50,21 @@ use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesCommand;
 use App\Scanning\Scanner\Application\ScanReleases\ScanReleasesHandler;
 use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaStarter;
+use App\Saga\Enrollment\Domain\EnrollmentSagaStore;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
+use App\Saga\Enrollment\Domain\Event\SagaCompensated;
+use App\Saga\Enrollment\Domain\Event\SagaCompleted;
+use App\Saga\Enrollment\Domain\Event\SagaStarted;
+use App\Saga\Enrollment\Domain\Event\WelcomePublished;
 use App\Saga\Enrollment\Domain\WelcomeEmailMessageFactory;
 use App\Saga\Enrollment\Domain\WelcomeEmailRelay;
 use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeCommand;
 use App\Saga\Enrollment\Application\HandleOutcome\HandleWelcomeEmailOutcomeHandler;
 use App\Saga\Enrollment\Application\Relay\RelayPendingWelcomeEmails;
+use App\Saga\Enrollment\Application\Start\StartEnrollmentSagaService;
 use App\Saga\Enrollment\Application\Sweep\SweepTimedOutSagas;
 use App\Saga\Enrollment\Domain\EnrollmentSagaCountPort;
+use App\Saga\Enrollment\Infrastructure\Listener\LogSagaTransition;
 use App\Saga\Enrollment\Infrastructure\Persistence\PdoEnrollmentSagaRepository;
 use App\Saga\Enrollment\Infrastructure\Persistence\PdoWelcomeEmailMessageFactory;
 use App\Saga\Enrollment\Infrastructure\Rabbit\RabbitWelcomeEmailRelay;
@@ -275,15 +282,21 @@ return static function (array $settings): Container {
             $c->get(PDO::class)
         ),
 
-        // HW9 B1: the durable saga state store. ISP-alias the Reader/Writer narrow
-        // ports to the one Starter instance (per-consumer ISP).
-        EnrollmentSagaStarter::class => static fn($c) => new PdoEnrollmentSagaRepository(
+        // HW9 B1: the durable saga state store. ISP-alias the Reader/Writer/Store
+        // narrow ports to the one repository instance (per-consumer ISP).
+        EnrollmentSagaStore::class => static fn($c) => new PdoEnrollmentSagaRepository(
             $c->get(PDO::class),
             $c->get(Clock::class)
         ),
-        EnrollmentSagaReader::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
-        EnrollmentSagaWriter::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
-        EnrollmentSagaCountPort::class => static fn($c) => $c->get(EnrollmentSagaStarter::class),
+        EnrollmentSagaReader::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
+        EnrollmentSagaWriter::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
+        EnrollmentSagaCountPort::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
+        // The starter the Subscription write path depends on: the aggregate-driven
+        // facade that persists the saga and dispatches SagaStarted on a new row.
+        EnrollmentSagaStarter::class => static fn($c) => new StartEnrollmentSagaService(
+            $c->get(EnrollmentSagaStore::class),
+            $c->get(EventDispatcherInterface::class)
+        ),
 
         // HW9 D5: the monolith saga-metrics counter table (006 saga_metrics),
         // incremented at the D1 relay / D3 reply consumer / D4 sweeper call-sites
@@ -292,7 +305,6 @@ return static function (array $settings): Container {
             $c->get(PDO::class)
         ),
         SagaMetricsReader::class => static fn($c) => $c->get(SagaMetricsRecorder::class),
-        PdoSagaMetricsStore::class => static fn($c) => $c->get(SagaMetricsRecorder::class),
 
         // HW9 D1: the outbox relay's publish adapter + serializer + the message
         // factory that resolves (email, repository) for a due saga's subscription.
@@ -323,6 +335,7 @@ return static function (array $settings): Container {
             $c->get(WelcomeEmailRelay::class),
             $c->get(EnrollmentSagaWriter::class),
             $c->get(SagaMetricsRecorder::class),
+            $c->get(EventDispatcherInterface::class),
             $c->get(LoggerInterface::class),
         ),
         SweepTimedOutSagas::class => static fn($c) => new SweepTimedOutSagas(
@@ -330,13 +343,16 @@ return static function (array $settings): Container {
             $c->get(EnrollmentSagaWriter::class),
             $c->get(SubscriptionConfirmationWriter::class),
             $c->get(TransactionManager::class),
+            $c->get(EventDispatcherInterface::class),
             $c->get(Clock::class),
             $c->get(SagaMetricsRecorder::class),
         ),
         HandleWelcomeEmailOutcomeHandler::class => static fn($c) => new HandleWelcomeEmailOutcomeHandler(
             $c->get(TransactionManager::class),
+            $c->get(EnrollmentSagaReader::class),
             $c->get(EnrollmentSagaWriter::class),
             $c->get(SubscriptionConfirmationWriter::class),
+            $c->get(EventDispatcherInterface::class),
             $c->get(SagaMetricsRecorder::class),
         ),
         WelcomeEmailOutcomeMessageMapper::class => static fn() => new WelcomeEmailOutcomeMessageMapper(),
@@ -391,12 +407,40 @@ return static function (array $settings): Container {
                     $listener($event);
                 },
             ],
+            // HW9: the saga lifecycle funnel -> one correlated log line per transition.
+            SagaStarted::class => [
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(LogSagaTransition::class);
+                    $listener($event);
+                },
+            ],
+            WelcomePublished::class => [
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(LogSagaTransition::class);
+                    $listener($event);
+                },
+            ],
+            SagaCompleted::class => [
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(LogSagaTransition::class);
+                    $listener($event);
+                },
+            ],
+            SagaCompensated::class => [
+                static function (object $event) use ($c): void {
+                    $listener = $c->get(LogSagaTransition::class);
+                    $listener($event);
+                },
+            ],
         ]),
         EventDispatcherInterface::class => static fn($c) => new InMemoryEventDispatcher(
             $c->get(ListenerProviderInterface::class)
         ),
 
         WhenSubscriptionCreatedThenLog::class => static fn($c) => new WhenSubscriptionCreatedThenLog(
+            $c->get(LoggerInterface::class)
+        ),
+        LogSagaTransition::class => static fn($c) => new LogSagaTransition(
             $c->get(LoggerInterface::class)
         ),
         SubscribeCommandHandler::class => static fn($c) => new SubscribeCommandHandler(

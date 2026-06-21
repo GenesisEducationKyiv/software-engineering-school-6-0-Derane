@@ -293,10 +293,15 @@ contracts/
   (mutable child, like the base allows — unlike `Subscription` it advances state).
   Identity: `SagaId`. Correlation key: `subscriptionId` (1:1 with the subscription,
   PRD FR2/D2). It holds `SagaState`, `awaitingSince`, and records domain events
-  (`SagaStarted`, `WelcomePublished`, `SagaCompleted`, `SagaCompensated`) drained
-  via `pullDomainEvents()` for in-process metrics/logging listeners. The aggregate
-  encodes the legal transitions; the **PDO adapter enforces them atomically** with
-  conditional `UPDATE … WHERE state = :expected`.
+  (`SagaStarted`, `WelcomePublished`, `SagaCompleted`, `SagaCompensated`). Each
+  use-case (start, relay, reply orchestrator, sweeper) loads/builds the aggregate,
+  applies the transition method, and — only when the persistence write actually
+  advanced the row — drains `pullDomainEvents()` onto the PSR-14 plane, where the
+  `LogSagaTransition` listener turns each into one correlated funnel log line (§10).
+  State-count metrics stay `rowCount`-derived (a no-op is not a domain event), so the
+  event plane is observability, not a second source of truth. The aggregate is the
+  domain-logic guard and event source; the **PDO adapter is the concurrency guard**,
+  enforcing transitions atomically with conditional `UPDATE … WHERE state = :expected`.
 
 - **`SagaState` enum** (string-backed): `Started`, `AwaitingConfirmation`,
   `Completed`, `Compensating`, `Compensated`. Mirrors the PRD §1.1 saga lifecycle

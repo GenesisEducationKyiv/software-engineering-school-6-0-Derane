@@ -9,6 +9,7 @@ use App\Saga\Enrollment\Application\Sweep\SweepTimedOutSagas;
 use App\Saga\Enrollment\Domain\EnrollmentSaga;
 use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
+use App\Saga\Enrollment\Domain\Event\SagaCompensated;
 use App\Saga\Enrollment\Domain\SagaState;
 use App\Shared\Domain\Clock;
 use App\Shared\Domain\TransactionManager;
@@ -16,6 +17,7 @@ use App\Shared\Domain\ValueObject\SagaId;
 use App\Subscription\Subscriptions\Domain\SubscriptionConfirmationWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 /**
  * The sweeper compensates due sagas via the orchestrator path (subscription cancel
@@ -33,6 +35,7 @@ final class SweepTimedOutSagasTest extends TestCase
     private EnrollmentSagaReader&MockObject $reader;
     private EnrollmentSagaWriter&MockObject $writer;
     private SubscriptionConfirmationWriter&MockObject $subscriptionWriter;
+    private EventDispatcherInterface&MockObject $dispatcher;
     private SagaMetricsRecorder&MockObject $metrics;
     private SweepTimedOutSagas $useCase;
 
@@ -41,6 +44,7 @@ final class SweepTimedOutSagasTest extends TestCase
         $this->reader = $this->createMock(EnrollmentSagaReader::class);
         $this->writer = $this->createMock(EnrollmentSagaWriter::class);
         $this->subscriptionWriter = $this->createMock(SubscriptionConfirmationWriter::class);
+        $this->dispatcher = $this->createMock(EventDispatcherInterface::class);
         $this->metrics = $this->createMock(SagaMetricsRecorder::class);
 
         $clock = new class (new \DateTimeImmutable(self::NOW)) implements Clock {
@@ -69,6 +73,7 @@ final class SweepTimedOutSagasTest extends TestCase
             $this->writer,
             $this->subscriptionWriter,
             $transactionManager,
+            $this->dispatcher,
             $clock,
             $this->metrics
         );
@@ -174,6 +179,43 @@ final class SweepTimedOutSagasTest extends TestCase
             ->with($this->equalTo($now), 1200)->willReturn([]);
 
         $this->useCase->sweep(600, 1200);
+    }
+
+    public function testDispatchesSagaCompensatedForEachCompensatedSaga(): void
+    {
+        $saga = $this->aSaga('5f1c0e2a-9b3d-4c7a-8e21-7c9b0d4e1f33', 1, SagaState::AwaitingConfirmation);
+        $this->reader->method('dueForSweep')->willReturn([$saga]);
+        $this->reader->method('dueForStartSweep')->willReturn([]);
+        $this->subscriptionWriter->method('cancel')->willReturn(true);
+        $this->writer->method('compensate')->willReturn(true);
+
+        $dispatched = [];
+        $this->dispatcher->expects($this->once())->method('dispatch')
+            ->willReturnCallback(static function (object $event) use (&$dispatched): object {
+                $dispatched[] = $event;
+
+                return $event;
+            });
+
+        $this->useCase->sweep(900, 900);
+
+        $this->assertCount(1, $dispatched);
+        $this->assertInstanceOf(SagaCompensated::class, $dispatched[0]);
+    }
+
+    public function testDoesNotDispatchWhenTheSagaRowDidNotTransition(): void
+    {
+        // A racing `sent` reply already completed the saga: compensate is a no-op,
+        // so no SagaCompensated is emitted.
+        $saga = $this->aSaga('5f1c0e2a-9b3d-4c7a-8e21-7c9b0d4e1f33', 1, SagaState::AwaitingConfirmation);
+        $this->reader->method('dueForSweep')->willReturn([$saga]);
+        $this->reader->method('dueForStartSweep')->willReturn([]);
+        $this->subscriptionWriter->method('cancel')->willReturn(false);
+        $this->writer->method('compensate')->willReturn(false);
+
+        $this->dispatcher->expects($this->never())->method('dispatch');
+
+        $this->useCase->sweep(900, 900);
     }
 
     private function aSaga(string $uuid, int $subscriptionId, SagaState $state): EnrollmentSaga

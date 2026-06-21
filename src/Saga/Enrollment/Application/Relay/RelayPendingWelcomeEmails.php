@@ -9,6 +9,7 @@ use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
 use App\Saga\Enrollment\Domain\WelcomeEmailMessageFactory;
 use App\Saga\Enrollment\Domain\WelcomeEmailRelay;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -38,6 +39,7 @@ final readonly class RelayPendingWelcomeEmails
         private WelcomeEmailRelay $relay,
         private EnrollmentSagaWriter $writer,
         private SagaMetricsRecorder $metrics,
+        private EventDispatcherInterface $eventDispatcher,
         ?LoggerInterface $logger = null
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -69,8 +71,20 @@ final readonly class RelayPendingWelcomeEmails
 
             // markPublished + the published counter run ONLY after publish()
             // returns (a confirmed publish).
-            $this->writer->markPublished($saga->id());
+            $published = $this->writer->markPublished($saga->id());
             $this->metrics->recordWelcomeCommandPublished();
+
+            if ($published) {
+                // The confirmed publish advanced the durable row; mirror the
+                // transition on the aggregate to emit WelcomePublished on the
+                // in-process plane. The persisted awaiting_since anchor is the
+                // writer's SQL NOW(); the value passed here is immaterial (the
+                // aggregate is used only to source the domain event).
+                $saga->markPublished(new \DateTimeImmutable());
+                foreach ($saga->pullDomainEvents() as $event) {
+                    $this->eventDispatcher->dispatch($event);
+                }
+            }
         }
     }
 }

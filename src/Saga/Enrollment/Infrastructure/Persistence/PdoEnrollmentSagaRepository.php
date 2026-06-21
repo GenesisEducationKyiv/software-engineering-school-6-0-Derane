@@ -7,7 +7,7 @@ namespace App\Saga\Enrollment\Infrastructure\Persistence;
 use App\Saga\Enrollment\Domain\EnrollmentSaga;
 use App\Saga\Enrollment\Domain\EnrollmentSagaCountPort;
 use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
-use App\Saga\Enrollment\Domain\EnrollmentSagaStarter;
+use App\Saga\Enrollment\Domain\EnrollmentSagaStore;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
 use App\Saga\Enrollment\Domain\SagaState;
 use App\Shared\Domain\Clock;
@@ -15,12 +15,13 @@ use App\Shared\Domain\ValueObject\SagaId;
 use PDO;
 
 /**
- * The durable saga state store (Postgres A), implementing the three per-consumer
- * ISP ports (Starter + Reader + Writer) on the shared PDO::class.
+ * The durable saga state store (Postgres A), implementing the per-consumer ISP
+ * ports (Store + Reader + Writer + CountPort) on the shared PDO::class.
  *
- * - start() is the idempotent atomic start: INSERT ... ON CONFLICT (subscription_id)
- *   DO NOTHING, so a duplicate POST starts no second saga. It mints a SagaId and
- *   runs inside the enclosing TransactionManager transaction (no inner tx of its own).
+ * - add() is the idempotent atomic start: INSERT ... ON CONFLICT (subscription_id)
+ *   DO NOTHING, so a duplicate POST starts no second saga. The aggregate carries its
+ *   own SagaId and Started state; this runs inside the enclosing TransactionManager
+ *   transaction (no inner tx of its own) and returns whether a row was inserted.
  * - Every Writer transition is a conditional UPDATE ... WHERE state IN (...) returning
  *   rowCount() > 0, so a redelivery is a state-guarded no-op (FR9).
  * - The two sweep Readers bind the PASSED $now (not SQL NOW()) so sweeping is
@@ -29,7 +30,7 @@ use PDO;
  * @psalm-api
  */
 final readonly class PdoEnrollmentSagaRepository implements
-    EnrollmentSagaStarter,
+    EnrollmentSagaStore,
     EnrollmentSagaReader,
     EnrollmentSagaWriter,
     EnrollmentSagaCountPort
@@ -41,7 +42,7 @@ final readonly class PdoEnrollmentSagaRepository implements
     }
 
     #[\Override]
-    public function start(int $subscriptionId): void
+    public function add(EnrollmentSaga $saga): bool
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO enrollment_sagas (saga_id, subscription_id, state, created_at, updated_at)
@@ -49,11 +50,13 @@ final readonly class PdoEnrollmentSagaRepository implements
              ON CONFLICT (subscription_id) DO NOTHING'
         );
         $stmt->execute([
-            ':saga_id' => SagaId::generate()->value(),
-            ':subscription_id' => $subscriptionId,
-            ':state' => SagaState::Started->value,
+            ':saga_id' => $saga->id()->value(),
+            ':subscription_id' => $saga->subscriptionId(),
+            ':state' => $saga->state()->value,
             ':now' => $this->clock->now()->format(\DateTimeInterface::ATOM),
         ]);
+
+        return $stmt->rowCount() > 0;
     }
 
     #[\Override]
@@ -169,7 +172,6 @@ final readonly class PdoEnrollmentSagaRepository implements
     #[\Override]
     public function compensate(SagaId $sagaId): bool
     {
-        // Started|AwaitingConfirmation -> Compensated.
         return $this->transition($sagaId, SagaState::Compensated);
     }
 

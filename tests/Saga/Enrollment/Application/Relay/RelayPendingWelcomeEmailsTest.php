@@ -10,6 +10,7 @@ use App\Saga\Enrollment\Domain\EnrollmentSaga;
 use App\Saga\Enrollment\Domain\EnrollmentSagaReader;
 use App\Saga\Enrollment\Domain\EnrollmentSagaWriter;
 use App\Saga\Enrollment\Domain\SagaState;
+use App\Saga\Enrollment\Domain\Event\WelcomePublished;
 use App\Saga\Enrollment\Domain\SendWelcomeEmail;
 use App\Saga\Enrollment\Domain\WelcomeEmailMessageFactory;
 use App\Saga\Enrollment\Domain\WelcomeEmailRelay;
@@ -18,6 +19,7 @@ use App\Shared\Domain\ValueObject\RepositoryName;
 use App\Shared\Domain\ValueObject\SagaId;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 final class RelayPendingWelcomeEmailsTest extends TestCase
 {
@@ -28,6 +30,7 @@ final class RelayPendingWelcomeEmailsTest extends TestCase
     private WelcomeEmailRelay&MockObject $relay;
     private EnrollmentSagaWriter&MockObject $writer;
     private SagaMetricsRecorder&MockObject $metrics;
+    private EventDispatcherInterface&MockObject $dispatcher;
     private RelayPendingWelcomeEmails $useCase;
 
     protected function setUp(): void
@@ -37,13 +40,15 @@ final class RelayPendingWelcomeEmailsTest extends TestCase
         $this->relay = $this->createMock(WelcomeEmailRelay::class);
         $this->writer = $this->createMock(EnrollmentSagaWriter::class);
         $this->metrics = $this->createMock(SagaMetricsRecorder::class);
+        $this->dispatcher = $this->createMock(EventDispatcherInterface::class);
 
         $this->useCase = new RelayPendingWelcomeEmails(
             $this->reader,
             $this->messageFactory,
             $this->relay,
             $this->writer,
-            $this->metrics
+            $this->metrics,
+            $this->dispatcher
         );
 
         $this->messageFactory->method('forSaga')->willReturn($this->aMessage());
@@ -154,6 +159,39 @@ final class RelayPendingWelcomeEmailsTest extends TestCase
         // The good saga is still relayed and marked published.
         $this->writer->expects($this->once())->method('markPublished')->with($this->equalTo($good->id()));
         $this->metrics->expects($this->once())->method('recordWelcomeCommandPublished');
+
+        $this->useCase->relay();
+    }
+
+    public function testDispatchesWelcomePublishedWhenTheRowAdvances(): void
+    {
+        $saga = $this->aStartedSaga();
+        $this->reader->method('dueForRelay')->willReturn([$saga]);
+        $this->writer->method('markPublished')->willReturn(true);
+
+        $dispatched = [];
+        $this->dispatcher->expects($this->once())->method('dispatch')
+            ->willReturnCallback(static function (object $event) use (&$dispatched): object {
+                $dispatched[] = $event;
+
+                return $event;
+            });
+
+        $this->useCase->relay();
+
+        $this->assertCount(1, $dispatched);
+        $this->assertInstanceOf(WelcomePublished::class, $dispatched[0]);
+    }
+
+    public function testDoesNotDispatchWhenMarkPublishedIsANoOp(): void
+    {
+        // A concurrent worker advanced the row first: markPublished is a rowCount()=0
+        // no-op, so no WelcomePublished is emitted for this tick.
+        $saga = $this->aStartedSaga();
+        $this->reader->method('dueForRelay')->willReturn([$saga]);
+        $this->writer->method('markPublished')->willReturn(false);
+
+        $this->dispatcher->expects($this->never())->method('dispatch');
 
         $this->useCase->relay();
     }
