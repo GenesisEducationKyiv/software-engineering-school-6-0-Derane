@@ -79,14 +79,30 @@ views {
     view sagaWorkerComponents of notifier.sagaWorker {
         title "Component View — Saga Worker"
         description "
-            Outbox relay, reply consumer + orchestrator, and timeout sweeper
-            inside the monolith saga-worker; saga state in the monolith
-            PostgreSQL.
+            Outbox relay, reply consumer + orchestrator, timeout sweeper, and
+            the two opt-in synchronous welcome-email relays (rest/grpc) inside
+            the monolith saga-worker; saga state in the monolith PostgreSQL.
         "
         include
             *,
             notifier.db,
-            notifier.rabbitmq
+            notifier.rabbitmq,
+            notifier.notificationSvc.welcomeRestController,
+            notifier.notificationGrpc.welcomeGrpcSvc
+    }
+
+    view notificationGrpcComponents of notifier.notificationGrpc {
+        title "Component View — Notification gRPC Server"
+        description "
+            RoadRunner gRPC server (:9002) serving
+            notification.welcome.v1.WelcomeEmailService over its own DI
+            container (handler/ledger/renderer/mailer are separate runtime
+            instances from the consumer-side notification service).
+        "
+        include
+            *,
+            notifier.notificationDb,
+            notifier.mailhog
     }
 
     dynamic view createSubscriptionFlow {
@@ -181,5 +197,42 @@ views {
 
         notifier.sagaWorker.sagaLoop -> notifier.sagaWorker.sweepUseCase "sweep timed-out sagas (no reply by T → compensate)"
         notifier.sagaWorker.sweepUseCase -> notifier.sagaWorker.confirmationWriter "cancel swept subscription"
+    }
+
+    dynamic view syncWelcomeEmailFlow {
+        title "Dynamic — Synchronous Welcome-Email Send (gRPC / REST)"
+        description "
+            Opt-in synchronous welcome-email transports selected by
+            WELCOME_EMAIL_TRANSPORT (rest|grpc). The saga-worker calls the
+            notification service and BLOCKS for sent|failed, then drives the
+            saga in-thread via the existing HandleWelcomeEmailOutcomeCommand.
+            The default rabbit path (async, see Confirmed-Subscription Saga)
+            is unchanged.
+        "
+
+        notifier.sagaWorker.sagaLoop -> notifier.sagaWorker.syncRelayUseCase "relay tick (transport=rest|grpc)"
+        notifier.sagaWorker.syncRelayUseCase -> notifier.sagaWorker.sagaRepo "SELECT due sagas"
+
+        notifier.sagaWorker.syncRelayUseCase -> notifier.sagaWorker.grpcWelcomeRelay "send(SendWelcomeEmail) (transport=grpc)"
+        notifier.sagaWorker.grpcWelcomeRelay -> notifier.notificationGrpc.welcomeGrpcSvc "SendWelcomeEmail RPC (deadline + bounded retry)"
+        notifier.notificationGrpc.welcomeGrpcSvc -> notifier.notificationGrpc.grpcWelcomeHandler "invoke unchanged handler"
+        notifier.notificationGrpc.grpcWelcomeHandler -> notifier.notificationGrpc.grpcWelcomeLedger "claim(subscriptionId) — atomic ON CONFLICT"
+        notifier.notificationGrpc.grpcWelcomeLedger -> notifier.notificationDb "INSERT welcome_notifications"
+        notifier.notificationGrpc.grpcWelcomeHandler -> notifier.notificationGrpc.grpcWelcomeRenderer "render welcome email"
+        notifier.notificationGrpc.grpcWelcomeHandler -> notifier.notificationGrpc.grpcWelcomeMailer "send welcome email"
+        notifier.notificationGrpc.grpcWelcomeMailer -> notifier.mailhog "SMTP delivery"
+        notifier.notificationGrpc.welcomeGrpcSvc -> notifier.sagaWorker.grpcWelcomeRelay "SendWelcomeEmailResponse{outcome=sent|failed}"
+
+        notifier.sagaWorker.syncRelayUseCase -> notifier.sagaWorker.restWelcomeRelay "send(SendWelcomeEmail) (transport=rest)"
+        notifier.sagaWorker.restWelcomeRelay -> notifier.notificationSvc.welcomeRestController "POST /internal/welcome-emails (deadline + bounded retry)"
+        notifier.notificationSvc.welcomeRestController -> notifier.notificationSvc.welcomeHandler "invoke unchanged handler"
+        notifier.notificationSvc.welcomeRestController -> notifier.sagaWorker.restWelcomeRelay "200 { outcome: sent|failed } (409 on in-flight)"
+
+        notifier.sagaWorker.syncRelayUseCase -> notifier.sagaWorker.sagaCommandBus "dispatch HandleWelcomeEmailOutcomeCommand (only on a definitive OK)"
+        notifier.sagaWorker.sagaCommandBus -> notifier.sagaWorker.outcomeHandler "handle outcome (ONE transaction)"
+        notifier.sagaWorker.outcomeHandler -> notifier.sagaWorker.confirmationWriter "confirm/cancel WHERE status=pending"
+        notifier.sagaWorker.confirmationWriter -> notifier.db "UPDATE subscriptions SET status=confirmed|cancelled"
+        notifier.sagaWorker.outcomeHandler -> notifier.sagaWorker.sagaRepo "complete/compensate saga"
+        notifier.sagaWorker.sagaRepo -> notifier.db "UPDATE enrollment_sagas SET state=completed|compensated"
     }
 }
