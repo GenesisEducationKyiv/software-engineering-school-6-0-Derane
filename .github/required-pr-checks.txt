@@ -15,3 +15,4 @@ check_run|Playwright (browser)|github-actions
 check_run|Playwright (auth enabled)|github-actions
 check_run|scanner-smoke + AC5 / NFR3 outage recovery|github-actions
 check_run|composer audit|github-actions
+check_run|gRPC contract (buf lint)|github-actions

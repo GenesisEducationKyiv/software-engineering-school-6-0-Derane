@@ -1,0 +1,30 @@
+name: gRPC Contract
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  buf:
+    # NOTE: this job `name:` must stay byte-identical to its row in
+    # .github/required-pr-checks.txt (RD10e).
+    name: gRPC contract (buf lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.71.0
+
+      # buf lint is fully OFFLINE — the hard acceptance criterion (AC2). It gates only
+      # the new welcome proto; the frozen legacy proto/release_notifier.proto is
+      # excluded in buf.yaml.
+      - name: buf lint (welcome proto, STANDARD ruleset)
+        run: buf lint
+
+      # buf build validates the proto compiles (also offline). Codegen
+      # (`make buf-generate`, which reaches buf.build for the two remote plugins) is a
+      # local/dev step; its output (gen/) is committed, like generated/.
+      - name: buf build (validate compilation)
+        run: buf build -o /dev/null
