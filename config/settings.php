@@ -49,6 +49,25 @@ return [
         'sweep_every_ticks' => (int) ($_ENV['SAGA_SWEEP_EVERY_TICKS'] ?? 60),
         'relay_batch_size' => (int) ($_ENV['SAGA_RELAY_BATCH_SIZE'] ?? 50),
     ],
+    // REST->gRPC welcome-email migration (Epic 3). The outbound welcome SEND leg is
+    // selected by WELCOME_EMAIL_TRANSPORT (rabbit | rest | grpc); absent/unknown ->
+    // rabbit (the HW9 async default, 100% intact). The reply leg + sweeper stay AMQP on
+    // all transports (RD4). The welcome_sync block is the single source of truth for the
+    // sync paths' deadline + bounded-retry policy (the broker-buffer/sweeper replacement).
+    'welcome_email' => [
+        'transport' => $_ENV['WELCOME_EMAIL_TRANSPORT'] ?? 'rabbit',
+        'rest_endpoint' => $_ENV['NOTIFICATION_REST_BASE_URL'] ?? 'http://notification-svc:8081',
+        'grpc_target' => $_ENV['NOTIFICATION_GRPC_TARGET'] ?? 'notification-svc:9002',
+        'sync' => [
+            'deadline_seconds' => (int) ($_ENV['WELCOME_EMAIL_SYNC_DEADLINE_SECONDS'] ?? 10),
+            'max_attempts' => (int) ($_ENV['WELCOME_EMAIL_SYNC_MAX_ATTEMPTS'] ?? 3),
+            // Comma-separated per-attempt backoff in ms (before the NEXT attempt).
+            'backoff_ms' => array_values(array_filter(array_map(
+                static fn (string $v): int => (int) trim($v),
+                explode(',', (string) ($_ENV['WELCOME_EMAIL_SYNC_BACKOFF_MS'] ?? '200,500,1000'))
+            ), static fn (int $v): bool => $v >= 0)) ?: [200, 500, 1000],
+        ],
+    ],
     'api_key' => $_ENV['API_KEY'] ?? '',
     'bootstrap' => [
         'run_migrations_on_boot' => filter_var(

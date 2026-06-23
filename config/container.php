@@ -67,7 +67,9 @@ use App\Saga\Enrollment\Domain\EnrollmentSagaCountPort;
 use App\Saga\Enrollment\Infrastructure\Listener\LogSagaTransition;
 use App\Saga\Enrollment\Infrastructure\Persistence\PdoEnrollmentSagaRepository;
 use App\Saga\Enrollment\Infrastructure\Persistence\PdoWelcomeEmailMessageFactory;
+use App\Saga\Enrollment\Infrastructure\Grpc\GrpcWelcomeEmailRelay;
 use App\Saga\Enrollment\Infrastructure\Rabbit\RabbitWelcomeEmailRelay;
+use App\Saga\Enrollment\Infrastructure\Rest\RestWelcomeEmailRelay;
 use App\Saga\Enrollment\Infrastructure\Rabbit\SendWelcomeEmailSerializer;
 use App\Saga\Enrollment\Infrastructure\Rabbit\WelcomeEmailOutcomeConsumer;
 use App\Saga\Enrollment\Infrastructure\Rabbit\WelcomeEmailOutcomeMessageMapper;
@@ -129,6 +131,7 @@ use App\Migration\Migrator;
 use DI\Container;
 use DI\ContainerBuilder;
 use GuzzleHttp\Client as GuzzleClient;
+use Notification\Welcome\V1\WelcomeEmailServiceClient;
 use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
@@ -309,14 +312,49 @@ return static function (array $settings): Container {
         // HW9 D1: the outbox relay's publish adapter + serializer + the message
         // factory that resolves (email, repository) for a due saga's subscription.
         SendWelcomeEmailSerializer::class => static fn() => new SendWelcomeEmailSerializer(),
-        // H1: the relay opens its OWN dedicated confirm-mode channel on the shared
-        // RabbitConnection — it must NOT reuse RabbitPublisher (whose channel is the
-        // worker's long-lived consume channel; confirm_select on it corrupts wait()).
-        WelcomeEmailRelay::class => static fn($c) => new RabbitWelcomeEmailRelay(
-            $c->get(RabbitConnection::class),
-            $c->get(SendWelcomeEmailSerializer::class),
-            $c->get(LoggerInterface::class),
-        ),
+        // Epic 3 (REST->gRPC migration, RD4 impl-swap): the WelcomeEmailRelay port is
+        // bound to one of THREE implementations selected by WELCOME_EMAIL_TRANSPORT
+        // (rabbit | rest | grpc); absent/unknown => rabbit (the HW9 async default, 100%
+        // intact). SagaWorker + RelayPendingWelcomeEmails are UNCHANGED — only this
+        // binding swaps, so the AMQP reply consumer + sweeper keep running on all
+        // transports (only the outbound SEND leg migrates). The selected adapter is the
+        // ONLY one built — the gRPC client (ext-grpc, monolith image only) is never
+        // instantiated unless transport=grpc.
+        //
+        // H1 (rabbit): the relay opens its OWN dedicated confirm-mode channel on the
+        // shared RabbitConnection — it must NOT reuse RabbitPublisher (whose channel is
+        // the worker's long-lived consume channel; confirm_select on it corrupts wait()).
+        WelcomeEmailRelay::class => static function ($c) use ($settings) {
+            $sync = $settings['welcome_email']['sync'];
+
+            return match ($settings['welcome_email']['transport']) {
+                'grpc' => new GrpcWelcomeEmailRelay(
+                    new WelcomeEmailServiceClient(
+                        $settings['welcome_email']['grpc_target'],
+                        ['credentials' => \Grpc\ChannelCredentials::createInsecure()],
+                    ),
+                    $c->get(CommandBus::class),
+                    $sync['deadline_seconds'],
+                    $sync['max_attempts'],
+                    $sync['backoff_ms'],
+                    $c->get(LoggerInterface::class),
+                ),
+                'rest' => new RestWelcomeEmailRelay(
+                    $c->get(GuzzleClient::class),
+                    $c->get(CommandBus::class),
+                    rtrim($settings['welcome_email']['rest_endpoint'], '/') . '/internal/welcome-emails',
+                    $sync['deadline_seconds'],
+                    $sync['max_attempts'],
+                    $sync['backoff_ms'],
+                    $c->get(LoggerInterface::class),
+                ),
+                default => new RabbitWelcomeEmailRelay(
+                    $c->get(RabbitConnection::class),
+                    $c->get(SendWelcomeEmailSerializer::class),
+                    $c->get(LoggerInterface::class),
+                ),
+            };
+        },
         WelcomeEmailMessageFactory::class => static fn($c) => new PdoWelcomeEmailMessageFactory(
             $c->get(PDO::class),
             $c->get(Clock::class),
