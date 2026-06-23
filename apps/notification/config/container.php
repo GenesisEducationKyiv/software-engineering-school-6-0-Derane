@@ -14,6 +14,7 @@ use App\Sending\Domain\WelcomeNotificationLedger;
 use App\Sending\Domain\WelcomeOutcomePublisher;
 use App\Sending\Application\NotificationMetricsReader;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
+use App\Sending\Infrastructure\Grpc\WelcomeEmailGrpcService;
 use App\Sending\Infrastructure\Health\CompositeHealthCheck;
 use App\Sending\Infrastructure\Health\DatabaseHealthCheck;
 use App\Sending\Infrastructure\Health\HealthCheckInterface;
@@ -21,6 +22,8 @@ use App\Sending\Infrastructure\Health\RabbitMqHealthCheck;
 use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\HealthController;
 use App\Sending\Infrastructure\Http\MetricsController;
+use App\Sending\Infrastructure\Http\WelcomeEmailController;
+use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
 use App\Sending\Infrastructure\Logging\StderrLogger;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
@@ -44,6 +47,7 @@ use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use DI\Container;
 use DI\ContainerBuilder;
+use Notification\Welcome\V1\WelcomeEmailServiceInterface;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
@@ -190,6 +194,22 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class),
             $c->get(ResponseFactoryInterface::class),
             $c->get(ExceptionStatusMap::class),
+        ),
+
+        // Synchronous welcome-email transport surfaces (REST→gRPC migration). Both
+        // wrap the UNCHANGED SendWelcomeEmailHandler via the shared validating
+        // WelcomeEmailFactory; the async RabbitMQ path above is untouched.
+        WelcomeEmailFactory::class => static fn() => new WelcomeEmailFactory(),
+        WelcomeEmailController::class => static fn($c) => new WelcomeEmailController(
+            $c->get(SendWelcomeEmailHandler::class),
+            $c->get(WelcomeEmailFactory::class),
+            $c->get(LoggerInterface::class),
+        ),
+        WelcomeEmailServiceInterface::class => static fn($c) => new WelcomeEmailGrpcService(
+            $c->get(SendWelcomeEmailHandler::class),
+            $c->get(WelcomeEmailFactory::class),
+            $c->get(ExceptionStatusMap::class),
+            $c->get(LoggerInterface::class),
         ),
     ]);
 
