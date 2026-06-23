@@ -94,6 +94,65 @@ make c4-validate
 make c4-down
 ```
 
+## REST → gRPC: welcome-email send
+
+The HW9 enrollment saga's **welcome-email send** (monolith saga relay → notification
+service) travels over three interchangeable transports, chosen by one env flag —
+a controlled REST→gRPC migration that keeps the async default fully intact:
+
+| `WELCOME_EMAIL_TRANSPORT` | Wire | Service B surface | Notes |
+| --- | --- | --- | --- |
+| `rabbit` *(default)* | AMQP (async) | `SendWelcomeEmailConsumer` | HW9 path, unchanged: broker buffer + timeout sweeper |
+| `rest` | HTTP/1.1 + JSON | `POST /internal/welcome-emails` (`php -S` :8081) | introduced sync baseline |
+| `grpc` | HTTP/2 + protobuf | `notification.welcome.v1.WelcomeEmailService/SendWelcomeEmail` (RoadRunner :9002) | the migrated call |
+
+All three drive the **same unchanged** `SendWelcomeEmailHandler`; the contract is
+`proto/notification/welcome/v1/welcome.proto`, buf-toolchained into `gen/` (`make buf-lint`,
+`make buf-generate`). The gRPC client (`grpc/grpc` + PECL `ext-grpc`) lives only in the
+monolith image; Service B's gRPC server is RoadRunner (no `ext-grpc`). On the sync paths
+the relay blocks for the `sent|failed` outcome and drives the saga in-thread (the async
+RabbitMQ reply remains an idempotent backstop). Details in **ADR-0004**.
+
+```bash
+# switch transport (the saga-worker reads it from .env), then recreate the worker:
+echo "WELCOME_EMAIL_TRANSPORT=grpc" >> .env && docker compose up -d --force-recreate saga-worker
+```
+
+### Benchmark — REST vs gRPC (k6)
+
+Both transports hit the **same** handler on the notification service; k6 drives HTTP for
+REST and `k6/net/grpc` for gRPC (`make bench-rest` / `make bench-grpc`, `VUS=`/`DURATION=`
+overridable). Measured locally via docker compose:
+
+**Matched load (8 VUs, 15s, 100% success on both):**
+
+| Metric | REST (`php -S`) | gRPC (RoadRunner) | gRPC vs REST |
+| --- | --- | --- | --- |
+| throughput | 16.5 req/s | **301.8 req/s** | ~18× |
+| latency p50 | 465 ms | **25 ms** | ~19× lower |
+| latency p95 | 615 ms | **43 ms** | ~14× lower |
+| latency p99 | 729 ms | **62 ms** | ~12× lower |
+
+**High load (50 VUs, 30s):** REST stayed flat at ~18 req/s (its `php -S` ceiling, 100%
+success); the gRPC wire sustained ~250+ req/s, but at that rate the **downstream
+synchronous AMQP outcome-reply publish** (a confirm-publish per send) saturated and the
+service returned `UNAVAILABLE` — i.e. under heavy load the bottleneck moves *off the wire*
+to the reply leg, not the gRPC transport.
+
+**Why gRPC wins here:**
+
+- **Server concurrency model (dominant factor):** the REST baseline is PHP's built-in
+  `php -S` — single-threaded, one request at a time (~18 req/s ceiling); the gRPC server
+  is RoadRunner with a persistent worker pool. This is the honest, real-deployment
+  difference and the largest contributor to the gap.
+- **HTTP/2 multiplexing:** one connection carries many concurrent streams (the k6 gRPC
+  client reuses a single connection per VU) versus serial HTTP/1.1 request/response.
+- **Binary protobuf vs text JSON:** smaller frames and no per-request JSON parse or schema
+  re-resolution.
+
+So the numbers reflect transport **and** server model together (the realistic end-to-end
+picture), not a wire-only microbenchmark.
+
 ## Quality Gates
 
 Monolith:

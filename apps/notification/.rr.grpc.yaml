@@ -16,3 +16,11 @@ grpc:
   listen: "tcp://0.0.0.0:9002"
   proto:
     - "../../proto/notification/welcome/v1/welcome.proto"
+  pool:
+    supervisor:
+      # Recycle a worker that has been idle longer than this. Kept BELOW the 60s AMQP
+      # heartbeat (config/container.php) so the WelcomeOutcomePublisher's eagerly-opened,
+      # never-reconnecting connection is never reused after the broker would drop it for
+      # missed heartbeats — the persistent-worker staleness fix (the REST php -S path is
+      # immune as a fresh process per request). See ADR-0004.
+      idle_ttl: 30s

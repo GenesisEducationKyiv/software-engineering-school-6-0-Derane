@@ -1,4 +1,4 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint deptrac psalm check proto buf-lint buf-generate \
+.PHONY: help ensure-env install build up down restart logs migrate test lint deptrac psalm check proto buf-lint buf-generate bench-rest bench-grpc \
         acceptance-up acceptance-run acceptance-down acceptance \
         acceptance-auth-up acceptance-auth-run acceptance-auth-down acceptance-auth \
         integration-up integration-run integration-down integration \
@@ -134,6 +134,15 @@ buf-lint: install ## Lint protos with buf (STANDARD ruleset, fully offline) insi
 
 buf-generate: install ## Generate the welcome-proto PHP stubs into gen/ via buf inside Docker (needs network for remote plugins)
 	$(COMPOSE) run --rm --no-deps -v "$(PWD):/app" app bash -lc "buf generate && chown -R $(HOST_UID):$(HOST_GID) gen"
+
+VUS ?= 50
+DURATION ?= 30s
+
+bench-rest: ## k6 REST welcome-email benchmark (stack must be up): make bench-rest [VUS=50 DURATION=30s]
+	docker run --rm --network host -v "$(PWD):/work" -w /work grafana/k6 run -e VUS=$(VUS) -e DURATION=$(DURATION) k6/welcome-rest.js
+
+bench-grpc: ## k6 gRPC welcome-email benchmark (stack must be up): make bench-grpc [VUS=50 DURATION=30s]
+	docker run --rm --network host -v "$(PWD):/work" -w /work grafana/k6 run -e VUS=$(VUS) -e DURATION=$(DURATION) k6/welcome-grpc.js
 
 integration-up: install ensure-env ## Start Postgres + Redis for integration tests
 	$(TEST_COMPOSE) up -d --wait postgres redis
