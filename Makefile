@@ -1,4 +1,4 @@
-.PHONY: help ensure-env install build up down restart logs migrate test lint deptrac psalm check proto \
+.PHONY: help ensure-env install build up down restart logs migrate test lint deptrac psalm check proto buf-lint buf-generate \
         acceptance-up acceptance-run acceptance-down acceptance \
         acceptance-auth-up acceptance-auth-run acceptance-auth-down acceptance-auth \
         integration-up integration-run integration-down integration \
@@ -128,6 +128,12 @@ check: install ## Run lint, architecture, static analysis and unit tests inside 
 
 proto: install ## Generate protobuf and gRPC PHP classes inside Docker
 	$(COMPOSE) run --rm --no-deps -v "$(PWD):/app" app bash -lc "chmod +x tools/bin/protoc-gen-php-grpc-2025.1.12-linux-amd64/protoc-gen-php-grpc && mkdir -p generated && chown -R $(HOST_UID):$(HOST_GID) generated && protoc --plugin=protoc-gen-php-grpc=tools/bin/protoc-gen-php-grpc-2025.1.12-linux-amd64/protoc-gen-php-grpc --php_out=generated --php-grpc_out=generated proto/release_notifier.proto && chown -R $(HOST_UID):$(HOST_GID) generated"
+
+buf-lint: install ## Lint protos with buf (STANDARD ruleset, fully offline) inside Docker
+	$(COMPOSE) run --rm --no-deps -v "$(PWD):/app" app buf lint
+
+buf-generate: install ## Generate the welcome-proto PHP stubs into gen/ via buf inside Docker (needs network for remote plugins)
+	$(COMPOSE) run --rm --no-deps -v "$(PWD):/app" app bash -lc "buf generate && chown -R $(HOST_UID):$(HOST_GID) gen"
 
 integration-up: install ensure-env ## Start Postgres + Redis for integration tests
 	$(TEST_COMPOSE) up -d --wait postgres redis

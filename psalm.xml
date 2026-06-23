@@ -9,8 +9,11 @@
 >
     <projectFiles>
         <directory name="src" />
+        <directory name="gen" />
         <ignoreFiles>
             <directory name="vendor" />
+            <!-- gen/ is buf-generated: scanned for symbol resolution, not analyzed (RD7). -->
+            <directory name="gen" />
         </ignoreFiles>
     </projectFiles>
 </psalm>

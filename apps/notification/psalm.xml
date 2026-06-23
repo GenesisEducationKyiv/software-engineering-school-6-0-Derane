@@ -9,8 +9,11 @@
 >
     <projectFiles>
         <directory name="src" />
+        <directory name="../../gen" />
         <ignoreFiles>
             <directory name="vendor" />
+            <!-- repo-root gen/ is buf-generated: resolve symbols, don't analyze (RD7). -->
+            <directory name="../../gen" />
         </ignoreFiles>
     </projectFiles>
     <issueHandlers>

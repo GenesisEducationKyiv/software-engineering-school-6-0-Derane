@@ -13,6 +13,7 @@
 
     <exclude-pattern>tests/e2e/</exclude-pattern>
     <exclude-pattern>generated/</exclude-pattern>
+    <exclude-pattern>gen/</exclude-pattern>
     <exclude-pattern>vendor/</exclude-pattern>
 
     <rule ref="PSR12"/>
