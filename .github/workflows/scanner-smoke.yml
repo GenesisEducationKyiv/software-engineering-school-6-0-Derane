@@ -8,7 +8,12 @@ jobs:
   scanner-smoke:
     name: scanner smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # `make scanner-smoke` builds BOTH the monolith `app` and `notification-svc` images
+    # from source (compiling pdo_pgsql/sockets/pcntl + downloading RoadRunner) before the
+    # smoke runs. That build alone takes ~15 min on a cold runner, so a 15-min cap killed
+    # the job during `--build --wait` — the smoke step never executed. The sibling
+    # docker-building jobs run ~17 min with no tight cap; give this one the same headroom.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
