@@ -26,12 +26,8 @@ use Spiral\RoadRunner\GRPC\Exception\ServiceException;
 use Spiral\RoadRunner\GRPC\StatusCode;
 
 /**
- * In-process gRPC server test (RD8b): the real {@see WelcomeEmailGrpcService} wired
- * to a REAL {@see SendWelcomeEmailHandler} over doubled domain ports (the project
- * pattern — the handler is final readonly and cannot be doubled), a real
- * {@see ExceptionStatusMap}, and a mocked {@see ContextInterface}. Drives each
- * handler disposition through the ledger/mailer/publisher mocks and asserts the
- * adapter's outcome derivation + gRPC status mapping (RD6).
+ * Drives the real service + handler over doubled domain ports and asserts
+ * outcome derivation + gRPC status mapping.
  */
 final class WelcomeEmailGrpcServiceTest extends TestCase
 {
@@ -103,8 +99,7 @@ final class WelcomeEmailGrpcServiceTest extends TestCase
 
     public function testAlreadyFailedYieldsOutcomeFailedAsNormalResponse(): void
     {
-        // AlreadyFailed claim → handler re-publishes `failed` then throws
-        // WelcomeAlreadyFailedException → adapter returns OUTCOME_FAILED (no exception).
+        // AlreadyFailed claim is a normal OUTCOME_FAILED response, not a thrown exception.
         $this->ledger->method('claim')->willReturn(ClaimResult::alreadyFailed());
         $this->mailer->expects(self::never())->method('send');
 
@@ -122,7 +117,7 @@ final class WelcomeEmailGrpcServiceTest extends TestCase
             $this->service()->SendWelcomeEmail($this->ctx, $this->validRequest());
             self::fail('Expected a GRPCException');
         } catch (GRPCException $e) {
-            // Benign contention — ABORTED, not UNAVAILABLE (RD6).
+            // Benign contention — ABORTED, not UNAVAILABLE.
             self::assertSame(StatusCode::ABORTED, $e->getCode());
             self::assertNotInstanceOf(ServiceException::class, $e);
         }

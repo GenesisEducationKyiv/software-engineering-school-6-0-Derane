@@ -309,21 +309,11 @@ return static function (array $settings): Container {
         ),
         SagaMetricsReader::class => static fn($c) => $c->get(SagaMetricsRecorder::class),
 
-        // HW9 D1: the outbox relay's publish adapter + serializer + the message
-        // factory that resolves (email, repository) for a due saga's subscription.
         SendWelcomeEmailSerializer::class => static fn() => new SendWelcomeEmailSerializer(),
-        // Epic 3 (REST->gRPC migration, RD4 impl-swap): the WelcomeEmailRelay port is
-        // bound to one of THREE implementations selected by WELCOME_EMAIL_TRANSPORT
-        // (rabbit | rest | grpc); absent/unknown => rabbit (the HW9 async default, 100%
-        // intact). SagaWorker + RelayPendingWelcomeEmails are UNCHANGED — only this
-        // binding swaps, so the AMQP reply consumer + sweeper keep running on all
-        // transports (only the outbound SEND leg migrates). The selected adapter is the
-        // ONLY one built — the gRPC client (ext-grpc, monolith image only) is never
-        // instantiated unless transport=grpc.
-        //
-        // H1 (rabbit): the relay opens its OWN dedicated confirm-mode channel on the
-        // shared RabbitConnection — it must NOT reuse RabbitPublisher (whose channel is
-        // the worker's long-lived consume channel; confirm_select on it corrupts wait()).
+        // Only the selected adapter is built, so the gRPC client (ext-grpc, monolith image
+        // only) is instantiated lazily. The rabbit relay opens its OWN confirm-mode channel —
+        // it must NOT reuse RabbitPublisher's long-lived consume channel (confirm_select
+        // corrupts wait()).
         WelcomeEmailRelay::class => static function ($c) use ($settings) {
             $sync = $settings['welcome_email']['sync'];
 

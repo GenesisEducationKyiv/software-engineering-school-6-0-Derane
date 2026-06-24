@@ -17,24 +17,9 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 /**
- * The `rest` synchronous welcome-send transport (opt-in via WELCOME_EMAIL_TRANSPORT,
- * RD4). It IMPLEMENTS the existing WelcomeEmailRelay port (publish: void) so the
- * SagaWorker + RelayPendingWelcomeEmails use-case are untouched — only the DI binding
- * swaps (RD4 impl-swap, superseding the architecture's earlier sibling-port idea D5).
- *
- * It POSTs {sagaId, subscriptionId, email, repository} as JSON to Service B's
- * /internal/welcome-emails, blocks for the {outcome, error} reply (caller-waits, DC1),
- * and applies the outcome IN-THREAD via the existing HandleWelcomeEmailOutcomeCommand
- * dispatched on the in-house CommandBus. publish() returns void only on a definitive
- * 2xx outcome; the async WelcomeEmailOutcome reply Service B still publishes is an
- * idempotent no-op backstop (RD5).
- *
- * Deadline + bounded retry (the broker-buffer/sweeper replacement on the sync path,
- * arch §7.4): timeout/connect_timeout = deadlineSeconds; up to maxAttempts; backoff
- * 200/500/1000ms; RETRY only on transient transport errors (connect error / 502 / 503
- * / 504); on a 409 (benign in-flight contention) or 4xx/5xx validation/internal error
- * THROW immediately (no retry, no saga drive); on retry exhaustion THROW
- * SyncWelcomeSendException so the relay leaves the saga for the next tick (RD6).
+ * The `rest` synchronous welcome-send transport: POSTs the send to Service B, blocks for
+ * the reply, and applies the outcome in-thread via the CommandBus. Retries only transient
+ * transport errors; a 409 or deterministic 4xx/5xx throws immediately.
  *
  * @psalm-api
  */
@@ -104,7 +89,6 @@ final readonly class RestWelcomeEmailRelay implements WelcomeEmailRelay
                     'http_errors' => false,
                 ]);
             } catch (ConnectException $e) {
-                // Transport-level transient (connect/timeout): retry.
                 $lastError = $e;
                 $this->backoff($attempt);
                 continue;

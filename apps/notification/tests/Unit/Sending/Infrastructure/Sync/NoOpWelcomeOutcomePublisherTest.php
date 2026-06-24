@@ -10,11 +10,9 @@ use App\Sending\Infrastructure\Sync\NoOpWelcomeOutcomePublisher;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The sync welcome surfaces (REST + gRPC) bind this no-op publisher so the fail-closed
- * Rabbit reply publisher stays off the sync send's critical path (ADR-0004): the relay
- * applies the outcome in-thread, so a reply-broker outage can never fail a SENT welcome
- * and trigger a false start-sweep compensation. That guarantee depends on this publisher
- * doing nothing and never throwing — which these tests lock.
+ * Locks the no-op publisher: it must do nothing and never throw, keeping the fail-closed
+ * Rabbit reply publisher off the sync send's critical path so a reply-broker outage can
+ * never fail a SENT welcome and trigger a false start-sweep compensation.
  */
 final class NoOpWelcomeOutcomePublisherTest extends TestCase
 {

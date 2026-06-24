@@ -11,26 +11,14 @@ use App\Sending\Infrastructure\Error\WelcomeRequestValidationException;
 use Notification\Welcome\V1\SendWelcomeEmailRequest;
 
 /**
- * Builds the {@see WelcomeEmail} VO from a sync transport request — a gRPC
- * {@see SendWelcomeEmailRequest} message or a REST JSON payload — constructing it
- * EXACTLY as {@see \App\Sending\Infrastructure\Rabbit\SendWelcomeEmailMessageMapper}
- * does on the async path, so the unchanged {@see \App\Sending\Application\SendWelcomeEmailHandler}
- * receives an identical VO regardless of transport (FR5).
- *
- * Lives in the transport-neutral Sync namespace (not under Http) because it is shared
- * by BOTH synchronous surfaces; neither the REST controller nor the gRPC service should
- * be subordinate to the other's namespace.
- *
- * VO construction IS the field validation: a malformed email/repository (or a bad
- * request shape on the REST path) is translated to a single
- * {@see WelcomeRequestValidationException} → gRPC INVALID_ARGUMENT / HTTP 400 (RD6).
+ * Builds the {@see WelcomeEmail} VO from a sync transport request, constructing it
+ * identically to the async path so the handler receives the same VO regardless of transport.
  */
 final readonly class WelcomeEmailFactory
 {
     public function fromGrpc(SendWelcomeEmailRequest $request): WelcomeEmail
     {
-        // int64 subscription_id is typed int|string by the protobuf runtime; the
-        // ledger key is an int (RD10a — no truncation: PHP ints are 64-bit here).
+        // int64 subscription_id is int|string from protobuf; the (int) cast won't truncate on 64-bit PHP.
         return $this->build(
             $request->getSagaId(),
             (int) $request->getSubscriptionId(),

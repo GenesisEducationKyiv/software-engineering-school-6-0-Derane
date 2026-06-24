@@ -1,20 +1,12 @@
-// k6 load test — gRPC path of the welcome-email send (Service B).
-// Mirrors welcome-rest.js exactly (same payload, VUs, duration), hitting the SAME
-// SendWelcomeEmailHandler over HTTP/2 + protobuf via the welcome.proto contract.
-//
-// Run (stack must be up; see Makefile `bench-grpc`):
-//   docker run --rm --network host -v "$PWD:/work" -w /work grafana/k6 run \
-//     -e VUS=50 -e DURATION=30s k6/welcome-grpc.js
-//
-// Uses a fixed subscription_id (distinct from the REST run's) so per-request work is
-// the constant AlreadySent dedup branch after the first send — isolating transport.
+// k6 load test — gRPC path of the welcome-email send (Service B), over HTTP/2 + protobuf.
+// Uses a fixed subscription_id (distinct from the REST run's) so per-request work is the
+// constant AlreadySent dedup branch after the first send — isolating transport.
 import grpc from 'k6/net/grpc';
 import { check } from 'k6';
 
 const TARGET = __ENV.GRPC_TARGET || 'localhost:9002';
 
-// welcome.proto has no imports; import root is the repo's proto/ dir (this script
-// lives in k6/, so the path is one level up).
+// Import root is the repo's proto/ dir (this script lives in k6/, so one level up).
 const client = new grpc.Client();
 client.load(['../proto'], 'notification/welcome/v1/welcome.proto');
 
@@ -34,7 +26,7 @@ const request = {
 };
 
 export default function () {
-  // One HTTP/2 connection per VU, reused across iterations (the whole point of gRPC).
+  // One HTTP/2 connection per VU, reused across iterations.
   if (__ITER === 0) {
     client.connect(TARGET, { plaintext: true });
   }

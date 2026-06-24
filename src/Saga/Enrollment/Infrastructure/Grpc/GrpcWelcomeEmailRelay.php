@@ -18,26 +18,11 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 /**
- * The `grpc` synchronous welcome-send transport (opt-in via WELCOME_EMAIL_TRANSPORT,
- * RD4). It IMPLEMENTS the existing WelcomeEmailRelay port (publish: void) so the
- * SagaWorker + RelayPendingWelcomeEmails use-case are untouched — only the DI binding
- * swaps (RD4 impl-swap, superseding the architecture's earlier sibling-port idea D5).
+ * Synchronous `grpc` welcome-send transport: blocks for the sent|failed outcome and
+ * applies it in-thread via HandleWelcomeEmailOutcomeCommand.
  *
- * Unlike the async rabbit relay, this BLOCKS for the sent|failed outcome (caller-waits,
- * DC1) and applies the outcome IN-THREAD by dispatching the existing
- * HandleWelcomeEmailOutcomeCommand through the in-house CommandBus. publish() returns
- * void only on a definitive OK outcome (the relay then markPublished()-no-ops on the
- * already-advanced row; the async WelcomeEmailOutcome reply Service B still publishes is
- * an idempotent no-op backstop — RD5). On benign in-flight contention (ABORTED),
- * a validation/internal error, or transport failure after the bounded retry budget, it
- * THROWS SyncWelcomeSendException so the relay records the failure and leaves the saga
- * for the next tick — exactly the broker-buffer/sweeper replacement on the sync path
- * (arch §7.4, RD6).
- *
- * The WelcomeEmailServiceClient is INJECTED so tests can mock it without ext-grpc
- * (which exists only in the monolith image). The status-code integers below mirror the
- * \Grpc\STATUS_* runtime constants (ext-grpc) by value; we use typed constants so this
- * adapter stays analyzable/testable on a host without ext-grpc loaded.
+ * The status-code integers below mirror \Grpc\STATUS_* (ext-grpc) by value as typed
+ * constants so this adapter stays analyzable/testable on a host without ext-grpc loaded.
  *
  * @psalm-api
  */
@@ -45,7 +30,6 @@ final readonly class GrpcWelcomeEmailRelay implements WelcomeEmailRelay
 {
     private const string TRANSPORT = 'grpc';
 
-    // gRPC canonical status codes (mirror \Grpc\STATUS_* from ext-grpc, by value).
     private const int STATUS_OK = 0;
     private const int STATUS_DEADLINE_EXCEEDED = 4;
     private const int STATUS_ABORTED = 10;
@@ -73,8 +57,6 @@ final readonly class GrpcWelcomeEmailRelay implements WelcomeEmailRelay
     {
         $outcome = $this->sendWithRetry($this->toRequest($message));
 
-        // Definitive OK only: apply the outcome in-thread via the existing reply-path
-        // command. confirm/cancel + saga transition are conditional + idempotent (RD5).
         $this->commandBus->dispatch(new HandleWelcomeEmailOutcomeCommand(
             $message->sagaId,
             $message->subscriptionId,
@@ -114,11 +96,9 @@ final readonly class GrpcWelcomeEmailRelay implements WelcomeEmailRelay
                 throw SyncWelcomeSendException::benignContention(self::TRANSPORT, $detail);
             }
 
-            // Transient ONLY — an explicit allow-list (the inverse of RestWelcomeEmailRelay's
-            // isTransient): UNAVAILABLE / DEADLINE_EXCEEDED retry within the budget. EVERY
-            // other non-OK code (INVALID_ARGUMENT, INTERNAL, NOT_FOUND, UNIMPLEMENTED,
-            // PERMISSION_DENIED, …) is deterministic — surface it immediately rather than
-            // burn the full retry budget and mask its cause behind "failed after N attempts".
+            // Transient allow-list ONLY: UNAVAILABLE / DEADLINE_EXCEEDED retry within the
+            // budget. Every other non-OK code is deterministic — surface it immediately
+            // rather than burn the retry budget and mask its cause behind "failed after N".
             if ($code === self::STATUS_UNAVAILABLE || $code === self::STATUS_DEADLINE_EXCEEDED) {
                 $lastError = new \RuntimeException(sprintf('grpc status %d: %s', $code, $detail));
                 $this->backoff($attempt);

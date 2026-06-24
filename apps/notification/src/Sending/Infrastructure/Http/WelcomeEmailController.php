@@ -14,20 +14,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
 
 /**
- * Synchronous REST baseline for the welcome-email send (FR3) — the benchmark
- * reference the gRPC twin is compared against, kept working after gRPC lands (FR11).
- *
- * `POST /internal/welcome-emails` over the UNCHANGED
- * {@see SendWelcomeEmailHandler}: it reads the JSON body, builds the WelcomeEmail VO
- * via {@see WelcomeEmailFactory} (VO construction IS the validation), invokes the
- * handler, and derives the business outcome with the SAME catch order as the gRPC
- * server (RD6):
- *  - normal return                  → {"outcome":"sent"}                 HTTP 200
- *  - WelcomeAlreadyFailedException  → {"outcome":"failed","error":...}   HTTP 200 (business result)
- *  - everything else (validation, WelcomeInFlightException, transient send failure)
- *    propagates to {@see ErrorHandlerMiddleware}, which maps it via
- *    {@see \App\Sending\Infrastructure\Error\ExceptionStatusMap::toHttpStatus()}
- *    → 400 / 409 / 503 / 500. One status map drives REST and gRPC alike (FR6).
+ * Synchronous REST baseline for the welcome-email send; must keep the SAME catch
+ * order as the gRPC twin so one ExceptionStatusMap drives both transports.
  */
 final readonly class WelcomeEmailController
 {
@@ -54,10 +42,6 @@ final readonly class WelcomeEmailController
     }
 
     /**
-     * Transport-level shape check: a non-JSON / non-object body is a bad request,
-     * surfaced as the shared validation exception → HTTP 400 (the field-level
-     * validation then happens in the factory's VO construction).
-     *
      * @return array<array-key,mixed>
      */
     private function decodeBody(Request $request): array

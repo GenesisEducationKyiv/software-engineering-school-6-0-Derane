@@ -13,20 +13,8 @@ use App\Sending\Domain\WelcomeOutcome;
 use App\Sending\Domain\WelcomeOutcomePublisher;
 
 /**
- * Welcome use-case — the claim/render/send/markSent flow keyed for welcome,
- * modeled on {@see SendReleaseEmailHandler}, with two HW9 additions: it publishes
- * a `WelcomeEmailOutcome` reply on every disposition (FR7), and it owns a terminal
- * branch ({@see handleTerminal()}) that the consumer invokes once the retry bound
- * is exhausted.
- *
- * The four claim outcomes (read via if-chains, never an exhaustive match, so the
- * shared {@see ClaimOutcome} enum stays additive):
- * - AlreadySent  → dedup, publish `sent`, return (no second email, FR6).
- * - AlreadyFailed→ re-publish `failed`, throw {@see WelcomeAlreadyFailedException}
- *   so the consumer DLQs (no re-send) — the redelivery-after-failed-reply path.
- * - InFlight     → throw {@see WelcomeInFlightException} (consumer parks the lease).
- * - Claimed      → render + send; on send throw recordFailedAttempt + rethrow
- *   (bounded retry); markSent true → publish `sent`; false (fenced) → superseded.
+ * Welcome use-case: claim/render/send/markSent. Claim outcomes are read via
+ * if-chains, never an exhaustive match, so the shared ClaimOutcome enum stays additive.
  */
 final readonly class SendWelcomeEmailHandler
 {
@@ -46,16 +34,14 @@ final readonly class SendWelcomeEmailHandler
         $claim = $this->ledger->claim($key, $email->recipientEmail);
 
         if ($claim->outcome === ClaimOutcome::AlreadySent) {
-            // Redelivery after a prior success: dedup, but STILL reply `sent` so the
-            // saga can complete instead of silently dropping the outcome.
+            // Dedup, but STILL reply `sent` so the saga can complete rather than silently drop.
             $this->record(fn() => $this->stats->recordWelcomeDeduped());
             $this->publishSent($email);
             return;
         }
 
         if ($claim->outcome === ClaimOutcome::AlreadyFailed) {
-            // Redelivery after a terminal failure: re-emit `failed`, do NOT re-send,
-            // and ask the consumer to complete the DLQ disposition.
+            // Re-emit `failed`, do NOT re-send; consumer completes the DLQ disposition.
             $this->publishFailed($email, 'welcome notification previously failed terminally');
             throw WelcomeAlreadyFailedException::forKey($key);
         }
@@ -79,18 +65,15 @@ final readonly class SendWelcomeEmailHandler
             return;
         }
 
-        // Fenced: our lease was taken over mid-send — the new holder owns the
-        // ledger row and replies for it. Returning normally still acks; retrying
-        // would only send a third copy.
+        // Fenced: lease taken over mid-send — the new holder owns the row and replies.
+        // Return normally to ack; retrying would only send a third copy.
     }
 
     /**
-     * Terminal branch (FR7) — invoked by the consumer when the retry bound is
-     * exhausted. Persist `terminal_failed_at` BEFORE publishing `failed` so that a
-     * redelivery after an unconfirmed reply-publish finds AlreadyFailed (re-emit,
-     * no re-send). The publisher fails closed: an unconfirmed publish throws, the
-     * message is left for redelivery, and the process exits for supervised restart
-     * — the terminal marker makes that redelivery idempotent.
+     * Persist `terminal_failed_at` BEFORE publishing `failed`: a redelivery after an
+     * unconfirmed reply-publish then finds AlreadyFailed (re-emit, no re-send). The
+     * publisher fails closed — an unconfirmed publish throws and the message is left
+     * for redelivery — so the terminal marker is what makes that redelivery idempotent.
      */
     public function handleTerminal(WelcomeEmail $email, string $error): void
     {
@@ -101,11 +84,9 @@ final readonly class SendWelcomeEmailHandler
 
     /**
      * `welcome_reply_published_total` is at-least-once, not exactly-once: under the
-     * fail-closed restart loop a redelivery re-emits the same disposition (e.g.
-     * AlreadySent → `sent`, AlreadyFailed → `failed`), so this counter can exceed
-     * `welcome_sent_total` / `welcome_failed_total` by the number of restarts. That
-     * is within the documented at-least-once delivery bound (NFR1); the consumer of
-     * the reply is idempotent on `sagaId`.
+     * fail-closed restart loop a redelivery re-emits the same disposition, so this
+     * counter can exceed `welcome_sent_total`/`welcome_failed_total`. The reply
+     * consumer is idempotent on `sagaId`.
      */
     private function publishSent(WelcomeEmail $email): void
     {
@@ -113,7 +94,6 @@ final readonly class SendWelcomeEmailHandler
         $this->record(fn() => $this->stats->recordWelcomeReplyPublished());
     }
 
-    /** @see publishSent() — `welcome_reply_published_total` is at-least-once here too. */
     private function publishFailed(WelcomeEmail $email, string $error): void
     {
         $this->publisher->publish($email->sagaId, $email->subscriptionId, WelcomeOutcome::Failed, $error);
@@ -126,7 +106,6 @@ final readonly class SendWelcomeEmailHandler
         try {
             $record();
         } catch (\Throwable) {
-            // swallowed — metric write must not change message disposition
         }
     }
 }

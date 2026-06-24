@@ -57,13 +57,10 @@ use Slim\Psr7\Factory\ResponseFactory;
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
 
-    // The SYNC welcome surfaces (REST + gRPC) reuse the UNCHANGED SendWelcomeEmailHandler
-    // but with a NO-OP reply publisher. On the sync path the monolith relay BLOCKS for the
-    // outcome and applies it in-thread, so the fail-closed Rabbit reply publisher must stay
-    // OFF the send's critical path: otherwise a reply-broker outage maps a SUCCESSFULLY-sent
-    // welcome to UNAVAILABLE/503, the relay exhausts its retries, and the start-sweep
-    // false-compensates the saga (cancelling a subscription whose email was sent). The async
-    // consumer below keeps the real Rabbit publisher. See NoOpWelcomeOutcomePublisher / ADR-0004.
+    // The sync welcome surfaces (REST + gRPC) build the handler with a NO-OP reply publisher:
+    // the monolith relay applies the outcome in-thread, so the fail-closed Rabbit reply must
+    // stay off the sync send's critical path (see NoOpWelcomeOutcomePublisher). The async
+    // consumer below keeps the real Rabbit publisher.
     $syncWelcomeHandler = static fn($c): SendWelcomeEmailHandler => new SendWelcomeEmailHandler(
         $c->get(WelcomeNotificationLedger::class),
         $c->get(WelcomeEmailRenderer::class),

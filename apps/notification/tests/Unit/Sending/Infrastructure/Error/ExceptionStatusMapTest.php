@@ -35,9 +35,9 @@ final class ExceptionStatusMapTest extends TestCase
     {
         $e = WelcomeInFlightException::forKey(new WelcomeNotificationKey(123));
 
-        // Load-bearing (RD6): WelcomeInFlightException extends \RuntimeException, so the
-        // specific arm must precede the \RuntimeException catch-all — otherwise it would
-        // map to UNAVAILABLE/503 and the caller would retry benign lock contention.
+        // Load-bearing: WelcomeInFlightException extends \RuntimeException, so the specific
+        // arm must precede the \RuntimeException catch-all — otherwise it maps to
+        // UNAVAILABLE/503 and the caller retries benign lock contention.
         self::assertSame(GrpcStatus::ABORTED, $this->map->toGrpcStatus($e));
         self::assertSame(StatusCodeInterface::STATUS_CONFLICT, $this->map->toHttpStatus($e));
     }
@@ -60,10 +60,10 @@ final class ExceptionStatusMapTest extends TestCase
 
     public function testWelcomeAlreadyFailedIsNotAStatusArmFallsThroughToUnavailable(): void
     {
-        // WelcomeAlreadyFailedException is a business FAILED outcome, NOT a status arm
-        // (the adapter returns OUTCOME_FAILED before ever reaching the status map).
-        // It still extends \RuntimeException, so if it ever reaches the map it lands on
-        // the RuntimeException arm — never INVALID_ARGUMENT/ABORTED.
+        // WelcomeAlreadyFailedException is a business FAILED outcome, not a status arm:
+        // the adapter returns OUTCOME_FAILED before the map. It extends \RuntimeException,
+        // so if it ever reaches the map it lands on the RuntimeException arm — never
+        // INVALID_ARGUMENT/ABORTED.
         $e = WelcomeAlreadyFailedException::forKey(new WelcomeNotificationKey(7));
 
         self::assertSame(GrpcStatus::UNAVAILABLE, $this->map->toGrpcStatus($e));

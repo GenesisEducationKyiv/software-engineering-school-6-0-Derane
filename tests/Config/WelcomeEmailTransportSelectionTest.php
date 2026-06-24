@@ -15,14 +15,10 @@ use DI\Container;
 use PHPUnit\Framework\TestCase;
 
 /**
- * WELCOME_EMAIL_TRANSPORT selection (Story 3.1/3.4, RD4 impl-swap): the
- * WelcomeEmailRelay port is bound to one of THREE implementations by the flag, default
- * rabbit (absent/unknown => rabbit). The selected adapter is built lazily — the gRPC
- * client (ext-grpc, monolith image only) is never instantiated unless transport=grpc.
- *
- * Hermetic (no Docker/DB/broker): the heavy CommandBus + RabbitConnection deps are
- * stubbed via $container->set(...) before resolution (the ContainerTest pattern), so
- * resolving the relay never touches PDO or a live AMQP socket.
+ * WELCOME_EMAIL_TRANSPORT selects the WelcomeEmailRelay binding (default rabbit;
+ * absent/unknown => rabbit). The selected adapter is built lazily, so the gRPC client
+ * (ext-grpc, monolith image only) is never instantiated unless transport=grpc. Hermetic:
+ * the heavy CommandBus + RabbitConnection deps are stubbed before resolution.
  */
 final class WelcomeEmailTransportSelectionTest extends TestCase
 {
@@ -64,10 +60,9 @@ final class WelcomeEmailTransportSelectionTest extends TestCase
             return;
         }
 
-        // Without ext-grpc the grpc branch cannot build a live client. Asserting that
-        // resolution FAILS on a \Grpc\* symbol (ChannelCredentials) — rather than
-        // silently returning the rabbit adapter — proves the grpc branch was selected
-        // and stays lazy (the client is built only on resolution, RD7/§7.5).
+        // Without ext-grpc the grpc branch cannot build a live client. Failing on a
+        // \Grpc\* symbol (ChannelCredentials) — not silently returning rabbit — proves
+        // the grpc branch was selected and the client is built only on resolution.
         $this->expectException(\Throwable::class);
         $container->get(WelcomeEmailRelay::class);
     }
@@ -77,7 +72,6 @@ final class WelcomeEmailTransportSelectionTest extends TestCase
         $settings = require dirname(__DIR__, 2) . '/config/settings.php';
         if ($transport === null) {
             unset($settings['welcome_email']['transport']);
-            // Mirror the settings default: absent env => rabbit.
             $settings['welcome_email']['transport'] = 'rabbit';
         } else {
             $settings['welcome_email']['transport'] = $transport;
@@ -88,7 +82,6 @@ final class WelcomeEmailTransportSelectionTest extends TestCase
         $containerFactory = require dirname(__DIR__, 2) . '/config/container.php';
         $container = $containerFactory($settings);
 
-        // Stub the heavy deps so resolving the relay never opens a socket / connects PDO.
         $container->set(CommandBus::class, new class implements CommandBus {
             #[\Override]
             public function dispatch(Command $command): void

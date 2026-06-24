@@ -21,12 +21,7 @@ use Notification\Welcome\V1\WelcomeEmailServiceClient;
 use PHPUnit\Framework\TestCase;
 
 /**
- * GrpcWelcomeEmailRelay is the `grpc` sync transport that IMPLEMENTS the existing
- * WelcomeEmailRelay port (publish: void, RD4). It issues a real UnaryCall to the
- * generated WelcomeEmailServiceClient, blocks for sent|failed, and on a definitive OK
- * drives the saga in-thread via HandleWelcomeEmailOutcomeCommand on the CommandBus.
- * The client + CommandBus are mocked so the wire mapping + retry policy are proven
- * WITHOUT ext-grpc (RD8: assert a real UnaryCall was issued with mapped fields).
+ * Client + CommandBus are mocked so the wire mapping + retry policy are proven without ext-grpc.
  *
  * gRPC status codes (mirror \Grpc\STATUS_*): OK=0, INVALID_ARGUMENT=3,
  * DEADLINE_EXCEEDED=4, ABORTED=10, INTERNAL=13, UNAVAILABLE=14.
@@ -53,7 +48,6 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
 
         $this->relay($client, $bus)->publish($this->message());
 
-        // RD8: a real SendWelcomeEmail UnaryCall was issued with the mapped fields.
         self::assertCount(1, $captured);
         $request = $captured[0]['request'];
         self::assertInstanceOf(SendWelcomeEmailRequest::class, $request);
@@ -61,10 +55,9 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
         self::assertSame('42', (string) $request->getSubscriptionId());
         self::assertSame('user@example.test', $request->getEmail());
         self::assertSame('owner/repo', $request->getRepository());
-        // 10s per-call deadline (in microseconds).
+        // 10s per-call deadline, in microseconds.
         self::assertSame(10_000_000, $captured[0]['options']['timeout']);
 
-        // The saga is driven in-thread with Sent.
         self::assertCount(1, $dispatched);
         self::assertInstanceOf(HandleWelcomeEmailOutcomeCommand::class, $dispatched[0]);
         self::assertSame(WelcomeOutcome::Sent, $dispatched[0]->outcome);
@@ -99,7 +92,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
         try {
             $this->relay($client, $bus)->publish($this->message());
         } finally {
-            // ABORTED is benign contention: exactly ONE call, no retry.
+            // ABORTED is benign in-flight contention: exactly one call, never retried.
             self::assertCount(1, $captured);
         }
     }
@@ -130,7 +123,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
         try {
             $this->relay($client, $bus)->publish($this->message());
         } finally {
-            // 3 attempts (UNAVAILABLE is transient).
+            // UNAVAILABLE is transient: retried up to 3 attempts.
             self::assertCount(3, $captured);
         }
     }
@@ -170,8 +163,8 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
 
     public function testPermanentNonOkCodeThrowsWithoutRetryOrDispatch(): void
     {
-        // A code outside the transient allow-list (here UNIMPLEMENTED — e.g. a method or
-        // proto-version mismatch) must surface IMMEDIATELY, not burn the retry budget.
+        // A code outside the transient allow-list (here UNIMPLEMENTED) must surface
+        // immediately, not burn the retry budget.
         $captured = [];
         $client = $this->clientReturning([null, $this->grpcStatus(self::UNIMPLEMENTED, 'no such method')], $captured);
         $bus = $this->createMock(CommandBus::class);
@@ -181,7 +174,6 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
         try {
             $this->relay($client, $bus)->publish($this->message());
         } finally {
-            // Deterministic, non-retryable: exactly ONE call.
             self::assertCount(1, $captured);
         }
     }
@@ -189,8 +181,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
     public function testUnspecifiedOutcomeOnOkStatusThrowsWithoutRetryOrDispatch(): void
     {
         // proto3 enum-zero defence: an OK status carrying OUTCOME_UNSPECIFIED is a contract
-        // breach the server must never emit — map it to a non-retryable failure, never to a
-        // saga drive, and never retry (the call already returned OK).
+        // breach — map it to a non-retryable failure, never a saga drive (the call returned OK).
         $captured = [];
         $client = $this->clientReturning(
             [$this->responseWithOutcome(Outcome::OUTCOME_UNSPECIFIED), $this->grpcStatus(self::OK)],
@@ -228,8 +219,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
     }
 
     /**
-     * Returns a client whose every SendWelcomeEmail call yields the SAME [$response, $status],
-     * recording each invocation's request + options.
+     * Every SendWelcomeEmail call yields the same [$response, $status].
      *
      * @param array{0: SendWelcomeEmailResponse|null, 1: \stdClass} $result
      * @param array<int, array{request: SendWelcomeEmailRequest, options: array<string, mixed>}> $captured
@@ -260,7 +250,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
     }
 
     /**
-     * Returns a client whose successive SendWelcomeEmail calls yield the given sequence.
+     * Successive SendWelcomeEmail calls yield the given sequence.
      *
      * @param list<array{0: SendWelcomeEmailResponse|null, 1: \stdClass}> $sequence
      * @param array<int, array{request: SendWelcomeEmailRequest, options: array<string, mixed>}> $captured
@@ -322,7 +312,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
 
     private function relay(WelcomeEmailServiceClient $client, CommandBus $bus): GrpcWelcomeEmailRelay
     {
-        // Zero backoff so the retry tests stay fast.
+        // Zero backoff keeps the retry tests fast.
         return new GrpcWelcomeEmailRelay($client, $bus, 10, 3, [0, 0, 0]);
     }
 

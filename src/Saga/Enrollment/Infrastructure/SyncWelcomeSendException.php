@@ -5,13 +5,8 @@ declare(strict_types=1);
 namespace App\Saga\Enrollment\Infrastructure;
 
 /**
- * Raised by the synchronous welcome relays (REST/gRPC) when the send call does NOT
- * yield a definitive business outcome — i.e. transport failure after the bounded
- * retry budget is spent, benign in-flight contention (gRPC ABORTED / REST 409), or a
- * validation/internal error. It is the sync-path analogue of
- * RabbitPublishFailedException: a throw means the saga must be left
- * Started/AwaitingConfirmation for the next relay tick to retry (RD6). A normal return
- * from publish() means a definitive outcome (Sent|Failed) was applied in-thread.
+ * Throwing leaves the saga Started/AwaitingConfirmation for the next relay tick to retry;
+ * a normal return from publish() means a definitive outcome (Sent|Failed) was applied in-thread.
  *
  * @psalm-api
  */

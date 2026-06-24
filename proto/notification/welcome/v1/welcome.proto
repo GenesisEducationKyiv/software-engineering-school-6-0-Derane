@@ -1,62 +1,46 @@
 syntax = "proto3";
 
-// Versioned package for the welcome-email send RPC (REST→gRPC migration).
-// Separate file + package from release_notifier.v1 so the monolith's existing
-// Subscription gRPC API and its generated/ tree stay frozen (PRD N2/FR12/DC4).
+// Separate package from release_notifier.v1 so the monolith's existing
+// Subscription gRPC API and its generated/ tree stay frozen.
 package notification.welcome.v1;
 
-// Distinct PHP namespace so the buf-generated classes never collide with the
-// committed generated/ tree's `Grpc\ReleaseNotifier\V1` PSR-4 map (PRD NFR4/DC3).
+// Distinct PHP namespace so generated classes never collide with the committed
+// generated/ tree's `Grpc\ReleaseNotifier\V1` PSR-4 map.
 option php_namespace = "Notification\\Welcome\\V1";
 option php_metadata_namespace = "GPBMetadata\\Proto\\Notification";
 
-// The single synchronous inter-service RPC. Service A (monolith saga relay) calls
-// Service B (notification) and BLOCKS for the sent|failed outcome — the deliberate
-// caller-waits semantic shift on the opt-in transports (PRD DC1). The async rabbit
-// path remains the default and is unaffected by this contract.
+// Synchronous inter-service RPC: the caller BLOCKS for the sent|failed outcome.
 service WelcomeEmailService {
-  // Render and send the welcome email for a confirmed-pending subscription, then
-  // return whether it was sent or failed. Business sent|failed is a normal OK
-  // response field; infrastructure/validation errors surface as gRPC STATUS codes
-  // (PRD FR6 table), never in-band.
+  // Business sent|failed is a normal OK response field; infrastructure/validation
+  // errors surface as gRPC STATUS codes, never in-band.
   rpc SendWelcomeEmail(SendWelcomeEmailRequest) returns (SendWelcomeEmailResponse);
 }
 
-// Request — field set mirrors the HW9 `SendWelcomeEmail/v1` AMQP payload exactly so
-// the unchanged SendWelcomeEmailHandler receives an identical WelcomeEmail VO (FR5).
 message SendWelcomeEmailRequest {
-  // The orchestrating saga's UUID; echoed back so the caller can correlate the
-  // outcome to its saga row (AMQP correlation_id = saga_id on the rabbit path).
+  // Echoed back so the caller can correlate the outcome to its saga row.
   string saga_id = 1;
 
-  // The subscription this welcome is for. The service-side welcome ledger is keyed
-  // by this id alone (one welcome per subscription) for exactly-once send dedup.
-  // int64 (RD10a) — avoids truncating large subscription ids.
+  // The welcome ledger is keyed by this id alone (one welcome per subscription)
+  // for exactly-once send dedup. int64 avoids truncating large subscription ids.
   int64 subscription_id = 2;
 
-  // Recipient email address. Validated by the EmailAddress value object on receipt;
-  // a malformed value yields gRPC INVALID_ARGUMENT (PRD FR6).
+  // Validated by the EmailAddress VO on receipt; malformed yields INVALID_ARGUMENT.
   string email = 3;
 
-  // The "owner/repo" the subscriber signed up for; rendered into the email body.
-  // Validated by the RepositoryName value object on receipt.
+  // The "owner/repo"; validated by the RepositoryName VO on receipt.
   string repository = 4;
 }
 
-// Response — carries the business disposition as a normal OK-status field.
 message SendWelcomeEmailResponse {
-  // sent | failed (or unspecified, never returned by the server — present only so
-  // proto3 enum-zero rules are honored).
+  // sent | failed; unspecified is never returned by the server.
   Outcome outcome = 1;
 
-  // Human-readable detail, populated only when outcome = OUTCOME_FAILED (mirrors the
-  // `error` field of WelcomeEmailOutcome/v1). Empty on OUTCOME_SENT.
+  // Populated only when outcome = OUTCOME_FAILED; empty on OUTCOME_SENT.
   string error_detail = 2;
 }
 
-// The terminal disposition of a welcome send. OUTCOME_UNSPECIFIED = 0 satisfies the
-// proto3 default-zero rule and is never emitted by the server. The OUTCOME_ value
-// prefix satisfies buf STANDARD's ENUM_VALUE_PREFIX (RD1).
+// OUTCOME_UNSPECIFIED = 0 satisfies the proto3 default-zero rule and is never
+// emitted by the server.
 enum Outcome {
   OUTCOME_UNSPECIFIED = 0;
   OUTCOME_SENT = 1;

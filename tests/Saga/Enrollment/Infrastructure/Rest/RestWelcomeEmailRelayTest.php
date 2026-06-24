@@ -22,12 +22,7 @@ use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
 /**
- * RestWelcomeEmailRelay is the `rest` sync transport that IMPLEMENTS the existing
- * WelcomeEmailRelay port (publish: void, RD4). It POSTs to /internal/welcome-emails,
- * blocks for {outcome,error}, and on a definitive 2xx drives the saga in-thread via
- * HandleWelcomeEmailOutcomeCommand on the CommandBus. Guzzle is mocked with a
- * MockHandler so the outcome mapping + deadline/retry policy are proven without a live
- * Service B (arch §7.2/§7.4).
+ * Proves the `rest` sync transport's outcome mapping + retry policy against a mocked Guzzle handler.
  */
 final class RestWelcomeEmailRelayTest extends TestCase
 {

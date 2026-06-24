@@ -19,21 +19,12 @@ use Spiral\RoadRunner\GRPC\Exception\ServiceException;
 use Spiral\RoadRunner\GRPC\StatusCode;
 
 /**
- * gRPC unary server for the welcome-email send (FR4), a net-new transport adapter
- * over the UNCHANGED {@see SendWelcomeEmailHandler} (FR5/N3). Modeled on the
- * monolith's {@see \App\Grpc\ReleaseNotifierService}.
+ * gRPC unary server for the welcome-email send over the unchanged handler.
  *
- * Outcome derivation lives in the adapter, not the handler, with this EXACT catch
- * order (load-bearing, RD6 — {@see WelcomeAlreadyFailedException} and
- * {@see \App\Sending\Application\WelcomeInFlightException} both extend \RuntimeException):
- *  1. handler returns normally (sent / dedup AlreadySent / fenced-superseded)
- *       → OUTCOME_SENT.
- *  2. WelcomeAlreadyFailedException → OUTCOME_FAILED as a NORMAL OK response (drives
- *       the saga compensate) — NOT an exception.
- *  3. anything else → {@see mapException()} via {@see ExceptionStatusMap::toGrpcStatus()}:
- *       WelcomeInFlightException → ABORTED (benign contention), validation →
- *       INVALID_ARGUMENT, transient (RuntimeException, incl. PDOException) → UNAVAILABLE,
- *       otherwise → INTERNAL.
+ * Catch order is load-bearing ({@see WelcomeAlreadyFailedException} and
+ * WelcomeInFlightException both extend \RuntimeException): WelcomeAlreadyFailedException
+ * must be caught BEFORE the generic \Throwable arm so it maps to OUTCOME_FAILED as a
+ * normal OK response (drives the saga compensate), not an exception.
  */
 final readonly class WelcomeEmailGrpcService implements WelcomeEmailServiceInterface
 {

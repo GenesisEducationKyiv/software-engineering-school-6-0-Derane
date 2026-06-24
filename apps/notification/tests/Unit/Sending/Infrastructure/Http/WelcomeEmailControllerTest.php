@@ -27,11 +27,8 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Factory\StreamFactory;
 
 /**
- * REST baseline test: the real {@see WelcomeEmailController} over a REAL
- * {@see SendWelcomeEmailHandler} (final readonly — driven via doubled domain ports,
- * the project pattern). Business outcomes (sent/failed) are asserted directly off
- * the controller; the error-path status mapping is asserted through the real
- * {@see ErrorHandlerMiddleware} exactly as wired in http/index.php (RD6).
+ * REST baseline: real WelcomeEmailController over a real SendWelcomeEmailHandler;
+ * error-path status mapping asserted through the real ErrorHandlerMiddleware.
  */
 final class WelcomeEmailControllerTest extends TestCase
 {
@@ -171,9 +168,8 @@ final class WelcomeEmailControllerTest extends TestCase
     }
 
     /**
-     * Runs the controller behind the real ErrorHandlerMiddleware so the error-path
-     * status mapping (the controller lets the throw propagate to the middleware) is
-     * exercised end-to-end exactly as in http/index.php.
+     * Runs the controller behind the real ErrorHandlerMiddleware: the controller lets
+     * the throw propagate, so status mapping is exercised as in http/index.php.
      *
      * @param array<string,mixed> $payload
      */

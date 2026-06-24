@@ -9,30 +9,19 @@ use Fig\Http\Message\StatusCodeInterface;
 use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
 
 /**
- * Single source of truth for translating exceptions to transport-level status
- * codes on the notification service — HTTP (the REST baseline + the
- * {@see \App\Sending\Infrastructure\Http\ErrorHandlerMiddleware}) and gRPC (the
- * {@see \App\Sending\Infrastructure\Grpc\WelcomeEmailGrpcService}). Both sync
- * surfaces share it so an exception maps consistently across transports (FR6).
+ * Translates exceptions to transport-level status codes (HTTP + gRPC), shared so
+ * an exception maps consistently across both sync surfaces.
  *
- * The catch order is LOAD-BEARING (RD6): {@see WelcomeRequestValidationException}
- * and {@see WelcomeInFlightException} both extend \RuntimeException, so their
- * specific arms MUST precede the generic \RuntimeException arm. In particular,
- * WelcomeInFlightException maps to ABORTED/409 (benign claim contention — the
- * caller leaves the saga pending and retries next tick); if it fell through to the
+ * Catch order is LOAD-BEARING: WelcomeRequestValidationException and
+ * WelcomeInFlightException both extend \RuntimeException, so their specific arms
+ * MUST precede the generic \RuntimeException arm. WelcomeInFlightException maps to
+ * ABORTED/409 (benign claim contention, retried next tick); fell through to the
  * \RuntimeException → UNAVAILABLE arm, the client would retry lock contention.
  *
- * Note: {@see \App\Sending\Application\WelcomeAlreadyFailedException} is NOT a status
- * arm — it is a business FAILED outcome the transport adapter returns as a normal
- * OK response before ever reaching this map.
- *
- * \PDOException extends \RuntimeException, so the generic \RuntimeException arm already
- * covers transient DB faults — there is deliberately NO separate \PDOException arm. One
- * would be unreachable, and (worse) any future transient-vs-constraint split added beneath
- * the \RuntimeException arm would silently never fire for PDO errors.
- *
- * The 401/403 (auth) rows are reserved: v1 has no auth (the sync surfaces are
- * reachable only on the compose network).
+ * \PDOException extends \RuntimeException, so the generic arm already covers
+ * transient DB faults — there is deliberately NO separate \PDOException arm (it
+ * would be unreachable, and a future transient-vs-constraint split beneath the
+ * \RuntimeException arm would silently never fire for PDO errors).
  */
 final readonly class ExceptionStatusMap
 {
