@@ -124,7 +124,7 @@ Both transports hit the **same** handler on the notification service; k6 drives 
 REST and `k6/net/grpc` for gRPC (`make bench-rest` / `make bench-grpc`, `VUS=`/`DURATION=`
 overridable). Measured locally via docker compose:
 
-**Matched load (8 VUs, 15s, 100% success on both):**
+**Matched load (8 VUs, 15s, 100% success on both)** — reproduce with `make bench-rest VUS=8 DURATION=15s` and `make bench-grpc VUS=8 DURATION=15s`:
 
 | Metric | REST (`php -S`) | gRPC (RoadRunner) | gRPC vs REST |
 | --- | --- | --- | --- |
@@ -133,7 +133,7 @@ overridable). Measured locally via docker compose:
 | latency p95 | 615 ms | **43 ms** | ~14× lower |
 | latency p99 | 729 ms | **62 ms** | ~12× lower |
 
-**High load (50 VUs, 30s):** REST stayed flat at ~18 req/s (its `php -S` ceiling, 100%
+**High load (50 VUs, 30s — the bare `make bench-rest` / `make bench-grpc` default):** REST stayed flat at ~18 req/s (its `php -S` ceiling, 100%
 success); the gRPC wire sustained ~250+ req/s, but at that rate the **downstream
 synchronous AMQP outcome-reply publish** (a confirm-publish per send) saturated and the
 service returned `UNAVAILABLE` — i.e. under heavy load the bottleneck moves *off the wire*

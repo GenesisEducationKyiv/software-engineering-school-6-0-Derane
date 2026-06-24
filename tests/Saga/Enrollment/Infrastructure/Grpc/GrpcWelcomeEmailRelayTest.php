@@ -37,6 +37,7 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
     private const int INVALID_ARGUMENT = 3;
     private const int DEADLINE_EXCEEDED = 4;
     private const int ABORTED = 10;
+    private const int UNIMPLEMENTED = 12;
     private const int INTERNAL = 13;
     private const int UNAVAILABLE = 14;
 
@@ -156,6 +157,45 @@ final class GrpcWelcomeEmailRelayTest extends TestCase
     {
         $captured = [];
         $client = $this->clientReturning([null, $this->grpcStatus(self::INTERNAL, 'boom')], $captured);
+        $bus = $this->createMock(CommandBus::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $this->expectException(SyncWelcomeSendException::class);
+        try {
+            $this->relay($client, $bus)->publish($this->message());
+        } finally {
+            self::assertCount(1, $captured);
+        }
+    }
+
+    public function testPermanentNonOkCodeThrowsWithoutRetryOrDispatch(): void
+    {
+        // A code outside the transient allow-list (here UNIMPLEMENTED — e.g. a method or
+        // proto-version mismatch) must surface IMMEDIATELY, not burn the retry budget.
+        $captured = [];
+        $client = $this->clientReturning([null, $this->grpcStatus(self::UNIMPLEMENTED, 'no such method')], $captured);
+        $bus = $this->createMock(CommandBus::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $this->expectException(SyncWelcomeSendException::class);
+        try {
+            $this->relay($client, $bus)->publish($this->message());
+        } finally {
+            // Deterministic, non-retryable: exactly ONE call.
+            self::assertCount(1, $captured);
+        }
+    }
+
+    public function testUnspecifiedOutcomeOnOkStatusThrowsWithoutRetryOrDispatch(): void
+    {
+        // proto3 enum-zero defence: an OK status carrying OUTCOME_UNSPECIFIED is a contract
+        // breach the server must never emit — map it to a non-retryable failure, never to a
+        // saga drive, and never retry (the call already returned OK).
+        $captured = [];
+        $client = $this->clientReturning(
+            [$this->responseWithOutcome(Outcome::OUTCOME_UNSPECIFIED), $this->grpcStatus(self::OK)],
+            $captured,
+        );
         $bus = $this->createMock(CommandBus::class);
         $bus->expects(self::never())->method('dispatch');
 

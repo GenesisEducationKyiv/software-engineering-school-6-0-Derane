@@ -26,6 +26,11 @@ use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
  * arm — it is a business FAILED outcome the transport adapter returns as a normal
  * OK response before ever reaching this map.
  *
+ * \PDOException extends \RuntimeException, so the generic \RuntimeException arm already
+ * covers transient DB faults — there is deliberately NO separate \PDOException arm. One
+ * would be unreachable, and (worse) any future transient-vs-constraint split added beneath
+ * the \RuntimeException arm would silently never fire for PDO errors.
+ *
  * The 401/403 (auth) rows are reserved: v1 has no auth (the sync surfaces are
  * reachable only on the compose network).
  */
@@ -36,8 +41,7 @@ final readonly class ExceptionStatusMap
         return match (true) {
             $e instanceof WelcomeRequestValidationException => StatusCodeInterface::STATUS_BAD_REQUEST,
             $e instanceof WelcomeInFlightException => StatusCodeInterface::STATUS_CONFLICT,
-            $e instanceof \RuntimeException,
-            $e instanceof \PDOException => StatusCodeInterface::STATUS_SERVICE_UNAVAILABLE,
+            $e instanceof \RuntimeException => StatusCodeInterface::STATUS_SERVICE_UNAVAILABLE,
             default => StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR,
         };
     }
@@ -47,8 +51,7 @@ final readonly class ExceptionStatusMap
         return match (true) {
             $e instanceof WelcomeRequestValidationException => GrpcStatus::INVALID_ARGUMENT,
             $e instanceof WelcomeInFlightException => GrpcStatus::ABORTED,
-            $e instanceof \RuntimeException,
-            $e instanceof \PDOException => GrpcStatus::UNAVAILABLE,
+            $e instanceof \RuntimeException => GrpcStatus::UNAVAILABLE,
             default => GrpcStatus::INTERNAL,
         };
     }
@@ -58,8 +61,7 @@ final readonly class ExceptionStatusMap
         return match (true) {
             $e instanceof WelcomeRequestValidationException,
             $e instanceof WelcomeInFlightException => $e->getMessage(),
-            $e instanceof \RuntimeException,
-            $e instanceof \PDOException => 'Service unavailable',
+            $e instanceof \RuntimeException => 'Service unavailable',
             default => 'Internal server error',
         };
     }

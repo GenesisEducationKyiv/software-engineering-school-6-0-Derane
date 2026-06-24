@@ -14,7 +14,7 @@ use App\Sending\Domain\WelcomeNotificationLedger;
 use App\Sending\Domain\WelcomeOutcomePublisher;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
 use App\Sending\Infrastructure\Grpc\WelcomeEmailGrpcService;
-use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use Notification\Welcome\V1\Outcome;
 use Notification\Welcome\V1\SendWelcomeEmailRequest;
 use PHPUnit\Framework\MockObject\MockObject;

@@ -15,7 +15,7 @@ use App\Sending\Domain\WelcomeOutcomePublisher;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
 use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\WelcomeEmailController;
-use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;

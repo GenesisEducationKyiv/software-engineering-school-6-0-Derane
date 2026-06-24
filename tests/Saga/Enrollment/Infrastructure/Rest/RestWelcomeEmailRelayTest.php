@@ -177,6 +177,49 @@ final class RestWelcomeEmailRelayTest extends TestCase
         }
     }
 
+    public function testHttp200NonJsonBodyThrowsWithoutRetryOrDispatch(): void
+    {
+        $mock = new MockHandler([new Response(200, [], 'not-json{')]);
+        $bus = $this->createMock(CommandBus::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $this->expectException(SyncWelcomeSendException::class);
+        try {
+            $this->relay($mock, $bus)->publish($this->message());
+        } finally {
+            // A malformed 2xx is a deterministic contract breach: ONE call, no retry.
+            self::assertCount(0, $mock);
+        }
+    }
+
+    public function testHttp200MissingOutcomeKeyThrowsWithoutRetryOrDispatch(): void
+    {
+        $mock = new MockHandler([new Response(200, [], (string) json_encode(['status' => 'ok']))]);
+        $bus = $this->createMock(CommandBus::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $this->expectException(SyncWelcomeSendException::class);
+        try {
+            $this->relay($mock, $bus)->publish($this->message());
+        } finally {
+            self::assertCount(0, $mock);
+        }
+    }
+
+    public function testHttp200UnknownOutcomeValueThrowsWithoutRetryOrDispatch(): void
+    {
+        $mock = new MockHandler([new Response(200, [], (string) json_encode(['outcome' => 'maybe']))]);
+        $bus = $this->createMock(CommandBus::class);
+        $bus->expects(self::never())->method('dispatch');
+
+        $this->expectException(SyncWelcomeSendException::class);
+        try {
+            $this->relay($mock, $bus)->publish($this->message());
+        } finally {
+            self::assertCount(0, $mock);
+        }
+    }
+
     /**
      * @param array<int, HandleWelcomeEmailOutcomeCommand> $dispatched
      */

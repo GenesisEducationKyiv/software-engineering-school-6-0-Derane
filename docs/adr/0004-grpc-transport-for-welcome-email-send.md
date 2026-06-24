@@ -71,14 +71,28 @@ deadline and bounded retry (3 attempts, 200/500/1000 ms) on `UNAVAILABLE`/
 the saga **in-thread** via the existing `HandleWelcomeEmailOutcomeCommand`. This is
 safe because `complete()`/`compensate()` accept `Started`, the subscription
 `status='pending'` guard makes re-application a no-op, and `markPublished()` then
-no-ops; the async reply the unchanged handler still publishes is an idempotent
-backstop. `SagaWorker`, `RelayPendingWelcomeEmails`, the port signature, and
-`RabbitWelcomeEmailRelay` are untouched.
+no-ops. On the sync surfaces Service B is wired with a **no-op reply publisher**
+(`NoOpWelcomeOutcomePublisher`), so the in-thread drive is the *sole* outcome signal —
+see "the sync reply leg is suppressed" below. `SagaWorker`, `RelayPendingWelcomeEmails`,
+the port signature, and `RabbitWelcomeEmailRelay` are untouched.
 
-### Only the send leg migrates
+### Only the send leg migrates — and the sync reply leg is suppressed
 
-The `WelcomeEmailOutcome/v1` reply and the timeout sweeper stay on RabbitMQ; the
-`saga-worker` keeps `depends_on: rabbitmq`. We migrate one *call*, not the broker.
+For the default `rabbit` transport the `WelcomeEmailOutcome/v1` reply and the timeout
+sweeper stay on RabbitMQ; the `saga-worker` keeps `depends_on: rabbitmq`. We migrate one
+*call*, not the broker.
+
+On the **sync** transports (`rest`/`grpc`) the reply leg is deliberately taken off the
+send's critical path: Service B's sync surfaces bind `NoOpWelcomeOutcomePublisher`, so the
+unchanged handler publishes no async reply — the relay has already applied the outcome
+in-thread. This closes a correctness hazard. `RabbitWelcomeOutcomePublisher` **fails
+closed** (it throws on an unconfirmed publish), and that publish happens *after* the email
+was sent and `markSent()` committed; mapped through `ExceptionStatusMap` it would turn a
+**successfully-sent** welcome into `UNAVAILABLE`/503, the relay would exhaust its retries,
+the saga would be left `Started`, and the start-sweep would **false-compensate** it
+(cancelling a subscription whose welcome email was sent). With the no-op publisher the sync
+path genuinely *replaces* the broker buffer (arch §7.4) instead of smuggling it back in on
+the reply leg. The handler stays byte-for-byte unchanged (FR5) — only the DI binding differs.
 
 ## Alternatives considered
 
@@ -118,9 +132,11 @@ The `WelcomeEmailOutcome/v1` reply and the timeout sweeper stay on RabbitMQ; the
 - On the sync paths the caller blocks and loses the broker buffer and the sweeper's
   never-hangs guarantee — mitigated by the client deadline + bounded retry, and by
   `rabbit` remaining the default (which retains the sweeper).
-- The unchanged handler still publishes its async `WelcomeEmailOutcome` reply on the
-  sync paths (FR5: no handler change), so the saga is signalled twice — harmless: the
-  conditional UPDATEs make the second an idempotent no-op (`welcome_reply_noop_total`).
+- On the sync paths the handler's `welcome_reply_published_total` metric still increments
+  even though `NoOpWelcomeOutcomePublisher` emits nothing — the metric sits in the unchanged
+  handler, not the publisher (FR5: no handler change). A cosmetic metric wart, not a state
+  difference: no reply is published, so the saga is signalled exactly once (the in-thread
+  drive), never twice.
 - The sync in-thread drive skips the `WelcomePublished` in-process event
   (`markPublished()` no-ops), so the `welcome.published` log line is absent on the
   sync transports — a minor observability gap, not a state difference.

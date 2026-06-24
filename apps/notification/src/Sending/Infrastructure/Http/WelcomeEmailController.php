@@ -7,6 +7,7 @@ namespace App\Sending\Infrastructure\Http;
 use App\Sending\Application\SendWelcomeEmailHandler;
 use App\Sending\Application\WelcomeAlreadyFailedException;
 use App\Sending\Infrastructure\Error\WelcomeRequestValidationException;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use Fig\Http\Message\StatusCodeInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;

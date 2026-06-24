@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Sending\Infrastructure\Http;
+namespace Tests\Unit\Sending\Infrastructure\Sync;
 
 use App\Sending\Domain\WelcomeEmail;
 use App\Sending\Infrastructure\Error\WelcomeRequestValidationException;
-use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use Notification\Welcome\V1\SendWelcomeEmailRequest;
 use PHPUnit\Framework\TestCase;
 

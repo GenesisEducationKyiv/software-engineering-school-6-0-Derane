@@ -7,7 +7,7 @@ namespace App\Sending\Infrastructure\Grpc;
 use App\Sending\Application\SendWelcomeEmailHandler;
 use App\Sending\Application\WelcomeAlreadyFailedException;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
-use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use Notification\Welcome\V1\Outcome;
 use Notification\Welcome\V1\SendWelcomeEmailRequest;
 use Notification\Welcome\V1\SendWelcomeEmailResponse;
@@ -32,7 +32,7 @@ use Spiral\RoadRunner\GRPC\StatusCode;
  *       the saga compensate) — NOT an exception.
  *  3. anything else → {@see mapException()} via {@see ExceptionStatusMap::toGrpcStatus()}:
  *       WelcomeInFlightException → ABORTED (benign contention), validation →
- *       INVALID_ARGUMENT, transient (RuntimeException/PDOException) → UNAVAILABLE,
+ *       INVALID_ARGUMENT, transient (RuntimeException, incl. PDOException) → UNAVAILABLE,
  *       otherwise → INTERNAL.
  */
 final readonly class WelcomeEmailGrpcService implements WelcomeEmailServiceInterface

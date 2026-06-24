@@ -47,7 +47,6 @@ final readonly class GrpcWelcomeEmailRelay implements WelcomeEmailRelay
 
     // gRPC canonical status codes (mirror \Grpc\STATUS_* from ext-grpc, by value).
     private const int STATUS_OK = 0;
-    private const int STATUS_INVALID_ARGUMENT = 3;
     private const int STATUS_DEADLINE_EXCEEDED = 4;
     private const int STATUS_ABORTED = 10;
     private const int STATUS_INTERNAL = 13;
@@ -115,17 +114,21 @@ final readonly class GrpcWelcomeEmailRelay implements WelcomeEmailRelay
                 throw SyncWelcomeSendException::benignContention(self::TRANSPORT, $detail);
             }
 
-            // Deterministic failures won't improve on retry.
-            if ($code === self::STATUS_INVALID_ARGUMENT || $code === self::STATUS_INTERNAL) {
-                throw SyncWelcomeSendException::nonRetryable(
-                    self::TRANSPORT,
-                    sprintf('status %d: %s', $code, $detail),
-                );
+            // Transient ONLY — an explicit allow-list (the inverse of RestWelcomeEmailRelay's
+            // isTransient): UNAVAILABLE / DEADLINE_EXCEEDED retry within the budget. EVERY
+            // other non-OK code (INVALID_ARGUMENT, INTERNAL, NOT_FOUND, UNIMPLEMENTED,
+            // PERMISSION_DENIED, …) is deterministic — surface it immediately rather than
+            // burn the full retry budget and mask its cause behind "failed after N attempts".
+            if ($code === self::STATUS_UNAVAILABLE || $code === self::STATUS_DEADLINE_EXCEEDED) {
+                $lastError = new \RuntimeException(sprintf('grpc status %d: %s', $code, $detail));
+                $this->backoff($attempt);
+                continue;
             }
 
-            // Transient: UNAVAILABLE / DEADLINE_EXCEEDED (or any other non-OK) — retry.
-            $lastError = new \RuntimeException(sprintf('grpc status %d: %s', $code, $detail));
-            $this->backoff($attempt);
+            throw SyncWelcomeSendException::nonRetryable(
+                self::TRANSPORT,
+                sprintf('status %d: %s', $code, $detail),
+            );
         }
 
         throw SyncWelcomeSendException::transportExhausted(self::TRANSPORT, $this->maxAttempts, $lastError);

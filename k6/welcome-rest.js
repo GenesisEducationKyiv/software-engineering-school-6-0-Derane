@@ -36,8 +36,17 @@ export default function () {
   const res = http.post(`${BASE}/internal/welcome-emails`, payload, {
     headers: { 'Content-Type': 'application/json' },
   });
+  // Strict, symmetric with welcome-grpc.js's `outcome === 'OUTCOME_SENT'`: parse the JSON
+  // and require outcome:sent, so identical per-request work is certified on both transports
+  // and a regression to outcome:failed fails the check instead of passing on a substring.
   check(res, {
     'http 200': (r) => r.status === 200,
-    'has outcome': (r) => typeof r.body === 'string' && r.body.includes('outcome'),
+    'outcome sent': (r) => {
+      try {
+        return JSON.parse(r.body).outcome === 'sent';
+      } catch (_e) {
+        return false;
+      }
+    },
   });
 }

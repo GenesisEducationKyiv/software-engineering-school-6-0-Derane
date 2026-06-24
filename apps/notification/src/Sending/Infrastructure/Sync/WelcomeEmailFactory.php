@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Sending\Infrastructure\Http;
+namespace App\Sending\Infrastructure\Sync;
 
 use App\Sending\Domain\EmailAddress;
 use App\Sending\Domain\RepositoryName;
@@ -16,6 +16,10 @@ use Notification\Welcome\V1\SendWelcomeEmailRequest;
  * EXACTLY as {@see \App\Sending\Infrastructure\Rabbit\SendWelcomeEmailMessageMapper}
  * does on the async path, so the unchanged {@see \App\Sending\Application\SendWelcomeEmailHandler}
  * receives an identical VO regardless of transport (FR5).
+ *
+ * Lives in the transport-neutral Sync namespace (not under Http) because it is shared
+ * by BOTH synchronous surfaces; neither the REST controller nor the gRPC service should
+ * be subordinate to the other's namespace.
  *
  * VO construction IS the field validation: a malformed email/repository (or a bad
  * request shape on the REST path) is translated to a single

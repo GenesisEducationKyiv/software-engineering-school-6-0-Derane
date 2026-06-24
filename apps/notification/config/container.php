@@ -23,7 +23,6 @@ use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\HealthController;
 use App\Sending\Infrastructure\Http\MetricsController;
 use App\Sending\Infrastructure\Http\WelcomeEmailController;
-use App\Sending\Infrastructure\Http\WelcomeEmailFactory;
 use App\Sending\Infrastructure\Logging\StderrLogger;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
@@ -42,6 +41,8 @@ use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
 use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailMessageMapper;
+use App\Sending\Infrastructure\Sync\NoOpWelcomeOutcomePublisher;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
@@ -55,6 +56,22 @@ use Slim\Psr7\Factory\ResponseFactory;
 
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
+
+    // The SYNC welcome surfaces (REST + gRPC) reuse the UNCHANGED SendWelcomeEmailHandler
+    // but with a NO-OP reply publisher. On the sync path the monolith relay BLOCKS for the
+    // outcome and applies it in-thread, so the fail-closed Rabbit reply publisher must stay
+    // OFF the send's critical path: otherwise a reply-broker outage maps a SUCCESSFULLY-sent
+    // welcome to UNAVAILABLE/503, the relay exhausts its retries, and the start-sweep
+    // false-compensates the saga (cancelling a subscription whose email was sent). The async
+    // consumer below keeps the real Rabbit publisher. See NoOpWelcomeOutcomePublisher / ADR-0004.
+    $syncWelcomeHandler = static fn($c): SendWelcomeEmailHandler => new SendWelcomeEmailHandler(
+        $c->get(WelcomeNotificationLedger::class),
+        $c->get(WelcomeEmailRenderer::class),
+        $c->get(Mailer::class),
+        new NoOpWelcomeOutcomePublisher(),
+        $c->get(WelcomeProcessingStatsRecorder::class),
+    );
+
     $containerBuilder->addDefinitions([
         PDO::class => static function () use ($settings) {
             $dsn = sprintf(
@@ -147,6 +164,9 @@ return static function (array $settings): Container {
         ),
         SendWelcomeEmailMessageMapper::class => static fn() => new SendWelcomeEmailMessageMapper(),
 
+        // The ASYNC-path handler: the rabbit consumer resolves this binding, so its reply
+        // travels back over RabbitMQ (the real fail-closed WelcomeOutcomePublisher). The
+        // SYNC surfaces use $syncWelcomeHandler (no-op publisher) instead — see above.
         SendWelcomeEmailHandler::class => static fn($c) => new SendWelcomeEmailHandler(
             $c->get(WelcomeNotificationLedger::class),
             // The welcome handler renders from the welcome template specifically,
@@ -201,12 +221,12 @@ return static function (array $settings): Container {
         // WelcomeEmailFactory; the async RabbitMQ path above is untouched.
         WelcomeEmailFactory::class => static fn() => new WelcomeEmailFactory(),
         WelcomeEmailController::class => static fn($c) => new WelcomeEmailController(
-            $c->get(SendWelcomeEmailHandler::class),
+            $syncWelcomeHandler($c),
             $c->get(WelcomeEmailFactory::class),
             $c->get(LoggerInterface::class),
         ),
         WelcomeEmailServiceInterface::class => static fn($c) => new WelcomeEmailGrpcService(
-            $c->get(SendWelcomeEmailHandler::class),
+            $syncWelcomeHandler($c),
             $c->get(WelcomeEmailFactory::class),
             $c->get(ExceptionStatusMap::class),
             $c->get(LoggerInterface::class),
