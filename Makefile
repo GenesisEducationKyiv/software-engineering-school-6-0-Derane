@@ -74,9 +74,13 @@ notification-integration-up: ensure-env ## Start notification-db + rabbitmq + ma
 	$(COMPOSE) up -d --wait notification-db rabbitmq mailhog
 
 notification-integration-run: ## Run the notification service's PHPUnit Integration suite inside Docker (requires notification-integration-up)
+	# Mount the test-only files (not baked into the image) at the image WORKDIR
+	# (/app/apps/notification, see apps/notification/Dockerfile) so phpunit discovers
+	# phpunit.xml from its CWD. Mounting at /app/* instead left phpunit with no config,
+	# so `--testsuite Integration` printed usage and the suite never ran.
 	$(COMPOSE) run --rm --no-deps \
-		-v "$(PWD)/apps/notification/tests:/app/tests:ro" \
-		-v "$(PWD)/apps/notification/phpunit.xml:/app/phpunit.xml:ro" \
+		-v "$(PWD)/apps/notification/tests:/app/apps/notification/tests:ro" \
+		-v "$(PWD)/apps/notification/phpunit.xml:/app/apps/notification/phpunit.xml:ro" \
 		notification-svc sh -c \
 		"composer install --no-interaction --ignore-platform-reqs --quiet && vendor/bin/phpunit --testsuite Integration --testdox"
 
