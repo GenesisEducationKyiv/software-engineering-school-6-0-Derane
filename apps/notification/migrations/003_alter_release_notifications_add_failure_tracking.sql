@@ -1,0 +1,5 @@
+ALTER TABLE release_notifications
+    ALTER COLUMN sent_at DROP NOT NULL,
+    ALTER COLUMN sent_at DROP DEFAULT,
+    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_error    TEXT;

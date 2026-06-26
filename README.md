@@ -1,312 +1,142 @@
 # GitHub Release Notifier
 
-API-сервіс для підписки на email-сповіщення про нові релізи GitHub-репозиторіїв.
+GitHub Release Notifier is a modular PHP system that lets users subscribe to
+GitHub repositories and receive email when a new release is published.
 
+The runtime is now split into:
 
-Проєкт має:
+- monolith HTTP API on Slim 4 / FrankenPHP
+- monolith gRPC API on RoadRunner
+- monolith scanner worker
+- notification microservice consuming `SendReleaseEmail/v1` from RabbitMQ
 
-- HTTP API на Slim 4
-- gRPC API на RoadRunner
-- scanner для періодичної перевірки нових релізів
-- notifier для email-доставки через SMTP
+## Stack
 
-## Вимоги
+- PHP 8.4 monolith, PHP 8.2 notification service
+- PostgreSQL for monolith data: `subscriptions`, `repositories`
+- PostgreSQL for notification data: `release_notifications`, `notification_metrics`
+- Redis for GitHub API caching
+- RabbitMQ for cross-service delivery
+- MailHog as the local SMTP sink
 
-Для роботи з проєктом потрібні тільки:
+## Quick Start
 
-- Docker
-- Docker Compose plugin
-- GNU Make
-
-Локально не потрібні:
-
-- PHP
-- Composer
-- PostgreSQL
-- Redis
-- RoadRunner binary `rr`
-
-Усе піднімається та перевіряється через `make`.
-
-![img.png](img.png)
-
-## AWS Deploy
-
-Сервіс задеплоєний на AWS
-
-Стек на одному інстансі через Docker Compose: app + scanner + PostgreSQL + Redis + Mailpit.
-
-| Сервіс | URL |
-|--------|-----|
-| HTML UI / форма підписок | http://44.212.26.4:8080 |
-| HTTP API | http://44.212.26.4:8080/api/subscriptions |
-| Health | http://44.212.26.4:8080/health |
-| Metrics | http://44.212.26.4:8080/metrics |
-| Mailpit (перегляд листів) | http://44.212.26.4:8025 |
-
-## Швидкий Старт
-
-Підготувати і підняти весь стек:
+Bring the local stack up and migrate both databases:
 
 ```bash
 make up
 make migrate
+make migrate-notification
 ```
 
-Сервіси:
+Main local endpoints:
 
 - HTTP API: `http://localhost:8080`
+- HTML form: `http://localhost:8080/`
+- Monolith health: `http://localhost:8080/health`
+- Monolith metrics: `http://localhost:8080/metrics`
 - gRPC: `localhost:9001`
-- HTML UI: `http://localhost:8080/`
-- MailHog: `http://localhost:8025`
-- Metrics: `http://localhost:8080/metrics`
+- MailHog UI: `http://localhost:8025`
+- RabbitMQ management: `http://localhost:15672`
 
-Корисні команди:
+## Compose Topology
+
+`make up` starts:
+
+- `app` — monolith HTTP runtime
+- `grpc` — monolith gRPC runtime
+- `scanner` — monolith scan loop
+- `postgres` — monolith database
+- `redis` — GitHub cache
+- `rabbitmq` — durable queue / DLQ transport
+- `notification-db` — notification-service database
+- `notification-svc` — notification worker
+- `mailhog` — local SMTP sink
+
+Release flow:
+
+1. HTTP/gRPC creates subscriptions in the monolith database.
+2. `scanner` polls GitHub and detects a new release.
+3. The monolith publishes one `SendReleaseEmail/v1` message per subscriber to RabbitMQ.
+4. `notification-svc` consumes the queue, dedupes in its own database, renders the email, and sends it to MailHog/SMTP.
+
+There is no longer an in-process monolith notifier or monolith-side
+`release_notifications` ledger.
+
+## Useful Commands
+
+Core:
 
 ```bash
-make logs
-make restart
+make up
 make down
-```
-
-## Основні Make Команди
-
-```bash
-make install   # зібрати Docker images для всіх workflow
-make up        # підняти весь application stack
-make migrate   # прогнати міграції в контейнері
-make lint      # phpcs у Docker
-make stan      # phpstan у Docker
-make test      # phpunit у Docker
-make check     # lint + stan + unit tests
-make proto     # згенерувати protobuf/gRPC класи
-make behat     # acceptance у Docker
-make ci        # повна перевірка: check + acceptance
-make down      # зупинити стек
-```
-
-`make up` автоматично створює `.env` із `.env.example`, якщо його ще немає.
-
-## Архітектура
-
-Ключові entrypoints:
-
-- `public/index.php` — HTTP entrypoint
-- `bin/grpc.php` — gRPC worker entrypoint
-- `bin/scanner.php` — scanner process
-
-Ключові модулі:
-
-- `src/Service/SubscriptionService.php` — бізнес-логіка підписок
-- `src/Grpc/ReleaseNotifierService.php` — gRPC adapter над тією самою логікою
-- `src/Repository/SubscriptionRepository.php` — PostgreSQL repository
-- `src/Service/GitHubService.php` — інтеграція з GitHub API
-- `src/Service/NotifierService.php` — SMTP-відправка повідомлень
-
-Нормальний флоу:
-
-1. Клієнт створює підписку через HTTP або gRPC.
-2. Сервіс валідовує `email` і `owner/repo`.
-3. Репозиторій перевіряється через GitHub API.
-4. Підписка зберігається в PostgreSQL.
-5. Scanner перевіряє релізи пачками.
-6. Якщо з’явився новий реліз, notifier відправляє лист.
-7. Стан доставки зберігається в БД, щоб уникнути дублювання.
-
-## HTTP API
-
-### Створити підписку
-
-```bash
-curl -X POST http://localhost:8080/api/subscriptions \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","repository":"golang/go"}'
-```
-
-### Список підписок
-
-```bash
-curl "http://localhost:8080/api/subscriptions?email=user@example.com&limit=20&offset=0"
-```
-
-### Отримати підписку
-
-```bash
-curl http://localhost:8080/api/subscriptions/1
-```
-
-### Видалити підписку
-
-```bash
-curl -X DELETE http://localhost:8080/api/subscriptions/1
-```
-
-### API key
-
-Якщо в `.env` задано `API_KEY`, усі запити до `/api/*` повинні передавати:
-
-```text
-X-API-Key: your-api-key
-```
-
-Маршрути `/`, `/health`, `/metrics` залишаються без авторизації.
-
-HTML-форма на `/` теж підтримує API key, але бере його з поля форми, а не з query string.
-
-## gRPC
-
-Proto-контракт лежить у `proto/release_notifier.proto`.
-
-Generated PHP-класи лежать у `generated/`.
-
-Регенерація:
-
-```bash
-make proto
-```
-
-Сервіс `release_notifier.v1.ReleaseNotifierService` підтримує:
-
-- `Health`
-- `CreateSubscription`
-- `ListSubscriptions`
-- `GetSubscription`
-- `DeleteSubscription`
-
-Важливий runtime-нюанс:
-
-- логер пише в `stderr`, а не в `stdout`
-- це потрібно для сумісності з RoadRunner worker protocol
-- інакше gRPC-відповіді ламаються на transport layer
-
-### gRPC smoke
-
-Якщо `grpcurl` встановлений локально:
-
-```bash
-grpcurl -plaintext -import-path proto -proto release_notifier.proto localhost:9001 list
-grpcurl -plaintext -import-path proto -proto release_notifier.proto \
-  -d '{}' \
-  localhost:9001 release_notifier.v1.ReleaseNotifierService/Health
-```
-
-Якщо локально `grpcurl` немає, можна використати Docker:
-
-```bash
-docker run --rm \
-  --network github-release-notifier_default \
-  -v "$PWD/proto:/proto" \
-  fullstorydev/grpcurl \
-  -plaintext \
-  -import-path /proto \
-  -proto release_notifier.proto \
-  grpc:9001 list
-```
-
-## Міграції
-
-```bash
+make restart
+make logs
 make migrate
+make migrate-notification
 ```
 
-Міграції запускаються з advisory lock, тому одночасний старт кількох процесів не повинен призводити до гонок schema changes.
-
-## Тести І Перевірки
-
-### Unit та статичні перевірки
-
-Усі ці команди виконуються всередині Docker:
+Notification-service operations:
 
 ```bash
-make lint
-make stan
-make test
-make check
+make logs-notification-svc
+make logs-rabbitmq
+make logs-notification-db
+make notification-smoke
+make scanner-smoke
 ```
 
-Покриття:
-
-- `make lint` — `src/`, `config/`, `bin/`, `tests/`
-- `make stan` — статичний аналіз
-- `make test` — PHPUnit
-
-### Acceptance
-
-Acceptance-набір запускається так:
+Architecture model:
 
 ```bash
-make behat
+make c4-up
+make c4-validate
+make c4-down
 ```
 
-Або поетапно:
+## Quality Gates
+
+Monolith:
 
 ```bash
-make behat-up
-docker compose -f docker-compose.yml -f docker-compose.test.yml exec -T app composer acceptance
-make behat-down
+composer lint
+./vendor/bin/phpunit --no-coverage --testsuite Unit
+composer psalm
 ```
 
-Що використовується:
+`composer lint` runs PHPCS (PSR-12) and deptrac (architecture boundaries). Deptrac output includes
+`Uncovered 269 | Allowed 306` — "Uncovered" counts classes not matched by any layer regex (e.g.
+generated/vendor classes, test helpers outside a declared layer); this is not a violation. The gate
+passes as long as the Violations count remains 0.
 
-- `features/*.feature` — бізнес-сценарії
-- `tests/Acceptance/FeatureContext.php` — step helpers і cleanup logic
-- `behat.yml` — конфіг Mink та OpenAPI validator
-- `docker-compose.test.yml` — test override для acceptance
-
-Що покривають acceptance:
-
-- `features/health.feature` — `/health`
-- `features/metrics.feature` — `/metrics`
-- `features/subscription.feature` — create/list/get/delete підписок
-- негативні кейси: невалідний email, невалідний repository format, відсутні поля, `404`
-- контракт HTTP API проти `swagger.yaml`
-
-Як працює cleanup:
-
-- сценарії з тегом `@cleanup` перед стартом чистять підписки через HTTP API
-- cleanup дозволений лише для `localhost` або `127.0.0.1`
-- якщо задано `API_KEY`, cleanup автоматично передає той самий `X-API-Key`
-
-Чому є `docker-compose.test.yml`:
-
-- для acceptance примусово ставиться порожній `API_KEY`
-- scanner interval зсувається далеко вперед, щоб background job не шумів під час тестів
-
-## Повна Перевірка
+Notification service:
 
 ```bash
-make ci
+cd apps/notification
+composer lint
+./vendor/bin/phpunit --no-coverage
+composer psalm
 ```
 
-`make ci` запускає:
+## Contracts
 
-1. `lint`
-2. `stan`
-3. `phpunit`
-4. `behat`
+Public wire contracts are frozen unless explicitly changed:
 
-Усе це відбувається всередині Docker.
+- REST `/api/subscriptions`
+- gRPC `proto/release_notifier.proto`
+- `SendReleaseEmail/v1` integration payload
 
-## OpenAPI / Swagger
+The monolith publishes the RabbitMQ command after release detection; the
+notification service never calls back into the monolith database to send mail.
 
-HTTP OpenAPI схема лежить у `swagger.yaml`.
+## Architecture Notes
 
-Вона використовується для:
+- Clean Architecture + pragmatic DDD layout under `src/<Context>/<Module>/<Layer>`
+- synchronous in-process PSR-14 domain events inside the monolith
+- asynchronous cross-service integration through RabbitMQ
+- no outbox: the scanner advances `last_seen_tag` only after publish succeeds
+- data ownership split:
+  - monolith DB: subscriptions and tracked repositories
+  - notification DB: delivery ledger and delivery metrics
 
-- acceptance contract validation
-- ручного перегляду в `https://editor.swagger.io/`
-
-Top-level `security: []` у схемі залишено навмисно:
-
-- це прибирає warnings у Behat OpenAPI validator
-- і фіксує очікувану структуру документа на рівні acceptance/regression checks
-
-## Extra
-
-- [x] HTML-сторінка для підписки
-- [x] Redis-кешування GitHub API
-- [x] API key через `X-API-Key`
-- [x] Prometheus metrics
-- [x] gRPC transport
-- [x] Acceptance suite з OpenAPI-перевіркою
-- [x] Production deploy на AWS
+The LikeC4 model lives in [docs/architecture](docs/architecture/README.md). ADRs live in `docs/adr/`.

@@ -66,10 +66,79 @@ services:
       - "6379:6379"
 
   mailhog:
-    image: mailhog/mailhog:latest
+    image: mailhog/mailhog:v1.0.1
     ports:
       - "1025:1025"
       - "8025:8025"
 
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notification-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME:-release_notifications}
+      POSTGRES_USER: ${NOTIFICATION_DB_USER:-notification}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-secret}
+    ports:
+      - "${NOTIFICATION_DB_PORT:-5433}:5432"
+    volumes:
+      - notification_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER:-notification} -d ${NOTIFICATION_DB_NAME:-release_notifications}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notification-svc:
+    build:
+      context: ./apps/notification
+      target: base
+    env_file:
+      - .env
+    environment:
+      NOTIFICATION_DB_HOST: notification-db
+      NOTIFICATION_DB_PORT: 5432
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+    ports:
+      # Publish the worker's health/metrics surface so /metrics is scrapeable
+      # and /health is curl-able from the host (NFR4 observability).
+      - "${NOTIFICATION_SVC_PORT:-8081}:8081"
+    healthcheck:
+      # busybox wget exits non-zero on the 503 that /health returns when
+      # Postgres or RabbitMQ is unreachable.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      notification-db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  rabbitmq_data:
+  notification_pgdata:

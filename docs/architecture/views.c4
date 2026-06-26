@@ -2,29 +2,29 @@ views {
     view index {
         title "System Landscape"
         description "
-            People and external systems that the GitHub Release Notifier
-            interacts with.
+            Subscriber, GitHub, and the system boundary.
         "
-        include *
+        include
+            user,
+            github,
+            notifier
     }
 
     view containers of notifier {
         title "Container View — GitHub Release Notifier"
         description "
-            Internal containers (deployable units) of the notifier system
-            and their interactions with users and external systems.
+            Final runtime topology after notification-service extraction.
         "
-        include *
+        include
+            *,
+            user,
+            github
     }
 
     view httpApiComponents of notifier.httpApi {
         title "Component View — HTTP API"
         description "
-            Components inside the HTTP API container:
-            middleware, controllers, services and repository.
-            The HTML subscription form is a served static asset
-            (see the container description), not an internal
-            component, and is omitted from this view.
+            HTTP edge and its bus/repository integration points.
         "
         include
             *,
@@ -32,22 +32,19 @@ views {
             notifier.db,
             notifier.redis,
             github
-        exclude
-            notifier.httpApi.homePage
     }
 
     view scannerComponents of notifier.scanner {
         title "Component View — Scanner Worker"
         description "
-            Components inside the Scanner container:
-            loop driver, GitHub adapter, notifier and repository.
+            Scanner-side publish path into RabbitMQ.
         "
         include
             *,
             notifier.db,
             notifier.redis,
             github,
-            smtp
+            notifier.rabbitmq
     }
 
     view grpcApiComponents of notifier.grpcApi {
@@ -66,49 +63,64 @@ views {
             github
     }
 
+    view notificationServiceComponents of notifier.notificationSvc {
+        title "Component View — Notification Service"
+        description "
+            Consumer, handler, ledger, renderer, and mailer inside apps/notification.
+        "
+        include
+            *,
+            notifier.rabbitmq,
+            notifier.notificationDb,
+            notifier.mailhog
+    }
+
     dynamic view createSubscriptionFlow {
         title "Dynamic — Create Subscription"
-        description "
-            Step-by-step flow when a subscriber creates a new
-            subscription via the HTTP API.
-        "
-
+        description "HTTP subscription flow through controller, buses, GitHub validation, and persistence."
         user -> notifier.httpApi.middleware "POST /api/subscriptions with X-API-Key"
         notifier.httpApi.middleware -> notifier.httpApi.subscriptionCtrl "Authenticated, forward to controller"
-        notifier.httpApi.subscriptionCtrl -> notifier.httpApi.subscriptionSvc "create(email, owner/repo)"
-        notifier.httpApi.subscriptionSvc -> notifier.httpApi.githubSvc "exists(owner/repo)?"
-        notifier.httpApi.githubSvc -> notifier.redis "GET cached response"
-        notifier.httpApi.githubSvc -> github "GET /repos/{owner}/{repo} (on cache miss)"
-        notifier.httpApi.githubSvc -> notifier.redis "SET response (on cache miss)"
-        notifier.httpApi.subscriptionSvc -> notifier.httpApi.subscriptionRepo "create(email, owner/repo)"
+        notifier.httpApi.subscriptionCtrl -> notifier.httpApi.commandBus "dispatch SubscribeCommand"
+        notifier.httpApi.commandBus -> notifier.httpApi.releaseSource "repositoryExists(owner/repo)?"
+        notifier.httpApi.releaseSource -> notifier.redis "GET cached response"
+        notifier.httpApi.releaseSource -> github "GET /repos/{owner}/{repo} (on cache miss)"
+        notifier.httpApi.releaseSource -> notifier.redis "SET response (on cache miss)"
+        notifier.httpApi.commandBus -> notifier.httpApi.subscriptionRepo "create(email, owner/repo)"
         notifier.httpApi.subscriptionRepo -> notifier.db "INSERT INTO repositories ON CONFLICT DO NOTHING (ensureRepositoryExists)"
         notifier.httpApi.subscriptionRepo -> notifier.db "INSERT INTO subscriptions ON CONFLICT DO NOTHING RETURNING ..."
         notifier.httpApi.subscriptionCtrl -> user "201 Created"
     }
 
-    dynamic view scanFlow {
-        title "Dynamic — Scan & Notify"
+    dynamic view publishAndSendFlow {
+        title "Dynamic — Publish And Send Release Notification"
         description "
-            How the scanner worker detects a new release tag and
-            delivers email notifications, deduplicating per
-            subscription via release_notifications.
+            Scanner-side publish followed by notification-service consume,
+            dedupe, and SMTP delivery.
         "
 
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getRepositoriesToScan(batchSize)"
+        notifier.scanner.cliRunner -> notifier.scanner.scanHandler "dispatch ScanReleasesCommand"
+        notifier.scanner.scanHandler -> notifier.scanner.scannerRepo "getRepositoriesToScan(batchSize)"
         notifier.scanner.scannerRepo -> notifier.db "SELECT repositories"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerGithub "getLatestRelease(owner/repo)"
-        notifier.scanner.scannerGithub -> notifier.redis "GET cached response"
-        notifier.scanner.scannerGithub -> github "GET /repos/.../releases/latest (on cache miss)"
-        notifier.scanner.scannerGithub -> notifier.redis "SET response with TTL (on cache miss)"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getRepositoryInfo(repo)"
+        notifier.scanner.scanHandler -> notifier.scanner.releaseDetector "getLatestRelease(owner/repo)"
+        notifier.scanner.releaseDetector -> notifier.redis "GET cached response"
+        notifier.scanner.releaseDetector -> github "GET /repos/.../releases/latest (on cache miss)"
+        notifier.scanner.releaseDetector -> notifier.redis "SET response with TTL (on cache miss)"
+        notifier.scanner.scanHandler -> notifier.scanner.scannerRepo "getRepositoryInfo(repo)"
         notifier.scanner.scannerRepo -> notifier.db "SELECT last_seen_tag"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "getSubscriptionsByRepository(repo) (when tag differs)"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "hasSuccessfulNotificationForRelease(sub, repo, tag)"
-        notifier.scanner.scannerSvc -> notifier.scanner.notifierSvc "sendReleaseNotification(email, repo, tag, ...)"
-        notifier.scanner.notifierSvc -> smtp "Deliver email"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "recordNotificationResult(sub, repo, tag, sent)"
-        notifier.scanner.scannerRepo -> notifier.db "INSERT/UPDATE release_notifications"
-        notifier.scanner.scannerSvc -> notifier.scanner.scannerRepo "updateLastSeenTag(repo, tag) (only when all delivered)"
+        notifier.scanner.scanHandler -> notifier.scanner.publishListener "dispatch NewReleaseDetected"
+        notifier.scanner.publishListener -> notifier.scanner.publishUseCase "publish(repository, release snapshot)"
+        notifier.scanner.publishUseCase -> notifier.scanner.scannerRepo "findSubscribersByRepository(repo)"
+        notifier.scanner.publishUseCase -> notifier.scanner.rabbitPublisher "publishAll: SendReleaseEmail/v1 batch, one per subscriber"
+        notifier.scanner.rabbitPublisher -> notifier.rabbitmq "Publish batch to notifications.send-email (single confirm-wait)"
+        notifier.notificationSvc.consumer -> notifier.rabbitmq "Consume next message"
+        notifier.notificationSvc.consumer -> notifier.notificationSvc.sendEmailHandler "invoke(message)"
+        notifier.notificationSvc.sendEmailHandler -> notifier.notificationSvc.ledger "claim(key) — atomic INSERT ... ON CONFLICT"
+        notifier.notificationSvc.sendEmailHandler -> notifier.notificationSvc.renderer "render email"
+        notifier.notificationSvc.sendEmailHandler -> notifier.notificationSvc.mailer "send email"
+        notifier.notificationSvc.sendEmailHandler -> notifier.notificationSvc.ledger "markSent / record dedupe"
+        notifier.notificationSvc.ledger -> notifier.notificationDb "INSERT release_notifications"
+        notifier.notificationSvc.mailer -> notifier.mailhog "SMTP delivery"
+        notifier.scanner.scanHandler -> notifier.scanner.scannerRepo "updateLastSeenTag(repo, tag) (only after publish succeeds)"
         notifier.scanner.scannerRepo -> notifier.db "UPDATE repositories.last_seen_tag"
     }
 }

@@ -3,10 +3,8 @@ model {
         httpApi = container "HTTP API" {
             description "
                 Public REST API for subscription CRUD.
-                Validates input, talks to repository,
-                checks repos against GitHub.
-                Exposes /health, /metrics and the static
-                HTML subscription form at GET /.
+                Builds commands/queries and uses the monolith
+                database plus cached GitHub lookups.
             "
             technology "PHP 8.4, Slim 4, FrankenPHP (Caddy)"
         }
@@ -23,22 +21,35 @@ model {
 
         scanner = container "Scanner Worker" {
             description "
-                Background process. Periodically polls
-                GitHub for new releases of subscribed repos
-                in batches and triggers email notifications.
-                Tracks per-repo last-seen tag and per-subscription
-                delivery state to avoid duplicate emails.
+                Background process. Polls GitHub for new releases,
+                resolves subscribers, and publishes one
+                SendReleaseEmail/v1 command per subscriber to RabbitMQ.
+                Advances last_seen_tag only after publish succeeds.
             "
             technology "PHP 8.4 CLI, long-running loop"
         }
 
-        db = database "PostgreSQL" {
+        notificationSvc = container "Notification Service" {
             description "
-                Stores subscriptions, per-repository last seen tag
-                and per-subscription release_notifications
-                (delivery state per release tag).
-                Migrations run with advisory lock to prevent
-                concurrent schema changes.
+                Queue consumer for SendReleaseEmail/v1.
+                Dedupes delivery in its own database, renders email,
+                and sends via MailHog/SMTP.
+            "
+            technology "PHP 8.2 CLI worker"
+        }
+
+        db = database "Monolith PostgreSQL" {
+            description "
+                Stores subscriptions and tracked repositories.
+                The monolith no longer owns release_notifications.
+            "
+            technology "PostgreSQL 16"
+        }
+
+        notificationDb = database "Notification PostgreSQL" {
+            description "
+                Stores release_notifications and notification_metrics
+                for the notification service.
             "
             technology "PostgreSQL 16"
         }
@@ -49,6 +60,22 @@ model {
                 rate limits and reduce latency.
             "
             technology "Redis 7"
+        }
+
+        rabbitmq = container "RabbitMQ" {
+            description "
+                Durable notifications exchange + send-email queue
+                + dead-letter queue for failed messages.
+            "
+            technology "RabbitMQ 4"
+        }
+
+        mailhog = container "MailHog" {
+            description "
+                Local SMTP sink and mailbox viewer used by
+                notification-svc in development.
+            "
+            technology "MailHog"
         }
     }
 
@@ -63,8 +90,12 @@ model {
     grpcApi -> redis "Reads/writes cached GitHub responses" "RESP"
     grpcApi -> github "Validates owner/repo exists" "HTTPS"
 
-    scanner -> db "Reads subscriptions, updates delivery state" "SQL/TCP"
+    scanner -> db "Reads subscriptions and scan progress" "SQL/TCP"
     scanner -> redis "Reads/writes cached GitHub responses" "RESP"
     scanner -> github "Polls release metadata" "HTTPS"
-    scanner -> smtp "Sends email notifications" "SMTP"
+    scanner -> rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"
+
+    notificationSvc -> rabbitmq "Consumes notifications.send-email / DLQ" "AMQP"
+    notificationSvc -> notificationDb "Reads/writes delivery ledger + metrics" "SQL/TCP"
+    notificationSvc -> mailhog "Sends email in local dev" "SMTP"
 }

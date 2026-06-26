@@ -1,0 +1,106 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Shared\Infrastructure\Messaging\Rabbit;
+
+use PhpAmqpLib\Channel\AMQPChannel;
+
+/**
+ * Asserts the full broker topology idempotently on construction:
+ * - Exchange `notifications` — topic, durable
+ * - Exchange `notifications.dlx` — fanout, durable (fanout routes dead-lettered
+ *   messages unconditionally without a routing key — simpler than topic for a
+ *   single DLQ)
+ * - Queue `notifications.send-email` — durable, x-dead-letter-exchange: notifications.dlx
+ * - Queue `notifications.send-email.retry` — durable, no consumers; messages
+ *   carry a per-message TTL and dead-letter back into `notifications.send-email`
+ *   via the default exchange (x-dead-letter-routing-key = the work queue name)
+ * - Queue `notifications.send-email.dlq` — durable
+ * - Binding notifications → notifications.send-email on release.email
+ * - Binding notifications.dlx → notifications.send-email.dlq (no routing key)
+ *
+ * @psalm-api
+ */
+final readonly class RabbitConnection
+{
+    // Public so the publisher targets the same exchange/routing key this class
+    // declares and binds — one source of truth for the publish topology.
+    public const EXCHANGE_NOTIFICATIONS = 'notifications';
+    public const ROUTING_KEY_RELEASE_EMAIL = 'release.email';
+    private const EXCHANGE_DLX = 'notifications.dlx';
+    private const QUEUE_SEND_EMAIL = 'notifications.send-email';
+    private const QUEUE_SEND_EMAIL_RETRY = 'notifications.send-email.retry';
+    private const QUEUE_SEND_EMAIL_DLQ = 'notifications.send-email.dlq';
+
+    public function __construct(private AMQPChannel $channel)
+    {
+        $this->assertTopology();
+    }
+
+    public function channel(): AMQPChannel
+    {
+        return $this->channel;
+    }
+
+    private function assertTopology(): void
+    {
+        $this->channel->exchange_declare(
+            self::EXCHANGE_NOTIFICATIONS,
+            'topic',
+            false,
+            true,   // durable
+            false   // auto_delete
+        );
+        $this->channel->exchange_declare(
+            self::EXCHANGE_DLX,
+            'fanout',
+            false,
+            true,   // durable
+            false   // auto_delete
+        );
+
+        $this->channel->queue_declare(
+            self::QUEUE_SEND_EMAIL,
+            false,
+            true,   // durable
+            false,  // exclusive
+            false,  // auto_delete
+            false,  // nowait
+            ['x-dead-letter-exchange' => ['S', self::EXCHANGE_DLX]]
+        );
+        // Retry parking queue: no consumers; expired messages dead-letter back
+        // into the work queue via the default exchange (routing key = queue name).
+        $this->channel->queue_declare(
+            self::QUEUE_SEND_EMAIL_RETRY,
+            false,
+            true,   // durable
+            false,  // exclusive
+            false,  // auto_delete
+            false,  // nowait
+            [
+                'x-dead-letter-exchange' => ['S', ''],
+                'x-dead-letter-routing-key' => ['S', self::QUEUE_SEND_EMAIL],
+            ]
+        );
+        $this->channel->queue_declare(
+            self::QUEUE_SEND_EMAIL_DLQ,
+            false,
+            true,   // durable
+            false,  // exclusive
+            false   // auto_delete
+        );
+
+        $this->channel->queue_bind(
+            self::QUEUE_SEND_EMAIL,
+            self::EXCHANGE_NOTIFICATIONS,
+            self::ROUTING_KEY_RELEASE_EMAIL
+        );
+        // Fanout DLX → DLQ: no routing key has any matching semantics here —
+        // the broadcast is unconditional (Decision 1).
+        $this->channel->queue_bind(
+            self::QUEUE_SEND_EMAIL_DLQ,
+            self::EXCHANGE_DLX
+        );
+    }
+}

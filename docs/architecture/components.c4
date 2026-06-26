@@ -1,15 +1,13 @@
 model {
     extend notifier.httpApi {
-        // Edge — PSR-15 middleware pipeline
         middleware = component "HTTP Middleware Pipeline" {
             description "
-                PSR-15 stack: ErrorHandler → ApiKey → Slim BodyParser.
-                See ARCHITECTURE.md for routing and whitelist details.
+                PSR-15 stack for /api, /health, /metrics, and the
+                HTML form entrypoint.
             "
             technology "PHP, PSR-15"
         }
 
-        // Controllers
         subscriptionCtrl = component "SubscriptionController" {
             description "REST handlers for /api/subscriptions CRUD."
             technology "PHP, Slim 4"
@@ -25,51 +23,46 @@ model {
             technology "PHP, Slim 4"
         }
 
-        // Application services
-        subscriptionSvc = component "SubscriptionService" {
+        commandBus = component "CommandBus" {
             description "
-                Core business logic: validates email and
-                owner/repo, checks GitHub, persists subscription.
+                In-memory command bus dispatching subscription
+                and repository-tracking commands.
             "
             technology "PHP"
         }
 
-        githubSvc = component "GitHubService" {
-            description "GitHub REST adapter with Redis-backed cache."
+        queryBus = component "QueryBus" {
+            description "In-memory query bus for subscription reads."
+            technology "PHP, Guzzle"
+        }
+
+        releaseSource = component "ReleaseSource" {
+            description "GitHub release/repository source with Redis-backed caching."
             technology "PHP, Guzzle"
         }
 
         metricsSvc = component "MetricsService" {
             description "
-                Computes Prometheus gauges from the database
-                on each /metrics scrape: total subscriptions,
-                tracked repositories, and repositories that have
-                a known last_seen_tag.
+                Aggregates Prometheus gauges from count ports.
             "
             technology "PHP"
         }
 
-        // Persistence
         subscriptionRepo = component "SubscriptionRepository" {
-            description "Data access for subscriptions table."
+            description "PDO adapter for subscriptions and subscriber lookup."
             technology "PHP, PDO"
-        }
-
-        // Static assets (served by Slim, not part of the JSON API)
-        homePage = staticAsset "HTML Subscription Form" {
-            description "Static public/index.html served by Slim at GET /. Submits to /api/subscriptions."
-            technology "Static HTML, served by Slim 4"
         }
 
         middleware -> subscriptionCtrl "Forwards authenticated /api/* requests"
         middleware -> healthCtrl "Forwards GET /health"
         middleware -> metricsCtrl "Forwards GET /metrics"
-        middleware -> homePage "Serves GET / (static)"
-        subscriptionCtrl -> subscriptionSvc "Delegates business logic"
+        subscriptionCtrl -> commandBus "Dispatches writes"
+        subscriptionCtrl -> queryBus "Dispatches reads"
         metricsCtrl -> metricsSvc "Renders Prometheus exposition"
         metricsSvc -> subscriptionRepo "Reads aggregate counts on every scrape"
-        subscriptionSvc -> githubSvc "Verifies owner/repo exists"
-        subscriptionSvc -> subscriptionRepo "Persists / loads subscriptions"
+        commandBus -> releaseSource "Validates owner/repo exists during subscribe"
+        commandBus -> subscriptionRepo "Persists subscriptions"
+        queryBus -> subscriptionRepo "Reads subscriptions"
     }
 
     extend notifier.grpcApi {
@@ -83,84 +76,151 @@ model {
             technology "PHP, RoadRunner gRPC"
         }
 
-        grpcSubscriptionSvc = component "SubscriptionService" {
-            description "
-                Same SubscriptionService class as in HTTP API,
-                but a separate runtime instance — bin/grpc.php
-                builds its own DI container at process start.
-            "
+        grpcCommandBus = component "CommandBus" {
+            description "Separate runtime instance from HTTP, same bus pattern."
             technology "PHP"
         }
 
-        grpcGithubSvc = component "GitHubService" {
-            description "Separate scanner/grpc-side instance of the GitHub adapter."
-            technology "PHP, Guzzle"
+        grpcQueryBus = component "QueryBus" {
+            description "Separate runtime instance from HTTP, same bus pattern."
+            technology "PHP"
         }
 
-        grpcSubscriptionRepo = component "SubscriptionRepository" {
-            description "Separate gRPC-side instance of the subscriptions repository."
+        grpcRepo = component "SubscriptionRepository" {
+            description "gRPC-side runtime instance of the subscription repository."
             technology "PHP, PDO"
         }
 
-        grpcSvc -> grpcSubscriptionSvc "Delegates business logic"
-        grpcSubscriptionSvc -> grpcGithubSvc "Verifies owner/repo exists"
-        grpcSubscriptionSvc -> grpcSubscriptionRepo "Persists / loads subscriptions"
+        grpcSvc -> grpcCommandBus "Dispatches writes"
+        grpcSvc -> grpcQueryBus "Dispatches reads"
+        grpcCommandBus -> grpcRepo "Persists subscriptions"
+        grpcQueryBus -> grpcRepo "Reads subscriptions"
     }
 
     user -> notifier.grpcApi.grpcSvc "RPC calls" "gRPC"
 
     extend notifier.scanner {
-        scannerSvc = component "ScannerService" {
+        cliRunner = component "ScannerCliRunner" {
             description "
-                Loop driver. Picks repositories to scan in batches,
-                resolves the latest release tag from GitHub,
-                compares against repositories.last_seen_tag,
-                dispatches per-subscriber emails (skipping
-                already-delivered tags via release_notifications),
-                advances last_seen_tag only after all subscribers got the email.
+                Long-running loop that dispatches ScanReleases commands.
             "
             technology "PHP CLI"
         }
 
-        scannerGithub = component "GitHubService" {
-            description "Same GitHubService class, scanner-side instance."
+        scanHandler = component "ScanReleasesHandler" {
+            description "
+                Orchestrates the scan cycle, dispatches
+                NewReleaseDetected, and advances markers only
+                after publish succeeds.
+            "
+            technology "PHP"
+        }
+
+        releaseDetector = component "ReleaseDetector" {
+            description "Compares GitHub releases against repository scan state."
             technology "PHP, Guzzle"
         }
 
-        notifierSvc = component "NotifierService" {
-            description "Builds and sends release email via SMTP."
-            technology "PHP, PHPMailer"
+        publishListener = component "PublishReleaseEmailsOnNewReleaseDetectedListener" {
+            description "
+                Thin adapter: maps NewReleaseDetected into the Publishing
+                context's ReleaseSnapshot and delegates to the use-case.
+            "
+            technology "PHP"
+        }
+
+        publishUseCase = component "PublishReleaseEmailsForRelease" {
+            description "
+                Publishing use-case: resolves subscribers and builds one
+                SendReleaseEmail/v1 message per recipient, published as
+                a single batch.
+            "
+            technology "PHP"
         }
 
         scannerRepo = component "SubscriptionRepository" {
             description "
-                Data access on the scanner side: reads subscriptions
-                and repositories rows, updates repositories.last_seen_tag
-                and last_checked_at, writes per-tag delivery rows
-                into release_notifications.
+                Scanner-side access to subscriptions and tracked repositories.
             "
             technology "PHP, PDO"
         }
 
-        scannerSvc -> scannerRepo "Picks batches"
-        scannerSvc -> scannerGithub "Resolves latest release per repo"
-        scannerSvc -> notifierSvc "Dispatches email when release is new"
+        rabbitPublisher = component "RabbitReleaseNotificationPublisher" {
+            description "Publishes SendReleaseEmail/v1 batches to RabbitMQ."
+            technology "PHP, AMQP"
+        }
+
+        cliRunner -> scanHandler "Dispatches scan command"
+        scanHandler -> scannerRepo "Reads due repositories and updates scan state"
+        scanHandler -> releaseDetector "Resolves latest release"
+        scanHandler -> publishListener "Triggers publish via NewReleaseDetected"
+        publishListener -> publishUseCase "Delegates repository + release snapshot"
+        publishUseCase -> scannerRepo "Resolves the repository's subscribers"
+        publishUseCase -> rabbitPublisher "Publishes the batch with one confirm-wait"
     }
 
     user -> notifier.httpApi.middleware "All HTTP requests (outermost edge)" "HTTPS"
 
     notifier.httpApi.healthCtrl -> notifier.db "SELECT 1 (liveness probe)" "SQL/TCP"
-    notifier.httpApi.githubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
-    notifier.httpApi.githubSvc -> github "Calls REST API" "HTTPS"
+    notifier.httpApi.releaseSource -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.httpApi.releaseSource -> github "Calls REST API" "HTTPS"
     notifier.httpApi.subscriptionRepo -> notifier.db "SQL" "TCP"
 
     notifier.grpcApi.grpcSvc -> notifier.db "SELECT 1 on Health() (liveness)" "SQL/TCP"
-    notifier.grpcApi.grpcGithubSvc -> notifier.redis "Reads/writes cached responses" "RESP"
-    notifier.grpcApi.grpcGithubSvc -> github "Calls REST API" "HTTPS"
-    notifier.grpcApi.grpcSubscriptionRepo -> notifier.db "SQL" "TCP"
+    notifier.grpcApi.grpcRepo -> notifier.db "SQL" "TCP"
 
-    notifier.scanner.scannerGithub -> notifier.redis "Reads/writes cached responses" "RESP"
-    notifier.scanner.scannerGithub -> github "Calls REST API" "HTTPS"
+    notifier.scanner.releaseDetector -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.scanner.releaseDetector -> github "Calls REST API" "HTTPS"
     notifier.scanner.scannerRepo -> notifier.db "SQL" "TCP"
-    notifier.scanner.notifierSvc -> smtp "Sends email" "SMTP"
+    notifier.scanner.rabbitPublisher -> notifier.rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"
+
+    extend notifier.notificationSvc {
+        consumer = component "SendReleaseEmailConsumer" {
+            description "
+                RabbitMQ consumer with ack/nack handling; transient
+                failures go to a TTL retry queue (delay grows per
+                attempt), claim contention parks for the lease window
+                without burning retry budget, poison messages and
+                exhausted retries go to the DLQ.
+            "
+            technology "PHP, AMQP"
+        }
+
+        sendEmailHandler = component "SendReleaseEmailHandler" {
+            description "
+                Idempotency gate: atomically claim the notification in
+                the ledger, render email, send mail, mark delivered —
+                or skip as dedupe / back off while another worker
+                holds the claim.
+            "
+            technology "PHP"
+        }
+
+        ledger = component "PdoNotificationLedger" {
+            description "
+                Service-owned delivery ledger with an atomic
+                INSERT … ON CONFLICT claim per business key.
+            "
+            technology "PHP, PDO"
+        }
+
+        renderer = component "ReleaseEmailRenderer" {
+            description "Maps the integration payload into rendered email."
+            technology "PHP"
+        }
+
+        mailer = component "PhpMailerMailer" {
+            description "SMTP adapter used by the notification service."
+            technology "PHP, PHPMailer"
+        }
+
+        consumer -> sendEmailHandler "Invokes for each consumed message"
+        sendEmailHandler -> ledger "Claims + records delivery"
+        sendEmailHandler -> renderer "Builds subject/body"
+        sendEmailHandler -> mailer "Sends email"
+    }
+
+    notifier.notificationSvc.consumer -> notifier.rabbitmq "Consumes queue / routes poison messages to DLQ" "AMQP"
+    notifier.notificationSvc.ledger -> notifier.notificationDb "SQL" "TCP"
+    notifier.notificationSvc.mailer -> notifier.mailhog "Sends email in local dev" "SMTP"
 }

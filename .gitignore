@@ -6,3 +6,21 @@ node_modules/
 .idea/
 tests/e2e/playwright-report/
 tests/e2e/test-results/
+
+# BMAD-METHOD (installed tooling — not committed; planning specs ARE
+# committed, see /specs/. Per-story implementation/review logs stay here,
+# gitignored — too verbose to be worth tracking.)
+/_bmad/
+/_bmad-output/
+/.claude/skills/bmad-*/
+!/.claude/skills/bmad-fr-nfr-review-gate/
+
+# deptrac analysis cache (config + baseline ARE tracked)
+/.deptrac.cache
+
+# BMAD FR/NFR review-gate runtime artifacts (impact context, review/fix logs,
+# GitHub corroboration) written by scripts/ai-review-loop.sh; default --log-dir
+/var/ai-review/
+
+# gstack headless-browser session artifacts
+/.gstack/

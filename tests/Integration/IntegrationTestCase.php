@@ -74,7 +74,7 @@ abstract class IntegrationTestCase extends TestCase
     private function truncateDataTables(): void
     {
         $this->c->get(PDO::class)->exec(
-            'TRUNCATE subscriptions, repositories, release_notifications RESTART IDENTITY CASCADE'
+            'TRUNCATE subscriptions, repositories RESTART IDENTITY CASCADE'
         );
     }
 

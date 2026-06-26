@@ -1,0 +1,16 @@
+name: Scanner Smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scanner-smoke:
+    name: scanner smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run scanner smoke
+        run: make scanner-smoke

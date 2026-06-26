@@ -6,8 +6,8 @@ namespace Tests\Controller;
 
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
-use App\Health\HealthCheckInterface;
-use App\Service\MetricsServiceInterface;
+use App\Shared\Infrastructure\Health\HealthCheckInterface;
+use App\Shared\Infrastructure\Metrics\MetricsServiceInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Slim\Psr7\Factory\RequestFactory;

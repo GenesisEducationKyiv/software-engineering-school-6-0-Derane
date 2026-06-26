@@ -1,0 +1,284 @@
+imports:
+  - deptrac.baseline.yaml
+
+deptrac:
+  paths:
+    - ./src
+    - ./apps
+  exclude_files:
+    - '#apps/[^/]+/vendor/.*#'
+
+  layers:
+    # ---------------------------------------------------------------------
+    # Shared kernel (monolith src/ only). apps/notification/src/Shared/
+    # duplicates these classes with the same FQCN but belongs solely to
+    # Apps.Notification layer — see AR-DEPTRAC architecture.md §4 note.
+    # ---------------------------------------------------------------------
+    - name: Shared.Domain
+      collectors:
+        - type: directory
+          value: ^src/Shared/Domain/.*
+    - name: Shared.Application
+      collectors:
+        - type: directory
+          value: ^src/Shared/Application/.*
+    - name: Shared.Infrastructure
+      collectors:
+        - type: directory
+          value: ^src/Shared/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Subscription context (module: Subscriptions)
+    # ---------------------------------------------------------------------
+    - name: Subscription.Domain
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Domain/.*
+    - name: Subscription.Application
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Application/.*
+    - name: Subscription.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Subscription/Subscriptions/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # RepositoryTracking context (module: Repositories)
+    # ---------------------------------------------------------------------
+    - name: RepositoryTracking.Domain
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Domain/.*
+    - name: RepositoryTracking.Application
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Application/.*
+    - name: RepositoryTracking.Infrastructure
+      collectors:
+        - type: directory
+          value: src/RepositoryTracking/Repositories/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Releases context (module: Sourcing)
+    # ---------------------------------------------------------------------
+    - name: Releases.Domain
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Domain/.*
+    - name: Releases.Application
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Application/.*
+    - name: Releases.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Releases/Sourcing/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Scanning context (module: Scanner) — orchestration, NO Domain layer
+    # ---------------------------------------------------------------------
+    - name: Scanning.Application
+      collectors:
+        - type: directory
+          value: src/Scanning/Scanner/Application/.*
+    - name: Scanning.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Scanning/Scanner/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Notification\Publishing context (monolith publisher side)
+    # ---------------------------------------------------------------------
+    - name: NotificationPublishing.Domain
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Domain/.*
+    - name: NotificationPublishing.Application
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Application/.*
+    - name: NotificationPublishing.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Notification/Publishing/Infrastructure/.*
+
+    # ---------------------------------------------------------------------
+    # Notification\Sending (the extracted service) lives entirely under
+    # apps/notification/src — collected by Apps.Notification below and
+    # additionally governed by apps/notification/deptrac.yaml's own
+    # Domain/Application/Infrastructure ruleset.
+    # ---------------------------------------------------------------------
+
+    # ---------------------------------------------------------------------
+    # apps/* deployables (composition roots / thin entrypoints)
+    # ---------------------------------------------------------------------
+    - name: Apps.Monolith
+      collectors:
+        - type: directory
+          value: apps/monolith/.*
+    - name: Apps.Notification
+      collectors:
+        - type: directory
+          value: apps/notification/.*
+
+    # ---------------------------------------------------------------------
+    # Legacy flat code (transitional; drains over Epic B). Layer-only, no context.
+    # Legacy.Domain (src/Domain, src/Exception) drained in B5 and
+    # Legacy.Application (src/Validation) drained when the validators were
+    # absorbed into the Shared VOs — both layers are gone, only
+    # Legacy.Infrastructure remains.
+    # ---------------------------------------------------------------------
+    - name: Legacy.Infrastructure
+      collectors:
+        - type: directory
+          value: src/Controller/.*
+        - type: directory
+          value: src/Grpc/.*
+        - type: directory
+          value: src/Migration/.*
+
+  ruleset:
+    # ===== Shared kernel: depended on by all; depends on nothing outside Shared.
+    Shared.Domain: []                      # Domain purity (intra-layer allowed by default)
+    Shared.Application:
+      - Shared.Domain
+    Shared.Infrastructure:
+      - Shared.Domain
+      - Shared.Application
+      - Subscription.Domain         # B5: MetricsService uses SubscriptionCountPort
+      - Subscription.Application    # ExceptionStatusMap references SubscriptionNotFoundException (application exception)
+      - Releases.Domain             # B5: ExceptionStatusMap references RateLimitException
+      - RepositoryTracking.Domain   # B5: MetricsService uses RepositoryCountPort
+
+    # ===== Subscription
+    Subscription.Domain:
+      - Shared.Domain
+    Subscription.Application:
+      - Subscription.Domain
+      - Shared.Domain
+      - Shared.Application
+      - Releases.Domain               # B1 grant: repositoryExists() port (GitHubServiceInterface)
+      - RepositoryTracking.Domain     # B1 grant: ensureExists() port (TrackedRepositoryRegistrar)
+    Subscription.Infrastructure:
+      - Subscription.Domain
+      - Subscription.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== RepositoryTracking
+    RepositoryTracking.Domain:
+      - Shared.Domain
+    RepositoryTracking.Application:
+      - RepositoryTracking.Domain
+      - Shared.Domain
+      - Shared.Application
+    RepositoryTracking.Infrastructure:
+      - RepositoryTracking.Domain
+      - RepositoryTracking.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Releases
+    Releases.Domain:
+      - Shared.Domain
+    Releases.Application:
+      - Releases.Domain
+      - Shared.Domain
+      - Shared.Application
+    Releases.Infrastructure:
+      - Releases.Domain
+      - Releases.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Scanning (orchestrator). In Epic B it gained cross-context port edges to
+    # Releases.Domain + RepositoryTracking.Domain (architecture §5). It has no Domain
+    # layer of its own; it dispatches NewReleaseDetected, which is owned by Releases (the
+    # context that owns the Release VO the event carries — see the event's docblock), so
+    # the only cross-context edges it needs are Releases.Domain + RepositoryTracking.Domain.
+    Scanning.Application:
+      - Shared.Domain
+      - Shared.Application
+      - Releases.Domain               # B4: catches RateLimitException; A1: constructs/dispatches NewReleaseDetected (owned by Releases.Domain)
+      - RepositoryTracking.Domain     # B4: ScanReleasesHandler uses ScanCandidateSource + ScanProgressWriter ports
+    Scanning.Infrastructure:
+      - Scanning.Application          # B4: ScannerCliRunner dispatches ScanReleasesCommand
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+
+    # ===== Notification\Publishing. Its Domain stays free of cross-context edges:
+    # SendReleaseEmail/ReleaseSnapshot are deliberately decoupled from Releases so the
+    # wire message can cross the queue boundary. All cross-context coupling is confined
+    # to a single Anti-Corruption Layer in Infrastructure\Acl:
+    #  - NotificationPublishing.Application has NO cross-context edge: the use-case
+    #    PublishReleaseEmailsForRelease resolves recipients via its own
+    #    SubscriberProvider port (Domain), returning this context's Recipient.
+    #  - NotificationPublishing.Infrastructure -> Subscription.Domain:
+    #    the ACL adapter SubscriptionSubscriberProvider is the single class that imports
+    #    Subscription (SubscriberFinder/SubscriberCollection/SubscriberRef) and
+    #    translates SubscriberRef -> Recipient.
+    #  - NotificationPublishing.Infrastructure -> Releases.Domain:
+    #    PublishReleaseEmailsOnNewReleaseDetectedListener (thin Infrastructure\Listener
+    #    adapter) consumes the Releases-owned NewReleaseDetected and maps the event's
+    #    Release into this context's own ReleaseSnapshot before delegating — keeping
+    #    the Application layer free of any Releases.Domain dependency.
+    NotificationPublishing.Domain:
+      - Shared.Domain
+    NotificationPublishing.Application:
+      - NotificationPublishing.Domain
+      - Shared.Domain
+      - Shared.Application
+    NotificationPublishing.Infrastructure:
+      - NotificationPublishing.Domain
+      - NotificationPublishing.Application
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - Subscription.Domain           # ACL: SubscriptionSubscriberProvider bridges SubscriberFinder -> Recipient
+      - Releases.Domain               # C2: listener maps the event's Releases\Sourcing\Domain\Release into this context's ReleaseSnapshot
+
+    # ===== apps/monolith: the monolith composition root — wires every monolith
+    # context's layers + Shared + Legacy (during the transition).
+    Apps.Monolith:
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - Subscription.Domain
+      - Subscription.Application
+      - Subscription.Infrastructure
+      - RepositoryTracking.Domain
+      - RepositoryTracking.Application
+      - RepositoryTracking.Infrastructure
+      - Releases.Domain
+      - Releases.Application
+      - Releases.Infrastructure
+      - Scanning.Application
+      - Scanning.Infrastructure
+      - NotificationPublishing.Domain
+      - NotificationPublishing.Application
+      - NotificationPublishing.Infrastructure
+      - Legacy.Infrastructure
+
+    # ===== apps/notification (extracted service): MUST NOT reach monolith-only
+    # contexts. The Shared.* grants exist because the service's own
+    # src/Shared/** reuses the App\Shared\… FQCNs of the monolith's shared
+    # kernel (independent code, no composer dependency) — deptrac resolves
+    # those names to the monolith layers. Internal layering is enforced by
+    # apps/notification/deptrac.yaml.
+    Apps.Notification:
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - Apps.Notification        # tests/ → src/ within the same service
+
+    # ===== Legacy transitional code (drains over Epic B).
+    Legacy.Infrastructure:
+      - Shared.Domain
+      - Shared.Application
+      - Shared.Infrastructure
+      - Subscription.Application       # B1: ReleaseNotifierService news the commands/queries/responses

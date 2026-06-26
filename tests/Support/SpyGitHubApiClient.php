@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
-use App\GitHub\GitHubApiClientInterface;
+use App\Releases\Sourcing\Infrastructure\GitHubApiClientInterface;
 
 /**
  * Counting test double for the GitHub API boundary. Returns canned payloads

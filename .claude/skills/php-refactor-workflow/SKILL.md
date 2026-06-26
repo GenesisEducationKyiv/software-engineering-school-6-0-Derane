@@ -36,11 +36,12 @@ When reviewing PHP code or a refactor in this project:
 6. **Duplicate serialization** (private `toPayload` re-implementing `toArray`) → call the canonical method.
 7. **Two places mapping exception → transport status** → unify into `ExceptionStatusMap`.
 8. **Concrete class as DI key** → bind interfaces only; alias when sharing instances.
-9. **Naming collisions** (`SubscriptionRepository` vs `SubscriberRepository`) → rename to reveal role.
+9. **Naming collisions / role-blind names** → rename to reveal role (e.g. the write port `SubscriptionRepository` vs the read port `SubscriberFinder`).
 10. **Missing tests for newly extracted classes** → each Pure Fabrication deserves a focused test.
 11. **Control-flow exception caught too deep** (e.g., rate limit handled inside the unit method instead of the orchestrator) → bubble it to the orchestrator.
 12. **Edge cases in "safe" refactors** — `array_is_list([])` returns true; check empty-input paths.
 13. **Wire format preserved?** Behat / contract tests still green?
+14. **Cross-context boundary respected?** No new Domain→Infrastructure or cross-context *concrete* edge; run deptrac via `composer lint`. A new cross-context edge should target a *port* and be granted in `deptrac.yaml` only with justification — and the event/owner lives in the context that owns the data it carries (don't make an upstream context depend on a downstream one). The baseline only shrinks, never grows.
 
 ## User-facing reply style
 

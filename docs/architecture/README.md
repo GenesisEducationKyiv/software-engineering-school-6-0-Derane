@@ -1,31 +1,29 @@
 # Architecture — Quick Start
 
-The C4 model for this project lives in `*.c4` files in this directory and is
-rendered via [LikeC4](https://likec4.dev). For the model overview, file
-breakdown, and pre-rendered diagrams, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+The `.c4` files in this directory describe the post-cutover architecture:
+monolith HTTP/gRPC/scanner publishing `SendReleaseEmail/v1` to RabbitMQ, and
+`notification-svc` consuming it with its own Postgres.
+
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the high-level explanation.
 
 ## Run
 
-Everything runs via `ghcr.io/likec4/likec4:1.56.0`; no local Node is required.
-Make targets are invoked from the project root:
+From the repo root:
 
 ```bash
-make c4-up         # live preview at http://localhost:5173
-make c4-down       # stop
-make c4-logs       # tail container logs
-make c4-validate   # validate the model
+make c4-up
+make c4-logs
+make c4-validate
+make c4-down
 ```
 
-Optionally — `LIKEC4_PORT=5174 make c4-up` if 5173 is busy.
+Set `LIKEC4_PORT=5174` if `5173` is busy.
 
-## Exporting a diagram image
+## Diagrams
 
-The LikeC4 web UI has an **Export** button in the toolbar of the current view —
-save PNG/SVG straight from the browser. The 7 PNGs in [`diagrams/`](./diagrams/)
-were generated this way and are committed so the model can be reviewed on
-GitHub without running anything locally. Regenerate them after changing the
-model.
+The `.c4` source is the source of truth. Export PNG/SVG from the LikeC4 UI when
+you need refreshed static diagrams.
 
 ## VS Code
 
-Install the **LikeC4** extension by `likec4` for live preview and autocomplete.
+Install the `likec4` extension for preview and autocomplete.

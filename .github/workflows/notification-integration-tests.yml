@@ -1,0 +1,15 @@
+name: Notification Service Integration Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  phpunit-integration:
+    name: PHPUnit (real Postgres + RabbitMQ + MailHog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run notification-service Integration suite (idempotency proof — E2/AC4)
+        run: make notification-integration

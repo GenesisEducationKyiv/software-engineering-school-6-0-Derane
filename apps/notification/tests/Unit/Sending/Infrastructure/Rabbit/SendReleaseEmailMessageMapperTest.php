@@ -1,0 +1,246 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Sending\Infrastructure\Rabbit;
+
+use App\Sending\Infrastructure\Rabbit\MalformedReleaseEmailMessageException;
+use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
+use PHPUnit\Framework\TestCase;
+
+final class SendReleaseEmailMessageMapperTest extends TestCase
+{
+    private const VALID_JSON = <<<'JSON'
+    {
+      "schema": "SendReleaseEmail/v1",
+      "eventId": "11111111-1111-4111-8111-111111111111",
+      "occurredAt": "2026-06-07T12:00:00+00:00",
+      "subscriptionId": 42,
+      "email": "subscriber@example.com",
+      "repository": "owner/repo",
+      "release": {
+        "tagName": "v1.2.3",
+        "name": "Release name",
+        "body": "Release body text.",
+        "htmlUrl": "https://github.com/owner/repo/releases/tag/v1.2.3",
+        "publishedAt": "2026-06-07T11:00:00+00:00"
+      }
+    }
+    JSON;
+
+    private SendReleaseEmailMessageMapper $mapper;
+
+    #[\Override]
+    protected function setUp(): void
+    {
+        $this->mapper = new SendReleaseEmailMessageMapper();
+    }
+
+    public function testMapsWellFormedJsonToReleaseEmail(): void
+    {
+        $email = $this->mapper->fromJson(self::VALID_JSON);
+
+        self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
+        self::assertSame(42, $email->subscriptionId);
+        self::assertSame('subscriber@example.com', $email->recipientEmail->value());
+        self::assertSame('owner/repo', $email->repository->value());
+        self::assertSame('v1.2.3', $email->tagName->value());
+        self::assertSame('Release name', $email->releaseName);
+        self::assertSame('Release body text.', $email->releaseBody);
+        self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
+        self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);
+    }
+
+    public function testThrowsOnWrongSchema(): void
+    {
+        $json = self::jsonWith(['schema' => 'SendReleaseEmail/v2']);
+
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    public function testThrowsOnMissingSchema(): void
+    {
+        $json = self::jsonWithout('schema');
+
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    public function testBodyIsOptionalAndDefaultsToEmptyString(): void
+    {
+        $json = self::jsonWithoutReleaseField('body');
+
+        $email = $this->mapper->fromJson($json);
+
+        self::assertSame('', $email->releaseBody);
+    }
+
+    public function testBodyDefaultsToEmptyStringWhenNonString(): void
+    {
+        $json = self::jsonWithReleaseField('body', 42);
+
+        $email = $this->mapper->fromJson($json);
+
+        self::assertSame('', $email->releaseBody);
+    }
+
+    public function testThrowsOnInvalidJson(): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson('{not valid json');
+    }
+
+    public function testThrowsWhenTopLevelJsonIsNotAnObject(): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson('[1,2,3]');
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function missingFieldProvider(): iterable
+    {
+        foreach (['subscriptionId', 'email', 'repository', 'release'] as $field) {
+            yield "missing {$field}" => [self::jsonWithout($field)];
+        }
+
+        foreach (['tagName', 'name', 'htmlUrl', 'publishedAt'] as $releaseField) {
+            yield "missing release.{$releaseField}" => [self::jsonWithoutReleaseField($releaseField)];
+        }
+    }
+
+    /** @dataProvider missingFieldProvider */
+    public function testThrowsOnMissingRequiredField(string $json): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function wrongTypedFieldProvider(): iterable
+    {
+        yield 'subscriptionId as string' => [self::jsonWith(['subscriptionId' => '42'])];
+        yield 'email as number' => [self::jsonWith(['email' => 123])];
+        yield 'repository as number' => [self::jsonWith(['repository' => 123])];
+        yield 'release as string' => [self::jsonWith(['release' => 'not-an-object'])];
+        yield 'release.tagName as null' => [self::jsonWithReleaseField('tagName', null)];
+        yield 'release.name as number' => [self::jsonWithReleaseField('name', 1)];
+        yield 'release.htmlUrl as number' => [self::jsonWithReleaseField('htmlUrl', 1)];
+        yield 'release.htmlUrl as javascript: uri' => [self::jsonWithReleaseField('htmlUrl', 'javascript:alert(1)')];
+        yield 'release.htmlUrl as ftp: uri' => [self::jsonWithReleaseField('htmlUrl', 'ftp://example.com/release')];
+        yield 'release.publishedAt as number' => [self::jsonWithReleaseField('publishedAt', 1)];
+    }
+
+    /** @dataProvider wrongTypedFieldProvider */
+    public function testThrowsOnWrongTypedField(string $json): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    /**
+     * Fields that are the right type but fail value-object validation are still
+     * poison messages — the self-validating VO rejection is translated to the
+     * mapper's exception so the consumer routes them to the DLQ.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidValueFieldProvider(): iterable
+    {
+        yield 'email present but malformed' => [self::jsonWith(['email' => 'not-an-email'])];
+        yield 'repository present but not owner/repo' => [self::jsonWith(['repository' => 'no-slash-here'])];
+        yield 'release.tagName present but blank' => [self::jsonWithReleaseField('tagName', '   ')];
+    }
+
+    /** @dataProvider invalidValueFieldProvider */
+    public function testThrowsOnFieldFailingValueObjectValidation(string $json): void
+    {
+        $this->expectException(MalformedReleaseEmailMessageException::class);
+
+        $this->mapper->fromJson($json);
+    }
+
+    public function testValueObjectRejectionIsChainedAsPreviousForDiagnosis(): void
+    {
+        try {
+            $this->mapper->fromJson(self::jsonWith(['email' => 'not-an-email']));
+            self::fail('expected MalformedReleaseEmailMessageException');
+        } catch (MalformedReleaseEmailMessageException $e) {
+            self::assertInstanceOf(\InvalidArgumentException::class, $e->getPrevious());
+        }
+    }
+
+    public function testIgnoresUnknownExtraFields(): void
+    {
+        $payload = self::validPayload();
+        $payload['unknownTopLevel'] = 'should-be-ignored';
+        $payload['anotherExtra'] = ['nested' => true];
+        /** @var array<string, mixed> $release */
+        $release = $payload['release'];
+        $release['unknownReleaseField'] = 'also-ignored';
+        $payload['release'] = $release;
+
+        $email = $this->mapper->fromJson(json_encode($payload, JSON_THROW_ON_ERROR));
+
+        self::assertSame('11111111-1111-4111-8111-111111111111', $email->eventId);
+        self::assertSame(42, $email->subscriptionId);
+        self::assertSame('subscriber@example.com', $email->recipientEmail->value());
+        self::assertSame('owner/repo', $email->repository->value());
+        self::assertSame('v1.2.3', $email->tagName->value());
+        self::assertSame('Release name', $email->releaseName);
+        self::assertSame('Release body text.', $email->releaseBody);
+        self::assertSame('https://github.com/owner/repo/releases/tag/v1.2.3', $email->releaseUrl);
+        self::assertSame('2026-06-07T11:00:00+00:00', $email->publishedAt);
+    }
+
+    /** @return array<string, mixed> */
+    private static function validPayload(): array
+    {
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode(self::VALID_JSON, true, flags: JSON_THROW_ON_ERROR);
+
+        return $payload;
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private static function jsonWith(array $overrides): string
+    {
+        return json_encode(array_replace(self::validPayload(), $overrides), JSON_THROW_ON_ERROR);
+    }
+
+    private static function jsonWithout(string $field): string
+    {
+        $payload = self::validPayload();
+        unset($payload[$field]);
+
+        return json_encode($payload, JSON_THROW_ON_ERROR);
+    }
+
+    private static function jsonWithReleaseField(string $field, mixed $value): string
+    {
+        $payload = self::validPayload();
+        /** @var array<string, mixed> $release */
+        $release = $payload['release'];
+        $release[$field] = $value;
+        $payload['release'] = $release;
+
+        return json_encode($payload, JSON_THROW_ON_ERROR);
+    }
+
+    private static function jsonWithoutReleaseField(string $field): string
+    {
+        $payload = self::validPayload();
+        /** @var array<string, mixed> $release */
+        $release = $payload['release'];
+        unset($release[$field]);
+        $payload['release'] = $release;
+
+        return json_encode($payload, JSON_THROW_ON_ERROR);
+    }
+}
