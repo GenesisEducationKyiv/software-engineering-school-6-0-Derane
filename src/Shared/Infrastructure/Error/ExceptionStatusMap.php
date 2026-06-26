@@ -8,7 +8,7 @@ use App\Releases\Sourcing\Domain\RateLimitException;
 use App\Shared\Domain\Exception\InvalidArgumentException;
 use App\Shared\Domain\Exception\RepositoryNotFoundException;
 use App\Shared\Domain\Exception\ValidationException;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use Fig\Http\Message\StatusCodeInterface;
 use Spiral\RoadRunner\GRPC\StatusCode as GrpcStatus;
 

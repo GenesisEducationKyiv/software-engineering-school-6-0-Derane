@@ -5,20 +5,19 @@ declare(strict_types=1);
 namespace Tests\Notification\Publishing\Infrastructure\Listener;
 
 use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
+use App\Notification\Publishing\Domain\Recipient;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\ReleaseSnapshot;
 use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Notification\Publishing\Domain\SendReleaseEmailFactoryInterface;
-use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
+use App\Notification\Publishing\Domain\SubscriberProvider;
+use App\Notification\Publishing\Infrastructure\Listener\PublishReleaseEmailsOnNewReleaseDetectedListener;
 use App\Releases\Sourcing\Domain\DetectedRelease;
 use App\Releases\Sourcing\Domain\NewReleaseDetected;
 use App\Releases\Sourcing\Domain\Release;
 use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\ReleaseTag;
 use App\Shared\Domain\ValueObject\RepositoryName;
-use App\Subscription\Subscriptions\Domain\SubscriberCollection;
-use App\Subscription\Subscriptions\Domain\SubscriberFinder;
-use App\Subscription\Subscriptions\Domain\SubscriberRef;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -28,20 +27,20 @@ use PHPUnit\Framework\TestCase;
  * and assert the adapter's own responsibility: the once-per-dispatch
  * DetectedRelease → ReleaseSnapshot mapping.
  */
-final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
+final class PublishReleaseEmailsOnNewReleaseDetectedListenerTest extends TestCase
 {
-    private SubscriberFinder&MockObject $subscribers;
+    private SubscriberProvider&MockObject $subscribers;
     private SendReleaseEmailFactoryInterface&MockObject $messageFactory;
     private ReleaseNotificationPublisher&MockObject $publisher;
-    private WhenNewReleaseDetectedThenPublishReleaseEmails $listener;
+    private PublishReleaseEmailsOnNewReleaseDetectedListener $listener;
 
     protected function setUp(): void
     {
-        $this->subscribers = $this->createMock(SubscriberFinder::class);
+        $this->subscribers = $this->createMock(SubscriberProvider::class);
         $this->messageFactory = $this->createMock(SendReleaseEmailFactoryInterface::class);
         $this->publisher = $this->createMock(ReleaseNotificationPublisher::class);
 
-        $this->listener = new WhenNewReleaseDetectedThenPublishReleaseEmails(
+        $this->listener = new PublishReleaseEmailsOnNewReleaseDetectedListener(
             new PublishReleaseEmailsForRelease(
                 $this->subscribers,
                 $this->messageFactory,
@@ -73,6 +72,11 @@ final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
         );
     }
 
+    private function recipient(int $subscriptionId, string $email): Recipient
+    {
+        return new Recipient($subscriptionId, new EmailAddress($email));
+    }
+
     private function message(int $subscriptionId): SendReleaseEmail
     {
         return new SendReleaseEmail(
@@ -97,13 +101,13 @@ final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
         $event = $this->event();
 
         $this->subscribers->expects($this->once())
-            ->method('findSubscribersByRepository')
+            ->method('findRecipientsForRepository')
             ->with(new RepositoryName('owner/repo'))
-            ->willReturn(new SubscriberCollection([
-                new SubscriberRef(1, 'a@example.com'),
-                new SubscriberRef(2, 'b@example.com'),
-                new SubscriberRef(3, 'c@example.com'),
-            ]));
+            ->willReturn([
+                $this->recipient(1, 'a@example.com'),
+                $this->recipient(2, 'b@example.com'),
+                $this->recipient(3, 'c@example.com'),
+            ]);
 
         $eventRepository = $event->repository;
 
@@ -149,8 +153,8 @@ final class WhenNewReleaseDetectedThenPublishReleaseEmailsTest extends TestCase
     public function testPropagatesPublisherFailureUncaughtSoTheScanMarkerIsNotAdvanced(): void
     {
         $this->subscribers->expects($this->once())
-            ->method('findSubscribersByRepository')
-            ->willReturn(new SubscriberCollection([new SubscriberRef(1, 'a@example.com')]));
+            ->method('findRecipientsForRepository')
+            ->willReturn([$this->recipient(1, 'a@example.com')]);
 
         $this->messageFactory->method('fromRecipient')
             ->willReturnCallback(fn(int $subscriptionId): SendReleaseEmail => $this->message($subscriptionId));

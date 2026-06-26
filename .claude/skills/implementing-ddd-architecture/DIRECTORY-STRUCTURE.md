@@ -154,7 +154,7 @@ apps/
 | Cache adapter      | `Redis{Concept}Cache.php` (Predis)   | `RedisGitHubCache.php`               |
 | Slim controller    | `{Entity}Controller.php`             | `SubscriptionController.php`         |
 | RabbitMQ adapter   | `Rabbit{Concept}.php`                | `RabbitReleaseNotificationPublisher.php` |
-| Listener           | `When{Event}Then{Action}.php`        | `WhenNewReleaseDetectedThenPublishReleaseEmails.php` |
+| Listener           | `{Action}On{Event}Listener.php`        | `PublishReleaseEmailsOnNewReleaseDetectedListener.php` |
 | Factory            | `{Concept}Factory.php` (+`Interface`)| `ReleaseFactory.php` / `ReleaseFactoryInterface.php` |
 
 ## Creating New Files: Step-by-Step

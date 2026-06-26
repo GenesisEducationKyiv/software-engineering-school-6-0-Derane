@@ -221,7 +221,7 @@ final class ScanReleasesHandlerTest extends TestCase
             ->with('golang/go')
             ->willReturn(RepositoryStatus::reconstitute('golang/go', 'v1.21.0', null));
 
-        // A throwing dispatcher mirrors WhenNewReleaseDetectedThenPublishReleaseEmails
+        // A throwing dispatcher mirrors PublishReleaseEmailsOnNewReleaseDetectedListener
         // letting a publish() failure propagate uncaught — the load-bearing
         // outbox-free guarantee: the exception must reach __invoke()'s
         // per-repository catch (\Exception $e) (logged as "Scan error", loop

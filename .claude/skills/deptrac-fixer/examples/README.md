@@ -206,6 +206,6 @@ All examples mirror real patterns:
 - **Self-validating VO**: `src/Shared/Domain/ValueObject/EmailAddress.php`, `RepositoryName.php`, `ReleaseTag.php`
 - **Domain port + PDO adapter**: `src/RepositoryTracking/Repositories/Domain/TrackedRepositoryRegistrar.php` + `…/Infrastructure/Persistence/PdoTrackedRepositoryWriter.php`
 - **Transport boundary**: `src/Grpc/ReleaseNotifierService.php`, `src/Releases/Sourcing/Application/FetchLatestRelease/`
-- **Domain events + listener**: `src/Notification/Publishing/Infrastructure/Listener/WhenNewReleaseDetectedThenPublishReleaseEmails.php` + `…/Application/PublishReleaseEmailsForRelease.php`
+- **Domain events + listener**: `src/Notification/Publishing/Infrastructure/Listener/PublishReleaseEmailsOnNewReleaseDetectedListener.php` + `…/Application/PublishReleaseEmailsForRelease.php`
 
 **Remember**: these are not theoretical examples — they reflect the actual patterns used in this codebase. Follow them closely to maintain consistency.

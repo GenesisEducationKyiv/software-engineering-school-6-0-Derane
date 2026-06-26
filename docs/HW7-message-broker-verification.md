@@ -37,7 +37,7 @@
 
 ```
 NewReleaseDetected (PSR-14, in-process)
-  → WhenNewReleaseDetectedThenPublishReleaseEmails   (listener, зареєстрований у ListenerProvider)
+  → PublishReleaseEmailsOnNewReleaseDetectedListener   (listener, зареєстрований у ListenerProvider)
   → PublishReleaseEmailsForRelease                   (use-case: резолвить підписників)
   → RabbitReleaseNotificationPublisher               (порт → adapter)
   → RabbitPublisher.publishBatch(...)                (publisher confirms, batched, exchange=notifications, key=release.email)

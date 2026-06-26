@@ -361,7 +361,7 @@ use App\Releases\Sourcing\Domain\NewReleaseDetected;
  *
  * @psalm-api
  */
-final readonly class WhenNewReleaseDetectedThenPublishReleaseEmails
+final readonly class PublishReleaseEmailsOnNewReleaseDetectedListener
 {
     public function __construct(private PublishReleaseEmailsForRelease $publishReleaseEmails)
     {

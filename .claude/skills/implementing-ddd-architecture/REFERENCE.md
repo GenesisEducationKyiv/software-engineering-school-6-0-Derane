@@ -431,13 +431,13 @@ final readonly class ReleaseSeenAdvanced implements DomainEvent
 ### Step 9: Create Listeners (Infrastructure Layer, PSR-14)
 
 ```php
-// src/Notification/Publishing/Infrastructure/Listener/WhenNewReleaseDetectedThenPublishReleaseEmails.php
+// src/Notification/Publishing/Infrastructure/Listener/PublishReleaseEmailsOnNewReleaseDetectedListener.php
 namespace App\Notification\Publishing\Infrastructure\Listener;
 
 use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
 use App\Releases\Sourcing\Domain\NewReleaseDetected;
 
-final readonly class WhenNewReleaseDetectedThenPublishReleaseEmails
+final readonly class PublishReleaseEmailsOnNewReleaseDetectedListener
 {
     public function __construct(private PublishReleaseEmailsForRelease $publishReleaseEmails) {}
 
@@ -755,10 +755,13 @@ final readonly class SendReleaseEmail
 }
 ```
 
-A PSR-14 listener (`WhenNewReleaseDetectedThenPublishReleaseEmails`) consumes the
-in-process `NewReleaseDetected`, the Publishing use-case resolves recipients via the
-`SubscriberFinder` port, and the `RabbitReleaseNotificationPublisher` sends one
-`SendReleaseEmail` per recipient onto the queue. The extracted notification service
+A PSR-14 listener (`PublishReleaseEmailsOnNewReleaseDetectedListener`) consumes the
+in-process `NewReleaseDetected`, the Publishing use-case resolves recipients via its own
+`SubscriberProvider` port — an Anti-Corruption Layer adapter
+(`SubscriptionSubscriberProvider`) bridges to the Subscription context's `SubscriberFinder`
+and translates each `SubscriberRef` into this context's own `Recipient`, so the Application
+layer carries no cross-context dependency — and the `RabbitReleaseNotificationPublisher`
+sends one `SendReleaseEmail` per recipient onto the queue. The extracted notification service
 consumes them; consumer-side dedup is by the business key (subscriptionId + tag + repository).
 
 ---

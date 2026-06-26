@@ -6,7 +6,7 @@ namespace App\Subscription\Subscriptions\Application\Unsubscribe;
 
 use App\Shared\Domain\Bus\Command\Command;
 use App\Shared\Domain\Bus\Command\CommandHandler;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use Psr\Log\LoggerInterface;
 

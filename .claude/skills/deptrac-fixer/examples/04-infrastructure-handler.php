@@ -144,7 +144,7 @@ final readonly class SubscriptionCreated implements DomainEvent
 }
 
 // STEP 3: A thin Infrastructure\Listener reacts and delegates to its OWN
-// Application use-case (the REAL WhenNewReleaseDetectedThenPublishReleaseEmails).
+// Application use-case (the REAL PublishReleaseEmailsOnNewReleaseDetectedListener).
 namespace Example\Notification\Publishing\Infrastructure\Listener;
 
 use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
@@ -161,7 +161,7 @@ use App\Releases\Sourcing\Domain\NewReleaseDetected;
  *
  * @psalm-api
  */
-final readonly class WhenNewReleaseDetectedThenPublishReleaseEmails
+final readonly class PublishReleaseEmailsOnNewReleaseDetectedListener
 {
     public function __construct(private PublishReleaseEmailsForRelease $publishReleaseEmails)
     {

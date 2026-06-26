@@ -9,7 +9,7 @@ use App\Shared\Domain\Exception\RepositoryNotFoundException;
 use App\Shared\Domain\Exception\ValidationException;
 use App\Shared\Infrastructure\Error\ExceptionStatusMap;
 use App\Shared\Infrastructure\Http\ErrorHandlerMiddleware;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\NullLogger;

@@ -9,7 +9,7 @@ use App\Shared\Domain\Bus\Query\QueryHandler;
 use App\Shared\Domain\Bus\Query\Response;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
 use App\Subscription\Subscriptions\Application\SubscriptionResponseFactoryInterface;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 
 /**

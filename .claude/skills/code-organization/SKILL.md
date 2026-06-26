@@ -82,7 +82,7 @@ Classes MUST be in directories matching their type:
 |                    | Bus implementation   | `{Strategy}{Type}Bus.php`                | `InMemoryCommandBus.php`                 |
 |                    | Messaging adapter    | `Rabbit{Role}.php`                        | `RabbitPublisher.php`                    |
 |                    | Controller           | `{Entity}Controller.php`                  | `SubscriptionController.php`             |
-|                    | Listener (PSR-14)    | `When{Event}Then{Action}.php`            | `WhenSubscriptionCreatedThenLog.php`     |
+|                    | Listener (PSR-14)    | `{Action}On{Event}Listener.php`            | `PublishReleaseEmailsOnNewReleaseDetectedListener.php` |
 |                    | Serializer           | `{Message}Serializer.php`                 | `SendReleaseEmailSerializer.php`        |
 
 ### Directory Structure by Layer

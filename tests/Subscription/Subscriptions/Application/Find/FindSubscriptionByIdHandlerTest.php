@@ -8,7 +8,7 @@ use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdHandler;
 use App\Subscription\Subscriptions\Application\Find\FindSubscriptionByIdQuery;
 use App\Subscription\Subscriptions\Application\SubscriptionResponse;
 use App\Subscription\Subscriptions\Application\SubscriptionResponseFactory;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;

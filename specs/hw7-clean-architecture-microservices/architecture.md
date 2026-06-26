@@ -170,7 +170,7 @@ Domain→Infrastructure edge, cross-context Infrastructure deps, and
     NOT a domain event. Versioned wire schema.
 - **`NewReleaseDetected` flow (decoupling):** `ScanReleases` raises
   `NewReleaseDetected{repository, release}` on the PSR-14 bus; a listener
-  `WhenNewReleaseDetectedThenPublishReleaseEmails` (`Notification\Publishing`)
+  `PublishReleaseEmailsOnNewReleaseDetectedListener` (`Notification\Publishing`)
   resolves recipients (Subscription port) and publishes per-recipient
   `SendReleaseEmail` to RabbitMQ. The event is **owned by `Releases\Sourcing\Domain`**
   (the context that owns the `Release` VO it carries), so both the Scanning raiser and
@@ -255,7 +255,7 @@ sequenceDiagram
     TR-->>SC: tag
     alt new release
         SC->>EV: dispatch NewReleaseDetected{repo, release}
-        EV->>PUB: WhenNewReleaseDetectedThenPublishReleaseEmails
+        EV->>PUB: PublishReleaseEmailsOnNewReleaseDetectedListener
         PUB->>SUB: findSubscribers(repo)
         SUB-->>PUB: [SubscriberRef...]
         loop per recipient

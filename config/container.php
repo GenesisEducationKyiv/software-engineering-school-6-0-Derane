@@ -10,9 +10,11 @@ use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
 use App\Notification\Publishing\Domain\EventIdGenerator;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\SendReleaseEmailFactoryInterface;
+use App\Notification\Publishing\Domain\SubscriberProvider;
+use App\Notification\Publishing\Infrastructure\Acl\SubscriptionSubscriberProvider;
 use App\Notification\Publishing\Infrastructure\Factory\SendReleaseEmailFactory;
 use App\Notification\Publishing\Infrastructure\Factory\UuidV4EventIdGenerator;
-use App\Notification\Publishing\Infrastructure\Listener\WhenNewReleaseDetectedThenPublishReleaseEmails;
+use App\Notification\Publishing\Infrastructure\Listener\PublishReleaseEmailsOnNewReleaseDetectedListener;
 use App\Notification\Publishing\Infrastructure\RabbitReleaseNotificationPublisher;
 use App\Notification\Publishing\Infrastructure\Serialization\SendReleaseEmailSerializer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitPublisher;
@@ -257,7 +259,7 @@ return static function (array $settings): Container {
         ListenerProviderInterface::class => static fn($c) => new ListenerProvider([
             NewReleaseDetected::class => [
                 static function (object $event) use ($c): void {
-                    $listener = $c->get(WhenNewReleaseDetectedThenPublishReleaseEmails::class);
+                    $listener = $c->get(PublishReleaseEmailsOnNewReleaseDetectedListener::class);
                     $listener($event);
                 },
             ],
@@ -332,13 +334,16 @@ return static function (array $settings): Container {
             $c->get(SendReleaseEmailSerializer::class),
             $c->get(LoggerInterface::class),
         ),
+        SubscriberProvider::class => static fn($c) => new SubscriptionSubscriberProvider(
+            $c->get(SubscriberFinder::class)
+        ),
         PublishReleaseEmailsForRelease::class => static fn($c) => new PublishReleaseEmailsForRelease(
-            $c->get(SubscriberFinder::class),
+            $c->get(SubscriberProvider::class),
             $c->get(SendReleaseEmailFactoryInterface::class),
             $c->get(ReleaseNotificationPublisher::class)
         ),
-        WhenNewReleaseDetectedThenPublishReleaseEmails::class =>
-            static fn($c) => new WhenNewReleaseDetectedThenPublishReleaseEmails(
+        PublishReleaseEmailsOnNewReleaseDetectedListener::class =>
+            static fn($c) => new PublishReleaseEmailsOnNewReleaseDetectedListener(
                 $c->get(PublishReleaseEmailsForRelease::class)
             ),
 

@@ -110,7 +110,7 @@ _(Architecture-derived technical requirements that shape implementation.)_
   integration messages — `SendReleaseEmail` is an integration **command**, not a domain event.
   (arch §5)
 - **AR-FLOW1 — `NewReleaseDetected` decoupling.** `ScanReleases` raises `NewReleaseDetected{repo,
-  release}` on the PSR-14 bus; listener `WhenNewReleaseDetectedThenPublishReleaseEmails`
+  release}` on the PSR-14 bus; listener `PublishReleaseEmailsOnNewReleaseDetectedListener`
   (`Notification\Publishing`) resolves recipients (Subscription port) and publishes per-recipient
   `SendReleaseEmail`. Scanning depends ONLY on Releases + RepositoryTracking. (arch §5)
 - **AR-FLOW2 — Pre-commit synchronous dispatch, no outbox.** `NewReleaseDetected` is dispatched
@@ -154,7 +154,7 @@ in FR11 and enforced throughout. No UX-DRs apply.
   behind ports; deptrac green).
 - FR2 → **Epic B / B5** (per-context count ports + `MetricsService` aggregation; remove
   `MetricsRepository` cross-table COUNT).
-- FR3 → **Epic C** (`SubscriberFinder` resolution + `WhenNewReleaseDetectedThenPublishReleaseEmails`
+- FR3 → **Epic C** (`SubscriberFinder` resolution + `PublishReleaseEmailsOnNewReleaseDetectedListener`
   listener publishing per recipient) ; switched live in **Epic E**.
 - FR4 → **Epic C** (`SendReleaseEmail/v1` message DTO + factory carrying full payload + `eventId`).
 - FR5 → **Epic E / E1** (marker advances only on successful publish; publish failure ⇒ no advance);
@@ -192,7 +192,7 @@ public wire contracts unchanged. (Phase P1)
 ### Epic C: Integration Foundation (Publisher Port, Domain Event, RabbitMQ Infra) — Not Yet Cut Over
 Introduce the asynchronous integration seam **without changing runtime behavior yet**: the
 `ReleaseNotificationPublisher` port + `SendReleaseEmail/v1` message, the `NewReleaseDetected` domain
-event and the `WhenNewReleaseDetectedThenPublishReleaseEmails` listener, the RabbitMQ + MailHog +
+event and the `PublishReleaseEmailsOnNewReleaseDetectedListener` listener, the RabbitMQ + MailHog +
 notification-db docker stack, and the shared messaging infrastructure (connection, confirm-publisher,
 consumer base). The Rabbit publisher adapter is **built but not default** — the in-process adapter
 still runs, so behavior is preserved. (Phases P2–P3)
@@ -665,7 +665,7 @@ test pins the shape.
 **Dependencies:** A1 (VOs), B5 (Shared).
 **Quality gates:** lint+deptrac, phpunit, psalm.
 
-### Story C2: NewReleaseDetected domain event + WhenNewReleaseDetectedThenPublishReleaseEmails listener
+### Story C2: NewReleaseDetected domain event + PublishReleaseEmailsOnNewReleaseDetectedListener listener
 
 As an integration developer,
 I want a `NewReleaseDetected` PSR-14 event raised by Scanning and a listener that resolves recipients
@@ -676,7 +676,7 @@ So that Scanning is decoupled from Subscription/Notification and the per-recipie
 **Scope / files (arch §5, §8):**
 - `src/.../NewReleaseDetected.php` (process-level domain event `{repository, release}`), dispatched
   on the PSR-14 bus by `ScanReleasesCommandHandler`.
-- `Notification/Publishing/.../WhenNewReleaseDetectedThenPublishReleaseEmails.php` listener:
+- `Notification/Publishing/.../PublishReleaseEmailsOnNewReleaseDetectedListener.php` listener:
   resolves recipients via the Subscription port — canonical signature
   `SubscriberFinderInterface::findSubscribersByRepository(string $repository): SubscriberCollection`
   — builds a `SendReleaseEmail` per recipient, calls `ReleaseNotificationPublisher::publish`.

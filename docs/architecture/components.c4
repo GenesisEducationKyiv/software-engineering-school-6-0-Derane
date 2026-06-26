@@ -121,7 +121,7 @@ model {
             technology "PHP, Guzzle"
         }
 
-        publishListener = component "WhenNewReleaseDetectedThenPublishReleaseEmails" {
+        publishListener = component "PublishReleaseEmailsOnNewReleaseDetectedListener" {
             description "
                 Thin adapter: maps NewReleaseDetected into the Publishing
                 context's ReleaseSnapshot and delegates to the use-case.

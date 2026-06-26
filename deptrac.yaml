@@ -146,7 +146,8 @@ deptrac:
     Shared.Infrastructure:
       - Shared.Domain
       - Shared.Application
-      - Subscription.Domain         # B5: ExceptionStatusMap references SubscriptionNotFoundException; MetricsService uses SubscriptionCountPort
+      - Subscription.Domain         # B5: MetricsService uses SubscriptionCountPort
+      - Subscription.Application    # ExceptionStatusMap references SubscriptionNotFoundException (application exception)
       - Releases.Domain             # B5: ExceptionStatusMap references RateLimitException
       - RepositoryTracking.Domain   # B5: MetricsService uses RepositoryCountPort
 
@@ -212,12 +213,17 @@ deptrac:
 
     # ===== Notification\Publishing. Its Domain stays free of cross-context edges:
     # SendReleaseEmail/ReleaseSnapshot are deliberately decoupled from Releases so the
-    # wire message can cross the queue boundary. Cross-context *port* edges:
-    #  - NotificationPublishing.Application -> Subscription.Domain:
-    #    PublishReleaseEmailsForRelease (the use-case) resolves recipients via
-    #    SubscriberFinder/SubscriberCollection/SubscriberRef.
+    # wire message can cross the queue boundary. All cross-context coupling is confined
+    # to a single Anti-Corruption Layer in Infrastructure\Acl:
+    #  - NotificationPublishing.Application has NO cross-context edge: the use-case
+    #    PublishReleaseEmailsForRelease resolves recipients via its own
+    #    SubscriberProvider port (Domain), returning this context's Recipient.
+    #  - NotificationPublishing.Infrastructure -> Subscription.Domain:
+    #    the ACL adapter SubscriptionSubscriberProvider is the single class that imports
+    #    Subscription (SubscriberFinder/SubscriberCollection/SubscriberRef) and
+    #    translates SubscriberRef -> Recipient.
     #  - NotificationPublishing.Infrastructure -> Releases.Domain:
-    #    WhenNewReleaseDetectedThenPublishReleaseEmails (thin Infrastructure\Listener
+    #    PublishReleaseEmailsOnNewReleaseDetectedListener (thin Infrastructure\Listener
     #    adapter) consumes the Releases-owned NewReleaseDetected and maps the event's
     #    Release into this context's own ReleaseSnapshot before delegating — keeping
     #    the Application layer free of any Releases.Domain dependency.
@@ -227,13 +233,13 @@ deptrac:
       - NotificationPublishing.Domain
       - Shared.Domain
       - Shared.Application
-      - Subscription.Domain           # C2: PublishReleaseEmailsForRelease uses SubscriberFinder/SubscriberCollection/SubscriberRef
     NotificationPublishing.Infrastructure:
       - NotificationPublishing.Domain
       - NotificationPublishing.Application
       - Shared.Domain
       - Shared.Application
       - Shared.Infrastructure
+      - Subscription.Domain           # ACL: SubscriptionSubscriberProvider bridges SubscriberFinder -> Recipient
       - Releases.Domain               # C2: listener maps the event's Releases\Sourcing\Domain\Release into this context's ReleaseSnapshot
 
     # ===== apps/monolith: the monolith composition root — wires every monolith

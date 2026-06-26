@@ -114,7 +114,7 @@ src/
 │   └── Infrastructure/
 │       ├── RabbitReleaseNotificationPublisher.php # php-amqplib adapter
 │       ├── Listener/
-│       │   └── WhenNewReleaseDetectedThenPublishReleaseEmails.php
+│       │   └── PublishReleaseEmailsOnNewReleaseDetectedListener.php
 │       ├── Factory/
 │       └── Serialization/
 │
@@ -236,7 +236,7 @@ Adapter injecting Handler         →   Adapter injecting CommandBus (Shared.Dom
 ```
 Direct call from Infrastructure   →   Aggregate records event via recordThat(...)
                                       Handler dispatches it; an Infrastructure\Listener
-                                      (e.g. WhenNewReleaseDetectedThenPublishReleaseEmails)
+                                      (e.g. PublishReleaseEmailsOnNewReleaseDetectedListener)
                                       reacts — Application depends only on its own Domain.
 ```
 
@@ -276,7 +276,7 @@ src/{Context}/{Module}/Infrastructure/
 │   └── Pdo{Entity}{Role}.php           # PdoTrackedRepositoryWriter.php — implements Domain ports
 ├── Cache/                              # Predis-backed cache (GitHub-API only)
 ├── Listener/
-│   └── When{Event}Then{Action}.php     # PSR-14 listeners reacting to domain events
+│   └── {Action}On{Event}Listener.php     # PSR-14 listeners reacting to domain events
 ├── Factory/
 │   └── {Thing}Factory.php              # implements {Thing}FactoryInterface
 └── {Tech}{Port}.php                    # GitHubApiReleaseSource, RabbitReleaseNotificationPublisher

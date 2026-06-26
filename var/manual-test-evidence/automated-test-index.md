@@ -8,7 +8,7 @@ automated test locations, for reviewers who cannot exhaustively traverse 210+ te
 **Test**: `testDoesNotMarkTheReleaseSeenWhenTheNewReleaseDetectedDispatchThrows`
 **File**: `tests/Scanning/Scanner/Application/ScanReleases/ScanReleasesHandlerTest.php:205`
 **What it proves**: When `EventDispatcherInterface::dispatch()` throws (mirroring
-`WhenNewReleaseDetectedThenPublishReleaseEmails` propagating a `RabbitPublisher` failure),
+`PublishReleaseEmailsOnNewReleaseDetectedListener` propagating a `RabbitPublisher` failure),
 `markReleaseSeen()` is **never called**. This is the load-bearing outbox-free invariant:
 a publish failure keeps the release marker un-advanced, so the scanner retries on the
 next cycle rather than silently losing the notification.

@@ -5,29 +5,28 @@ declare(strict_types=1);
 namespace Tests\Notification\Publishing\Application;
 
 use App\Notification\Publishing\Application\PublishReleaseEmailsForRelease;
+use App\Notification\Publishing\Domain\Recipient;
 use App\Notification\Publishing\Domain\ReleaseNotificationPublisher;
 use App\Notification\Publishing\Domain\ReleaseSnapshot;
 use App\Notification\Publishing\Domain\SendReleaseEmail;
 use App\Notification\Publishing\Domain\SendReleaseEmailFactoryInterface;
+use App\Notification\Publishing\Domain\SubscriberProvider;
 use App\Shared\Domain\ValueObject\EmailAddress;
 use App\Shared\Domain\ValueObject\ReleaseTag;
 use App\Shared\Domain\ValueObject\RepositoryName;
-use App\Subscription\Subscriptions\Domain\SubscriberCollection;
-use App\Subscription\Subscriptions\Domain\SubscriberFinder;
-use App\Subscription\Subscriptions\Domain\SubscriberRef;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 final class PublishReleaseEmailsForReleaseTest extends TestCase
 {
-    private SubscriberFinder&MockObject $subscribers;
+    private SubscriberProvider&MockObject $subscribers;
     private SendReleaseEmailFactoryInterface&MockObject $messageFactory;
     private ReleaseNotificationPublisher&MockObject $publisher;
     private PublishReleaseEmailsForRelease $useCase;
 
     protected function setUp(): void
     {
-        $this->subscribers = $this->createMock(SubscriberFinder::class);
+        $this->subscribers = $this->createMock(SubscriberProvider::class);
         $this->messageFactory = $this->createMock(SendReleaseEmailFactoryInterface::class);
         $this->publisher = $this->createMock(ReleaseNotificationPublisher::class);
 
@@ -49,6 +48,11 @@ final class PublishReleaseEmailsForReleaseTest extends TestCase
         );
     }
 
+    private function recipient(int $subscriptionId, string $email): Recipient
+    {
+        return new Recipient($subscriptionId, new EmailAddress($email));
+    }
+
     private function message(int $subscriptionId): SendReleaseEmail
     {
         return new SendReleaseEmail(
@@ -62,19 +66,19 @@ final class PublishReleaseEmailsForReleaseTest extends TestCase
         );
     }
 
-    public function testResolvesTheRepositorysSubscribersAndPublishesOneDistinctMessagePerRecipientAsOneBatch(): void
+    public function testResolvesTheRepositorysRecipientsAndPublishesOneDistinctMessagePerRecipientAsOneBatch(): void
     {
         $repository = new RepositoryName('owner/repo');
         $snapshot = $this->snapshot();
 
         $this->subscribers->expects($this->once())
-            ->method('findSubscribersByRepository')
+            ->method('findRecipientsForRepository')
             ->with(new RepositoryName('owner/repo'))
-            ->willReturn(new SubscriberCollection([
-                new SubscriberRef(1, 'a@example.com'),
-                new SubscriberRef(2, 'b@example.com'),
-                new SubscriberRef(3, 'c@example.com'),
-            ]));
+            ->willReturn([
+                $this->recipient(1, 'a@example.com'),
+                $this->recipient(2, 'b@example.com'),
+                $this->recipient(3, 'c@example.com'),
+            ]);
 
         /** @var list<array{0: int, 1: EmailAddress, 2: RepositoryName, 3: ReleaseSnapshot}> $factoryCalls */
         $factoryCalls = [];
@@ -123,11 +127,11 @@ final class PublishReleaseEmailsForReleaseTest extends TestCase
     public function testPropagatesPublisherFailureUncaught(): void
     {
         $this->subscribers->expects($this->once())
-            ->method('findSubscribersByRepository')
-            ->willReturn(new SubscriberCollection([
-                new SubscriberRef(1, 'a@example.com'),
-                new SubscriberRef(2, 'b@example.com'),
-            ]));
+            ->method('findRecipientsForRepository')
+            ->willReturn([
+                $this->recipient(1, 'a@example.com'),
+                $this->recipient(2, 'b@example.com'),
+            ]);
 
         $this->messageFactory->expects($this->exactly(2))
             ->method('fromRecipient')
@@ -143,12 +147,12 @@ final class PublishReleaseEmailsForReleaseTest extends TestCase
         ($this->useCase)(new RepositoryName('owner/repo'), $this->snapshot());
     }
 
-    public function testZeroSubscribersPublishesNothingAndReturnsNormally(): void
+    public function testZeroRecipientsPublishesNothingAndReturnsNormally(): void
     {
         $this->subscribers->expects($this->once())
-            ->method('findSubscribersByRepository')
+            ->method('findRecipientsForRepository')
             ->with(new RepositoryName('owner/repo'))
-            ->willReturn(new SubscriberCollection([]));
+            ->willReturn([]);
 
         $this->messageFactory->expects($this->never())->method('fromRecipient');
         $this->publisher->expects($this->never())->method('publishAll');

@@ -6,7 +6,7 @@ namespace Tests\Subscription\Subscriptions\Application\Unsubscribe;
 
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommand;
 use App\Subscription\Subscriptions\Application\Unsubscribe\UnsubscribeCommandHandler;
-use App\Subscription\Subscriptions\Domain\SubscriptionNotFoundException;
+use App\Subscription\Subscriptions\Application\Exception\SubscriptionNotFoundException;
 use App\Subscription\Subscriptions\Domain\SubscriptionRepository;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
