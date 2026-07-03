@@ -44,10 +44,24 @@ return [
         // Secondary start-sweep deadline T_start (>= T): never-published STARTED
         // sagas past created_at + T_start (the broker-down backstop, NFR3).
         'start_timeout_seconds' => (int) ($_ENV['SAGA_START_TIMEOUT_SECONDS'] ?? 900),
-        // The saga-worker tick cadence and how often (in ticks) it runs the sweep.
         'worker_wait_seconds' => (int) ($_ENV['SAGA_WORKER_WAIT_SECONDS'] ?? 1),
         'sweep_every_ticks' => (int) ($_ENV['SAGA_SWEEP_EVERY_TICKS'] ?? 60),
         'relay_batch_size' => (int) ($_ENV['SAGA_RELAY_BATCH_SIZE'] ?? 50),
+    ],
+    // Welcome-email SEND transport: rabbit (default, async) | rest | grpc.
+    'welcome_email' => [
+        'transport' => $_ENV['WELCOME_EMAIL_TRANSPORT'] ?? 'rabbit',
+        'rest_endpoint' => $_ENV['NOTIFICATION_REST_BASE_URL'] ?? 'http://notification-svc:8081',
+        'grpc_target' => $_ENV['NOTIFICATION_GRPC_TARGET'] ?? 'notification-svc:9002',
+        'sync' => [
+            'deadline_seconds' => (int) ($_ENV['WELCOME_EMAIL_SYNC_DEADLINE_SECONDS'] ?? 10),
+            'max_attempts' => (int) ($_ENV['WELCOME_EMAIL_SYNC_MAX_ATTEMPTS'] ?? 3),
+            // Comma-separated per-attempt backoff in ms (before the NEXT attempt).
+            'backoff_ms' => array_values(array_filter(array_map(
+                static fn (string $v): int => (int) trim($v),
+                explode(',', (string) ($_ENV['WELCOME_EMAIL_SYNC_BACKOFF_MS'] ?? '200,500,1000'))
+            ), static fn (int $v): bool => $v >= 0)) ?: [200, 500, 1000],
+        ],
     ],
     'api_key' => $_ENV['API_KEY'] ?? '',
     'bootstrap' => [

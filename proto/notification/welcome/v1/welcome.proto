@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+// Separate package from release_notifier.v1 so the monolith's existing
+// Subscription gRPC API and its generated/ tree stay frozen.
+package notification.welcome.v1;
+
+// Distinct PHP namespace so generated classes never collide with the committed
+// generated/ tree's `Grpc\ReleaseNotifier\V1` PSR-4 map.
+option php_namespace = "Notification\\Welcome\\V1";
+option php_metadata_namespace = "GPBMetadata\\Proto\\Notification";
+
+// Synchronous inter-service RPC: the caller BLOCKS for the sent|failed outcome.
+service WelcomeEmailService {
+  // Business sent|failed is a normal OK response field; infrastructure/validation
+  // errors surface as gRPC STATUS codes, never in-band.
+  rpc SendWelcomeEmail(SendWelcomeEmailRequest) returns (SendWelcomeEmailResponse);
+}
+
+message SendWelcomeEmailRequest {
+  // Echoed back so the caller can correlate the outcome to its saga row.
+  string saga_id = 1;
+
+  // The welcome ledger is keyed by this id alone (one welcome per subscription)
+  // for exactly-once send dedup. int64 avoids truncating large subscription ids.
+  int64 subscription_id = 2;
+
+  // Validated by the EmailAddress VO on receipt; malformed yields INVALID_ARGUMENT.
+  string email = 3;
+
+  // The "owner/repo"; validated by the RepositoryName VO on receipt.
+  string repository = 4;
+}
+
+message SendWelcomeEmailResponse {
+  // sent | failed; unspecified is never returned by the server.
+  Outcome outcome = 1;
+
+  // Populated only when outcome = OUTCOME_FAILED; empty on OUTCOME_SENT.
+  string error_detail = 2;
+}
+
+// OUTCOME_UNSPECIFIED = 0 satisfies the proto3 default-zero rule and is never
+// emitted by the server.
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_SENT = 1;
+  OUTCOME_FAILED = 2;
+}

@@ -1,0 +1,26 @@
+version: "3"
+
+# Service B (notification) gRPC server — a second supervised RoadRunner process
+# inside the notification container (D6), forked by bin/start.sh alongside the
+# php -S health/metrics server (:8081) and the AMQP consumer. Plaintext over the
+# compose network (N6), mirroring the monolith's root .rr.grpc.yaml.
+#
+# Working dir at runtime is /app/apps/notification (Dockerfile WORKDIR); the proto
+# and the buf-generated stubs live at the repo-root /app/proto and /app/gen, hence
+# the ../../ prefix. RoadRunner's Go process terminates gRPC and hands decoded
+# messages to the pure-PHP Spiral server worker, so no ext-grpc is needed here.
+server:
+  command: "php bin/grpc.php"
+
+grpc:
+  listen: "tcp://0.0.0.0:9002"
+  proto:
+    - "../../proto/notification/welcome/v1/welcome.proto"
+  pool:
+    supervisor:
+      # Recycle a worker that has been idle longer than this. Kept BELOW the 60s AMQP
+      # heartbeat (config/container.php) so the WelcomeOutcomePublisher's eagerly-opened,
+      # never-reconnecting connection is never reused after the broker would drop it for
+      # missed heartbeats — the persistent-worker staleness fix (the REST php -S path is
+      # immune as a fresh process per request). See ADR-0004.
+      idle_ttl: 30s

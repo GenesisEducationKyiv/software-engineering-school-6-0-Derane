@@ -12,16 +12,11 @@ use PhpAmqpLib\Message\AMQPMessage;
 use Psr\Log\LoggerInterface;
 
 /**
- * The notification service's first publisher: emits a `WelcomeEmailOutcome/v1`
- * reply to the `notifications` exchange on `subscription.welcome-email.reply`.
- *
- * Fails closed with publisher confirms, mirroring
- * {@see \App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer}::republishDelayed:
- * a dedicated confirm-mode channel (so the long-lived consume channel is never
- * flipped into confirm mode), a nack handler registered BEFORE publishing, and a
- * bounded confirm-wait. Any unconfirmed publish (no connection, broker nack, or
- * timeout) throws {@see WelcomeOutcomePublishFailedException} — the caller must
- * NOT proceed as if the reply was sent.
+ * Fails closed with publisher confirms: a dedicated confirm-mode channel (so the
+ * long-lived consume channel is never flipped into confirm mode), a nack handler
+ * registered BEFORE publishing, and a bounded confirm-wait. Any unconfirmed
+ * publish throws WelcomeOutcomePublishFailedException — the caller must NOT
+ * proceed as if the reply was sent.
  */
 final readonly class RabbitWelcomeOutcomePublisher implements WelcomeOutcomePublisher
 {
@@ -51,11 +46,9 @@ final readonly class RabbitWelcomeOutcomePublisher implements WelcomeOutcomePubl
 
         $amqpConnection = $this->connection->channel()->getConnection();
         if ($amqpConnection === null) {
-            // No live connection to publish on. Fail closed.
             throw WelcomeOutcomePublishFailedException::noConnection();
         }
 
-        // Dedicated confirm-mode channel so the consume channel is untouched.
         $publishChannel = $amqpConnection->channel();
         try {
             $publishChannel->confirm_select();

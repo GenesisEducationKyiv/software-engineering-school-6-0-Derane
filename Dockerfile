@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     git \
     curl \
-    && install-php-extensions pdo_pgsql pcntl sockets redis \
+    && install-php-extensions pdo_pgsql pcntl sockets redis grpc protobuf \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -24,5 +24,13 @@ RUN curl -fsSL https://github.com/roadrunner-server/roadrunner/releases/download
     && mv /tmp/roadrunner-2025.1.12-linux-amd64/rr /usr/local/bin/rr \
     && chmod +x /usr/local/bin/rr \
     && rm -rf /tmp/rr.tar.gz /tmp/roadrunner-2025.1.12-linux-amd64
+
+# buf — pinned (RD2). Codegen (`make buf-generate`) and the offline `make buf-lint`
+# gate run in this image; `buf lint` is fully offline, `buf generate` reaches
+# buf.build for the two remote plugins. The vendored Spiral plugin (tools/bin) is the
+# one local plugin. ext-grpc above is the gRPC CLIENT runtime for the saga-worker.
+RUN curl -fsSL "https://github.com/bufbuild/buf/releases/download/v1.71.0/buf-Linux-x86_64" \
+    -o /usr/local/bin/buf \
+    && chmod +x /usr/local/bin/buf
 
 EXPOSE 8080

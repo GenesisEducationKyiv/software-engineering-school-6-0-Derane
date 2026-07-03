@@ -125,7 +125,10 @@ services:
 
   notification-svc:
     build:
-      context: ./apps/notification
+      # Repo-root context (RD3) so the image can COPY the root-level proto/ and gen/
+      # trees the gRPC server needs at build + runtime.
+      context: .
+      dockerfile: apps/notification/Dockerfile
       target: base
     env_file:
       - .env
@@ -140,6 +143,8 @@ services:
       # Publish the worker's health/metrics surface so /metrics is scrapeable
       # and /health is curl-able from the host (NFR4 observability).
       - "${NOTIFICATION_SVC_PORT:-8081}:8081"
+      # Service B gRPC server (D6) — the welcome-email SendWelcomeEmail RPC.
+      - "${NOTIFICATION_GRPC_PORT:-9002}:9002"
     healthcheck:
       # busybox wget exits non-zero on the 503 that /health returns when
       # Postgres or RabbitMQ is unreachable.

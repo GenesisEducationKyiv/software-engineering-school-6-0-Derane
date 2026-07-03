@@ -47,9 +47,24 @@ model {
                 Queue consumer for SendReleaseEmail/v1 and SendWelcomeEmail/v1.
                 Dedupes delivery in its own database, renders email,
                 sends via MailHog/SMTP, and publishes WelcomeEmailOutcome/v1
-                replies back to the monolith saga worker.
+                replies back to the monolith saga worker. Its php -S HTTP
+                surface also serves a synchronous welcome-email REST endpoint
+                (POST /internal/welcome-emails) alongside health/metrics.
             "
-            technology "PHP 8.2 CLI worker"
+            technology "PHP 8.2 CLI worker + php -S HTTP"
+        }
+
+        notificationGrpc = container "Notification gRPC Server" {
+            description "
+                Second supervised process in the notification container
+                (forked by bin/start.sh). RoadRunner gRPC server on :9002
+                serving notification.welcome.v1.WelcomeEmailService
+                (unary SendWelcomeEmail). A synchronous transport twin of the
+                async welcome-email path; invokes the unchanged
+                SendWelcomeEmailHandler. RoadRunner terminates gRPC, so no
+                ext-grpc is needed on this side.
+            "
+            technology "PHP 8.2, RoadRunner, gRPC"
         }
 
         db = database "Monolith PostgreSQL" {
@@ -111,8 +126,13 @@ model {
 
     sagaWorker -> db "Reads/writes enrollment_sagas + subscription status" "SQL/TCP"
     sagaWorker -> rabbitmq "Publishes SendWelcomeEmail/v1, consumes WelcomeEmailOutcome/v1" "AMQP"
+    sagaWorker -> notificationGrpc "Sends welcome email when WELCOME_EMAIL_TRANSPORT=grpc (opt-in, caller-waits sent|failed)" "gRPC, HTTP/2"
+    sagaWorker -> notificationSvc "Sends welcome email when WELCOME_EMAIL_TRANSPORT=rest (opt-in, caller-waits sent|failed)" "HTTPS, JSON"
 
     notificationSvc -> rabbitmq "Consumes notifications.send-email + welcome-email / DLQ; publishes WelcomeEmailOutcome/v1" "AMQP"
     notificationSvc -> notificationDb "Reads/writes delivery + welcome ledgers + metrics" "SQL/TCP"
     notificationSvc -> mailhog "Sends email in local dev" "SMTP"
+
+    notificationGrpc -> notificationDb "Claims + records welcome delivery via the unchanged handler" "SQL/TCP"
+    notificationGrpc -> mailhog "Sends welcome email in local dev" "SMTP"
 }

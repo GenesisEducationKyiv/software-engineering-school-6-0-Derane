@@ -14,6 +14,7 @@ use App\Sending\Domain\WelcomeNotificationLedger;
 use App\Sending\Domain\WelcomeOutcomePublisher;
 use App\Sending\Application\NotificationMetricsReader;
 use App\Sending\Infrastructure\Error\ExceptionStatusMap;
+use App\Sending\Infrastructure\Grpc\WelcomeEmailGrpcService;
 use App\Sending\Infrastructure\Health\CompositeHealthCheck;
 use App\Sending\Infrastructure\Health\DatabaseHealthCheck;
 use App\Sending\Infrastructure\Health\HealthCheckInterface;
@@ -21,6 +22,7 @@ use App\Sending\Infrastructure\Health\RabbitMqHealthCheck;
 use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\HealthController;
 use App\Sending\Infrastructure\Http\MetricsController;
+use App\Sending\Infrastructure\Http\WelcomeEmailController;
 use App\Sending\Infrastructure\Logging\StderrLogger;
 use App\Sending\Infrastructure\Mail\MailerFactoryInterface;
 use App\Sending\Infrastructure\Mail\PhpMailerMailer;
@@ -39,11 +41,14 @@ use App\Sending\Infrastructure\Rabbit\SendReleaseEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendReleaseEmailMessageMapper;
 use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailConsumer;
 use App\Sending\Infrastructure\Rabbit\SendWelcomeEmailMessageMapper;
+use App\Sending\Infrastructure\Sync\NoOpWelcomeOutcomePublisher;
+use App\Sending\Infrastructure\Sync\WelcomeEmailFactory;
 use App\Shared\Infrastructure\Messaging\Rabbit\MessageConsumer;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConnection;
 use App\Shared\Infrastructure\Messaging\Rabbit\RabbitConsumer;
 use DI\Container;
 use DI\ContainerBuilder;
+use Notification\Welcome\V1\WelcomeEmailServiceInterface;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Log\LoggerInterface;
@@ -51,6 +56,19 @@ use Slim\Psr7\Factory\ResponseFactory;
 
 return static function (array $settings): Container {
     $containerBuilder = new ContainerBuilder();
+
+    // The sync welcome surfaces (REST + gRPC) build the handler with a NO-OP reply publisher:
+    // the monolith relay applies the outcome in-thread, so the fail-closed Rabbit reply must
+    // stay off the sync send's critical path (see NoOpWelcomeOutcomePublisher). The async
+    // consumer below keeps the real Rabbit publisher.
+    $syncWelcomeHandler = static fn($c): SendWelcomeEmailHandler => new SendWelcomeEmailHandler(
+        $c->get(WelcomeNotificationLedger::class),
+        $c->get(WelcomeEmailRenderer::class),
+        $c->get(Mailer::class),
+        new NoOpWelcomeOutcomePublisher(),
+        $c->get(WelcomeProcessingStatsRecorder::class),
+    );
+
     $containerBuilder->addDefinitions([
         PDO::class => static function () use ($settings) {
             $dsn = sprintf(
@@ -133,9 +151,6 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class),
         ),
 
-        // Welcome path (HW9 saga). WelcomeProcessingStatsRecorder and the
-        // WelcomeOutcomePublisher reply publisher are aliased to their concrete
-        // implementations registered below.
         WelcomeProcessingStatsRecorder::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
         WelcomeOutcomePublisher::class => static fn($c) => new RabbitWelcomeOutcomePublisher(
             $c->get(RabbitConnection::class),
@@ -143,10 +158,11 @@ return static function (array $settings): Container {
         ),
         SendWelcomeEmailMessageMapper::class => static fn() => new SendWelcomeEmailMessageMapper(),
 
+        // The ASYNC-path handler: the rabbit consumer resolves this binding, so its reply
+        // travels back over RabbitMQ (the real fail-closed WelcomeOutcomePublisher). The
+        // SYNC surfaces use $syncWelcomeHandler (no-op publisher) instead — see above.
         SendWelcomeEmailHandler::class => static fn($c) => new SendWelcomeEmailHandler(
             $c->get(WelcomeNotificationLedger::class),
-            // The welcome handler renders from the welcome template specifically,
-            // not the shared EmailRenderer binding (which is the release renderer).
             $c->get(WelcomeEmailRenderer::class),
             $c->get(Mailer::class),
             $c->get(WelcomeOutcomePublisher::class),
@@ -190,6 +206,19 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class),
             $c->get(ResponseFactoryInterface::class),
             $c->get(ExceptionStatusMap::class),
+        ),
+
+        WelcomeEmailFactory::class => static fn() => new WelcomeEmailFactory(),
+        WelcomeEmailController::class => static fn($c) => new WelcomeEmailController(
+            $syncWelcomeHandler($c),
+            $c->get(WelcomeEmailFactory::class),
+            $c->get(LoggerInterface::class),
+        ),
+        WelcomeEmailServiceInterface::class => static fn($c) => new WelcomeEmailGrpcService(
+            $syncWelcomeHandler($c),
+            $c->get(WelcomeEmailFactory::class),
+            $c->get(ExceptionStatusMap::class),
+            $c->get(LoggerInterface::class),
         ),
     ]);
 

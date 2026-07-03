@@ -198,9 +198,43 @@ model {
             description "
                 Publishes SendWelcomeEmail/v1 to RabbitMQ with publisher
                 confirms; throws on an unconfirmed publish so the saga is
-                not advanced (retried next tick).
+                not advanced (retried next tick). Bound when
+                WELCOME_EMAIL_TRANSPORT=rabbit (default, async).
             "
             technology "PHP, AMQP"
+        }
+
+        syncRelayUseCase = component "RelayPendingWelcomeEmailsSync" {
+            description "
+                Synchronous relay use-case (opt-in). Per due saga, calls the
+                SyncWelcomeEmailSender and, only on a definitive OK outcome,
+                dispatches the existing HandleWelcomeEmailOutcomeCommand to
+                drive the saga in-thread. Aliased onto the relay-use-case
+                binding the unchanged SagaWorker consumes when
+                WELCOME_EMAIL_TRANSPORT is rest or grpc.
+            "
+            technology "PHP"
+        }
+
+        restWelcomeRelay = component "RestWelcomeEmailRelay" {
+            description "
+                Synchronous SyncWelcomeEmailSender adapter. POSTs JSON to the
+                notification REST endpoint via Guzzle with a per-call deadline
+                and bounded retry, blocks for sent|failed. Bound when
+                WELCOME_EMAIL_TRANSPORT=rest.
+            "
+            technology "PHP, Guzzle"
+        }
+
+        grpcWelcomeRelay = component "GrpcWelcomeEmailRelay" {
+            description "
+                Synchronous SyncWelcomeEmailSender adapter. Wraps the generated
+                WelcomeEmailServiceClient (gRPC/ext-grpc) with a call deadline
+                and bounded retry on UNAVAILABLE/DEADLINE_EXCEEDED, maps the
+                wire Outcome to sent|failed. Bound when
+                WELCOME_EMAIL_TRANSPORT=grpc.
+            "
+            technology "PHP, gRPC"
         }
 
         outcomeConsumer = component "WelcomeEmailOutcomeConsumer" {
@@ -257,11 +291,16 @@ model {
             technology "PHP, PDO"
         }
 
-        sagaLoop -> relayUseCase "Relays pending welcome emails each tick"
+        sagaLoop -> relayUseCase "Relays pending welcome emails each tick (rabbit, default)"
+        sagaLoop -> syncRelayUseCase "Relays via the sync sender each tick (rest/grpc, opt-in)"
         sagaLoop -> outcomeConsumer "Consumes WelcomeEmailOutcome/v1"
         sagaLoop -> sweepUseCase "Sweeps timed-out sagas periodically"
         relayUseCase -> sagaRepo "Reads STARTED sagas, marks published"
         relayUseCase -> welcomeRelay "Publishes SendWelcomeEmail/v1 (confirmed)"
+        syncRelayUseCase -> sagaRepo "Reads due sagas"
+        syncRelayUseCase -> restWelcomeRelay "send(SendWelcomeEmail) (rest)"
+        syncRelayUseCase -> grpcWelcomeRelay "send(SendWelcomeEmail) (grpc)"
+        syncRelayUseCase -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand on a definitive OK"
         outcomeConsumer -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand"
         sagaCommandBus -> outcomeHandler "Handles the reply command"
         outcomeHandler -> sagaRepo "complete/compensate saga (conditional)"
@@ -274,6 +313,9 @@ model {
     notifier.sagaWorker.confirmationWriter -> notifier.db "SQL (subscriptions.status)" "TCP"
     notifier.sagaWorker.welcomeRelay -> notifier.rabbitmq "Publishes SendWelcomeEmail/v1 (confirms)" "AMQP"
     notifier.sagaWorker.outcomeConsumer -> notifier.rabbitmq "Consumes notifications.welcome-email-reply" "AMQP"
+
+    notifier.sagaWorker.restWelcomeRelay -> notifier.notificationSvc.welcomeRestController "POST /internal/welcome-emails (sync, caller-waits sent|failed)" "HTTPS, JSON"
+    notifier.sagaWorker.grpcWelcomeRelay -> notifier.notificationGrpc.welcomeGrpcSvc "SendWelcomeEmail RPC (sync, caller-waits sent|failed)" "gRPC, HTTP/2"
 
     extend notifier.notificationSvc {
         consumer = component "SendReleaseEmailConsumer" {
@@ -358,12 +400,24 @@ model {
             technology "PHP, AMQP"
         }
 
+        welcomeRestController = component "WelcomeEmailController" {
+            description "
+                Synchronous REST baseline (POST /internal/welcome-emails) on
+                the php -S HTTP surface. Validates the JSON shape, builds the
+                WelcomeEmail VO, invokes the unchanged SendWelcomeEmailHandler,
+                and returns sent|failed (409 on in-flight contention). Error
+                mapping via ExceptionStatusMap::toHttpStatus().
+            "
+            technology "PHP, Slim 4"
+        }
+
         consumer -> sendEmailHandler "Invokes for each consumed message"
         sendEmailHandler -> ledger "Claims + records delivery"
         sendEmailHandler -> renderer "Builds subject/body"
         sendEmailHandler -> mailer "Sends email"
 
         welcomeConsumer -> welcomeHandler "Invokes for each consumed welcome message"
+        welcomeRestController -> welcomeHandler "Invokes the unchanged handler on POST /internal/welcome-emails"
         welcomeHandler -> welcomeLedger "Claims + records welcome delivery"
         welcomeHandler -> welcomeRenderer "Builds welcome subject/body"
         welcomeHandler -> mailer "Sends welcome email"
@@ -377,4 +431,58 @@ model {
     notifier.notificationSvc.welcomeConsumer -> notifier.rabbitmq "Consumes notifications.welcome-email / DLQ" "AMQP"
     notifier.notificationSvc.welcomeLedger -> notifier.notificationDb "SQL (welcome_notifications)" "TCP"
     notifier.notificationSvc.outcomePublisher -> notifier.rabbitmq "Publishes WelcomeEmailOutcome/v1 (confirms)" "AMQP"
+
+    extend notifier.notificationGrpc {
+        welcomeGrpcSvc = component "WelcomeEmailGrpcService" {
+            description "
+                Spiral gRPC service implementing the generated
+                WelcomeEmailServiceInterface (unary SendWelcomeEmail). Derives
+                sent|failed from the handler's dispositions; maps exceptions to
+                gRPC status codes via ExceptionStatusMap::toGrpcStatus()
+                (WelcomeInFlightException -> ABORTED, validation ->
+                INVALID_ARGUMENT, else INTERNAL/UNAVAILABLE).
+            "
+            technology "PHP, RoadRunner gRPC"
+        }
+
+        grpcWelcomeHandler = component "SendWelcomeEmailHandler" {
+            description "
+                gRPC-side runtime instance of the unchanged welcome handler
+                (bin/grpc.php builds its own DI container). Same claim ->
+                render -> send -> markSent flow as the consumer-side instance.
+            "
+            technology "PHP"
+        }
+
+        grpcWelcomeLedger = component "PdoWelcomeNotificationLedger" {
+            description "
+                gRPC-side runtime instance of the welcome delivery ledger
+                keyed by subscription_id (UNIQUE); atomic INSERT … ON CONFLICT
+                claim with terminal_failed_at guard.
+            "
+            technology "PHP, PDO"
+        }
+
+        grpcWelcomeRenderer = component "WelcomeEmailRenderer" {
+            description "
+                gRPC-side runtime instance of the welcome email renderer.
+            "
+            technology "PHP"
+        }
+
+        grpcWelcomeMailer = component "PhpMailerMailer" {
+            description "
+                gRPC-side runtime instance of the SMTP adapter.
+            "
+            technology "PHP, PHPMailer"
+        }
+
+        welcomeGrpcSvc -> grpcWelcomeHandler "Invokes the unchanged handler per SendWelcomeEmail RPC"
+        grpcWelcomeHandler -> grpcWelcomeLedger "Claims + records welcome delivery"
+        grpcWelcomeHandler -> grpcWelcomeRenderer "Builds welcome subject/body"
+        grpcWelcomeHandler -> grpcWelcomeMailer "Sends welcome email"
+    }
+
+    notifier.notificationGrpc.grpcWelcomeLedger -> notifier.notificationDb "SQL (welcome_notifications)" "TCP"
+    notifier.notificationGrpc.grpcWelcomeMailer -> notifier.mailhog "Sends welcome email in local dev" "SMTP"
 }

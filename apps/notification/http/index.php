@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Sending\Infrastructure\Http\ErrorHandlerMiddleware;
 use App\Sending\Infrastructure\Http\HealthController;
 use App\Sending\Infrastructure\Http\MetricsController;
+use App\Sending\Infrastructure\Http\WelcomeEmailController;
 use Slim\Factory\AppFactory;
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -19,5 +20,6 @@ $app = AppFactory::create();
 $app->add($container->get(ErrorHandlerMiddleware::class));
 $app->get('/health', HealthController::class);
 $app->get('/metrics', MetricsController::class);
+$app->post('/internal/welcome-emails', WelcomeEmailController::class);
 
 return $app;

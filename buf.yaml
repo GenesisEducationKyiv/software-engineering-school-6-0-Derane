@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # The frozen legacy proto predates buf STANDARD lint (its file/package layout is
+  # fixed by N2/FR12); exclude it so buf lint gates ONLY the new contract.
+  ignore:
+    - proto/release_notifier.proto
+breaking:
+  use:
+    - FILE

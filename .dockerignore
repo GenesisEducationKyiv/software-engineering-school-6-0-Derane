@@ -1,4 +1,5 @@
 vendor/
+apps/notification/vendor/
 node_modules/
 .env
 .git

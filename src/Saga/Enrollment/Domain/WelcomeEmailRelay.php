@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Saga\Enrollment\Domain;
 
 /**
- * Port for the outbox-style relay publish. Implemented by RabbitWelcomeEmailRelay
- * with publisher confirms; it throws on an unconfirmed publish so the saga is NOT
- * advanced (the relay re-tries next tick, after recordRelayFailure).
+ * Port for the welcome-email relay publish. Contract: normal return = a DEFINITIVE disposition
+ * was reached; a throw = NO definitive disposition, so the saga is NOT advanced and is left for
+ * the next tick to retry.
  *
  * @psalm-api
  */
