@@ -28,7 +28,7 @@ export default function () {
   const res = http.post(`${BASE}/internal/welcome-emails`, payload, {
     headers: { 'Content-Type': 'application/json' },
   });
-  // Parse the JSON and require outcome:sent, so a regression to outcome:failed fails the check.
+  // The endpoint returns HTTP 200 even for outcome:failed, so assert the body, not just the status.
   check(res, {
     'http 200': (r) => r.status === 200,
     'outcome sent': (r) => {

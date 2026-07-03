@@ -272,8 +272,6 @@ return static function (array $settings): Container {
         SubscriberFinder::class => static fn($c) => $c->get(SubscriptionRepository::class),
         SubscriptionCountPort::class => static fn($c) => $c->get(SubscriptionRepository::class),
 
-        // HW9 B3: the conditional confirm/cancel writer (Saga.Application ->
-        // Subscription.Domain edge), on the same shared PDO::class.
         SubscriptionConfirmationWriter::class => static fn($c) => new PdoSubscriptionConfirmationWriter(
             $c->get(PDO::class)
         ),
@@ -285,8 +283,6 @@ return static function (array $settings): Container {
             $c->get(PDO::class)
         ),
 
-        // HW9 B1: the durable saga state store. ISP-alias the Reader/Writer/Store
-        // narrow ports to the one repository instance (per-consumer ISP).
         EnrollmentSagaStore::class => static fn($c) => new PdoEnrollmentSagaRepository(
             $c->get(PDO::class),
             $c->get(Clock::class)
@@ -294,8 +290,6 @@ return static function (array $settings): Container {
         EnrollmentSagaReader::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
         EnrollmentSagaWriter::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
         EnrollmentSagaCountPort::class => static fn($c) => $c->get(EnrollmentSagaStore::class),
-        // The starter the Subscription write path depends on: the aggregate-driven
-        // facade that persists the saga and dispatches SagaStarted on a new row.
         EnrollmentSagaStarter::class => static fn($c) => new StartEnrollmentSagaService(
             $c->get(EnrollmentSagaStore::class),
             $c->get(EventDispatcherInterface::class)
@@ -350,13 +344,10 @@ return static function (array $settings): Container {
             $c->get(Clock::class),
         ),
 
-        // HW9 D2: the monolith's first runtime consumer port -> the verbatim live
-        // RabbitConsumer (M4 fence). The saga worker consumes the reply queue here.
         MessageConsumer::class => static fn($c) => new RabbitConsumer(
             $c->get(RabbitConnection::class)
         ),
 
-        // HW9 D2/D3/D4: the relay/reply/sweep use-cases the worker drives per tick.
         RelayPendingWelcomeEmails::class => static fn($c) => new RelayPendingWelcomeEmails(
             $c->get(EnrollmentSagaReader::class),
             $c->get(WelcomeEmailMessageFactory::class),
@@ -503,7 +494,6 @@ return static function (array $settings): Container {
             SubscribeCommand::class => $c->get(SubscribeCommandHandler::class),
             UnsubscribeCommand::class => $c->get(UnsubscribeCommandHandler::class),
             ScanReleasesCommand::class => $c->get(ScanReleasesHandler::class),
-            // HW9 D3: the reply-path orchestrator (T3 confirm / C1 compensate).
             HandleWelcomeEmailOutcomeCommand::class => $c->get(HandleWelcomeEmailOutcomeHandler::class),
         ]),
         QueryBus::class => static fn($c) => new InMemoryQueryBus([

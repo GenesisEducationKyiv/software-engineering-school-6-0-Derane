@@ -55,34 +55,6 @@ final class WelcomeEmailGrpcServiceTest extends TestCase
         $this->ctx = $this->createMock(ContextInterface::class);
     }
 
-    private function service(): WelcomeEmailGrpcService
-    {
-        $handler = new SendWelcomeEmailHandler(
-            $this->ledger,
-            $this->renderer,
-            $this->mailer,
-            $this->publisher,
-            $this->stats,
-        );
-
-        return new WelcomeEmailGrpcService(
-            $handler,
-            new WelcomeEmailFactory(),
-            new ExceptionStatusMap(),
-            new NullLogger(),
-        );
-    }
-
-    private function validRequest(): SendWelcomeEmailRequest
-    {
-        return new SendWelcomeEmailRequest([
-            'saga_id' => 'saga-1',
-            'subscription_id' => 42,
-            'email' => 'user@example.com',
-            'repository' => 'owner/repo',
-        ]);
-    }
-
     public function testNormalReturnYieldsOutcomeSent(): void
     {
         $this->ledger->method('claim')->willReturn(ClaimResult::claimed('fence'));
@@ -99,7 +71,6 @@ final class WelcomeEmailGrpcServiceTest extends TestCase
 
     public function testAlreadyFailedYieldsOutcomeFailedAsNormalResponse(): void
     {
-        // AlreadyFailed claim is a normal OUTCOME_FAILED response, not a thrown exception.
         $this->ledger->method('claim')->willReturn(ClaimResult::alreadyFailed());
         $this->mailer->expects(self::never())->method('send');
 
@@ -173,5 +144,33 @@ final class WelcomeEmailGrpcServiceTest extends TestCase
         } catch (ServiceException $e) {
             self::assertSame(StatusCode::INTERNAL, $e->getCode());
         }
+    }
+
+    private function service(): WelcomeEmailGrpcService
+    {
+        $handler = new SendWelcomeEmailHandler(
+            $this->ledger,
+            $this->renderer,
+            $this->mailer,
+            $this->publisher,
+            $this->stats,
+        );
+
+        return new WelcomeEmailGrpcService(
+            $handler,
+            new WelcomeEmailFactory(),
+            new ExceptionStatusMap(),
+            new NullLogger(),
+        );
+    }
+
+    private function validRequest(): SendWelcomeEmailRequest
+    {
+        return new SendWelcomeEmailRequest([
+            'saga_id' => 'saga-1',
+            'subscription_id' => 42,
+            'email' => 'user@example.com',
+            'repository' => 'owner/repo',
+        ]);
     }
 }

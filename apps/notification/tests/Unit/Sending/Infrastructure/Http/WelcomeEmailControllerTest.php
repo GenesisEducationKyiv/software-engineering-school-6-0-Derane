@@ -53,41 +53,6 @@ final class WelcomeEmailControllerTest extends TestCase
         $this->stats = $this->createMock(WelcomeProcessingStatsRecorder::class);
     }
 
-    private function controller(): WelcomeEmailController
-    {
-        $handler = new SendWelcomeEmailHandler(
-            $this->ledger,
-            $this->renderer,
-            $this->mailer,
-            $this->publisher,
-            $this->stats,
-        );
-
-        return new WelcomeEmailController($handler, new WelcomeEmailFactory(), new NullLogger());
-    }
-
-    /** @param array<string,mixed> $payload */
-    private function request(array $payload): ServerRequestInterface
-    {
-        $body = (new StreamFactory())->createStream(json_encode($payload, JSON_THROW_ON_ERROR));
-
-        return (new ServerRequestFactory())
-            ->createServerRequest('POST', '/internal/welcome-emails')
-            ->withHeader('Content-Type', 'application/json')
-            ->withBody($body);
-    }
-
-    /** @return array<string,mixed> */
-    private function validPayload(): array
-    {
-        return [
-            'sagaId' => 'saga-1',
-            'subscriptionId' => 123,
-            'email' => 'user@example.com',
-            'repository' => 'owner/repo',
-        ];
-    }
-
     public function testValidRequestReturnsSentJson(): void
     {
         $this->ledger->method('claim')->willReturn(ClaimResult::claimed('fence'));
@@ -165,6 +130,41 @@ final class WelcomeEmailControllerTest extends TestCase
         $response = $this->runThroughErrorHandler($this->validPayload());
 
         self::assertSame(503, $response->getStatusCode());
+    }
+
+    private function controller(): WelcomeEmailController
+    {
+        $handler = new SendWelcomeEmailHandler(
+            $this->ledger,
+            $this->renderer,
+            $this->mailer,
+            $this->publisher,
+            $this->stats,
+        );
+
+        return new WelcomeEmailController($handler, new WelcomeEmailFactory(), new NullLogger());
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function request(array $payload): ServerRequestInterface
+    {
+        $body = (new StreamFactory())->createStream(json_encode($payload, JSON_THROW_ON_ERROR));
+
+        return (new ServerRequestFactory())
+            ->createServerRequest('POST', '/internal/welcome-emails')
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($body);
+    }
+
+    /** @return array<string,mixed> */
+    private function validPayload(): array
+    {
+        return [
+            'sagaId' => 'saga-1',
+            'subscriptionId' => 123,
+            'email' => 'user@example.com',
+            'repository' => 'owner/repo',
+        ];
     }
 
     /**

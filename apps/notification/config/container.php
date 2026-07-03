@@ -151,9 +151,6 @@ return static function (array $settings): Container {
             $c->get(LoggerInterface::class),
         ),
 
-        // Welcome path (HW9 saga). WelcomeProcessingStatsRecorder and the
-        // WelcomeOutcomePublisher reply publisher are aliased to their concrete
-        // implementations registered below.
         WelcomeProcessingStatsRecorder::class => static fn($c) => $c->get(DeliveryOutcomeRecorder::class),
         WelcomeOutcomePublisher::class => static fn($c) => new RabbitWelcomeOutcomePublisher(
             $c->get(RabbitConnection::class),
@@ -166,8 +163,6 @@ return static function (array $settings): Container {
         // SYNC surfaces use $syncWelcomeHandler (no-op publisher) instead — see above.
         SendWelcomeEmailHandler::class => static fn($c) => new SendWelcomeEmailHandler(
             $c->get(WelcomeNotificationLedger::class),
-            // The welcome handler renders from the welcome template specifically,
-            // not the shared EmailRenderer binding (which is the release renderer).
             $c->get(WelcomeEmailRenderer::class),
             $c->get(Mailer::class),
             $c->get(WelcomeOutcomePublisher::class),
@@ -213,9 +208,6 @@ return static function (array $settings): Container {
             $c->get(ExceptionStatusMap::class),
         ),
 
-        // Synchronous welcome-email transport surfaces (REST→gRPC migration). Both
-        // wrap the UNCHANGED SendWelcomeEmailHandler via the shared validating
-        // WelcomeEmailFactory; the async RabbitMQ path above is untouched.
         WelcomeEmailFactory::class => static fn() => new WelcomeEmailFactory(),
         WelcomeEmailController::class => static fn($c) => new WelcomeEmailController(
             $syncWelcomeHandler($c),
