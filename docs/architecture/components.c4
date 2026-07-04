@@ -33,7 +33,7 @@ model {
 
         queryBus = component "QueryBus" {
             description "In-memory query bus for subscription reads."
-            technology "PHP, Guzzle"
+            technology "PHP"
         }
 
         releaseSource = component "ReleaseSource" {
@@ -43,13 +43,49 @@ model {
 
         metricsSvc = component "MetricsService" {
             description "
-                Aggregates Prometheus gauges from count ports.
+                Aggregates Prometheus gauges from four count/reader ports on
+                every /metrics scrape: subscriptions, tracked repositories,
+                saga states, and saga event counters.
             "
             technology "PHP"
         }
 
-        subscriptionRepo = component "SubscriptionRepository" {
-            description "PDO adapter for subscriptions and subscriber lookup."
+        subscriptionRepo = component "PdoSubscriptionRepository" {
+            description "
+                PDO adapter implementing the narrow subscription ports
+                (SubscriptionRepository, SubscriberFinder, SubscriptionCountPort).
+            "
+            technology "PHP, PDO"
+        }
+
+        trackedRepoWriter = component "PdoTrackedRepositoryWriter" {
+            description "
+                RepositoryTracking adapter: ensureExists(owner/repo) during
+                subscribe (TrackedRepositoryRegistrar port).
+            "
+            technology "PHP, PDO"
+        }
+
+        sagaStore = component "PdoEnrollmentSagaRepository" {
+            description "
+                Saga store: the subscribe handler starts the enrollment saga in
+                the SAME transaction as the subscription insert
+                (EnrollmentSagaStarter port); also serves the saga-state gauges
+                (EnrollmentSagaCountPort).
+            "
+            technology "PHP, PDO"
+        }
+
+        trackedRepoReader = component "PdoTrackedRepositoryReader" {
+            description "Serves the tracked-repository count gauge (RepositoryCountPort)."
+            technology "PHP, PDO"
+        }
+
+        sagaMetricsStore = component "PdoSagaMetricsStore" {
+            description "
+                Reads saga event counters off the saga_metrics read-model
+                (SagaMetricsReader port).
+            "
             technology "PHP, PDO"
         }
 
@@ -59,9 +95,14 @@ model {
         subscriptionCtrl -> commandBus "Dispatches writes"
         subscriptionCtrl -> queryBus "Dispatches reads"
         metricsCtrl -> metricsSvc "Renders Prometheus exposition"
-        metricsSvc -> subscriptionRepo "Reads aggregate counts on every scrape"
+        metricsSvc -> subscriptionRepo "Subscription count gauge"
+        metricsSvc -> trackedRepoReader "Repository count gauge"
+        metricsSvc -> sagaStore "Saga state gauges"
+        metricsSvc -> sagaMetricsStore "Saga event counters"
         commandBus -> releaseSource "Validates owner/repo exists during subscribe"
+        commandBus -> trackedRepoWriter "ensureExists(owner/repo) during subscribe"
         commandBus -> subscriptionRepo "Persists subscriptions"
+        commandBus -> sagaStore "Starts the enrollment saga (same transaction)"
         queryBus -> subscriptionRepo "Reads subscriptions"
     }
 
@@ -86,14 +127,41 @@ model {
             technology "PHP"
         }
 
-        grpcRepo = component "SubscriptionRepository" {
-            description "gRPC-side runtime instance of the subscription repository."
+        grpcReleaseSource = component "ReleaseSource" {
+            description "
+                gRPC-side runtime instance of the GitHub release/repository
+                source with Redis-backed caching.
+            "
+            technology "PHP, Guzzle"
+        }
+
+        grpcRepo = component "PdoSubscriptionRepository" {
+            description "gRPC-side runtime instance of the PDO subscription adapter."
+            technology "PHP, PDO"
+        }
+
+        grpcTrackedRepoWriter = component "PdoTrackedRepositoryWriter" {
+            description "
+                gRPC-side runtime instance registering tracked repositories
+                during subscribe (TrackedRepositoryRegistrar port).
+            "
+            technology "PHP, PDO"
+        }
+
+        grpcSagaStore = component "PdoEnrollmentSagaRepository" {
+            description "
+                gRPC-side runtime instance starting the enrollment saga in the
+                SAME transaction as the subscription insert.
+            "
             technology "PHP, PDO"
         }
 
         grpcSvc -> grpcCommandBus "Dispatches writes"
         grpcSvc -> grpcQueryBus "Dispatches reads"
+        grpcCommandBus -> grpcReleaseSource "Validates owner/repo exists during subscribe"
+        grpcCommandBus -> grpcTrackedRepoWriter "ensureExists(owner/repo) during subscribe"
         grpcCommandBus -> grpcRepo "Persists subscriptions"
+        grpcCommandBus -> grpcSagaStore "Starts the enrollment saga (same transaction)"
         grpcQueryBus -> grpcRepo "Reads subscriptions"
     }
 
@@ -117,8 +185,20 @@ model {
         }
 
         releaseDetector = component "ReleaseDetector" {
-            description "Compares GitHub releases against repository scan state."
-            technology "PHP, Guzzle"
+            description "
+                Compares the latest GitHub release (via the ReleaseSource port)
+                against the repository's last_seen_tag to decide whether a new
+                release appeared.
+            "
+            technology "PHP"
+        }
+
+        scannerReleaseSource = component "GitHubApiReleaseSource" {
+            description "
+                Releases-context adapter behind the ReleaseSource port: GitHub
+                REST client wrapped in the Redis-backed cache stack.
+            "
+            technology "PHP, Guzzle, Predis"
         }
 
         publishListener = component "WhenNewReleaseDetectedThenPublishReleaseEmails" {
@@ -138,10 +218,24 @@ model {
             technology "PHP"
         }
 
-        scannerRepo = component "SubscriptionRepository" {
+        scannerRepoReader = component "PdoTrackedRepositoryReader" {
             description "
-                Scanner-side access to subscriptions and tracked repositories.
+                RepositoryTracking adapter: scan candidates and last_seen_tag
+                reads (ScanCandidateSource / RepositoryStatusReader ports).
             "
+            technology "PHP, PDO"
+        }
+
+        scannerRepoWriter = component "PdoTrackedRepositoryWriter" {
+            description "
+                RepositoryTracking adapter: advances last_seen_tag after a
+                successful publish (ScanProgressWriter port).
+            "
+            technology "PHP, PDO"
+        }
+
+        scannerSubscriptionRepo = component "PdoSubscriptionRepository" {
+            description "Resolves the repository's subscribers (SubscriberFinder port)."
             technology "PHP, PDO"
         }
 
@@ -151,11 +245,14 @@ model {
         }
 
         cliRunner -> scanHandler "Dispatches scan command"
-        scanHandler -> scannerRepo "Reads due repositories and updates scan state"
+        scanHandler -> scannerRepoReader "Reads due repositories (ScanCandidateSource)"
         scanHandler -> releaseDetector "Resolves latest release"
+        releaseDetector -> scannerReleaseSource "getLatestRelease via ReleaseSource port"
+        releaseDetector -> scannerRepoReader "Reads last_seen_tag (RepositoryStatusReader)"
+        scanHandler -> scannerRepoWriter "Advances last_seen_tag only after publish succeeds"
         scanHandler -> publishListener "Triggers publish via NewReleaseDetected"
         publishListener -> publishUseCase "Delegates repository + release snapshot"
-        publishUseCase -> scannerRepo "Resolves the repository's subscribers"
+        publishUseCase -> scannerSubscriptionRepo "Resolves the repository's subscribers"
         publishUseCase -> rabbitPublisher "Publishes the batch with one confirm-wait"
     }
 
@@ -164,14 +261,24 @@ model {
     notifier.httpApi.healthCtrl -> notifier.db "SELECT 1 (liveness probe)" "SQL/TCP"
     notifier.httpApi.releaseSource -> notifier.redis "Reads/writes cached responses" "RESP"
     notifier.httpApi.releaseSource -> github "Calls REST API" "HTTPS"
-    notifier.httpApi.subscriptionRepo -> notifier.db "SQL" "TCP"
+    notifier.httpApi.subscriptionRepo -> notifier.db "SQL (subscriptions)" "TCP"
+    notifier.httpApi.trackedRepoWriter -> notifier.db "SQL (repositories)" "TCP"
+    notifier.httpApi.trackedRepoReader -> notifier.db "SQL (repositories)" "TCP"
+    notifier.httpApi.sagaStore -> notifier.db "SQL (enrollment_sagas)" "TCP"
+    notifier.httpApi.sagaMetricsStore -> notifier.db "SQL (saga_metrics)" "TCP"
 
     notifier.grpcApi.grpcSvc -> notifier.db "SELECT 1 on Health() (liveness)" "SQL/TCP"
-    notifier.grpcApi.grpcRepo -> notifier.db "SQL" "TCP"
+    notifier.grpcApi.grpcReleaseSource -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.grpcApi.grpcReleaseSource -> github "Calls REST API" "HTTPS"
+    notifier.grpcApi.grpcRepo -> notifier.db "SQL (subscriptions)" "TCP"
+    notifier.grpcApi.grpcTrackedRepoWriter -> notifier.db "SQL (repositories)" "TCP"
+    notifier.grpcApi.grpcSagaStore -> notifier.db "SQL (enrollment_sagas)" "TCP"
 
-    notifier.scanner.releaseDetector -> notifier.redis "Reads/writes cached responses" "RESP"
-    notifier.scanner.releaseDetector -> github "Calls REST API" "HTTPS"
-    notifier.scanner.scannerRepo -> notifier.db "SQL" "TCP"
+    notifier.scanner.scannerReleaseSource -> notifier.redis "Reads/writes cached responses" "RESP"
+    notifier.scanner.scannerReleaseSource -> github "Calls REST API" "HTTPS"
+    notifier.scanner.scannerRepoReader -> notifier.db "SQL (repositories)" "TCP"
+    notifier.scanner.scannerRepoWriter -> notifier.db "SQL (repositories.last_seen_tag)" "TCP"
+    notifier.scanner.scannerSubscriptionRepo -> notifier.db "SQL (subscriptions)" "TCP"
     notifier.scanner.rabbitPublisher -> notifier.rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"
 
     extend notifier.sagaWorker {
@@ -187,52 +294,45 @@ model {
 
         relayUseCase = component "RelayPendingWelcomeEmails" {
             description "
-                Outbox relay use-case: selects STARTED sagas and publishes
-                one SendWelcomeEmail/v1 each with publisher confirms, advancing
-                the saga to AWAITING_CONFIRMATION only after a confirmed publish.
+                Outbox relay use-case — the SINGLE relay for all three
+                transports: selects STARTED sagas and hands each
+                SendWelcomeEmail to whichever WelcomeEmailRelay adapter the
+                container bound (WELCOME_EMAIL_TRANSPORT=rabbit|rest|grpc),
+                advancing the saga to AWAITING_CONFIRMATION only after the
+                relay reports success.
             "
             technology "PHP"
         }
 
         welcomeRelay = component "RabbitWelcomeEmailRelay" {
             description "
-                Publishes SendWelcomeEmail/v1 to RabbitMQ with publisher
-                confirms; throws on an unconfirmed publish so the saga is
-                not advanced (retried next tick). Bound when
-                WELCOME_EMAIL_TRANSPORT=rabbit (default, async).
+                WelcomeEmailRelay adapter: publishes SendWelcomeEmail/v1 to
+                RabbitMQ with publisher confirms; throws on an unconfirmed
+                publish so the saga is not advanced (retried next tick).
+                Bound when WELCOME_EMAIL_TRANSPORT=rabbit (default, async).
             "
             technology "PHP, AMQP"
         }
 
-        syncRelayUseCase = component "RelayPendingWelcomeEmailsSync" {
-            description "
-                Synchronous relay use-case (opt-in). Per due saga, calls the
-                SyncWelcomeEmailSender and, only on a definitive OK outcome,
-                dispatches the existing HandleWelcomeEmailOutcomeCommand to
-                drive the saga in-thread. Aliased onto the relay-use-case
-                binding the unchanged SagaWorker consumes when
-                WELCOME_EMAIL_TRANSPORT is rest or grpc.
-            "
-            technology "PHP"
-        }
-
         restWelcomeRelay = component "RestWelcomeEmailRelay" {
             description "
-                Synchronous SyncWelcomeEmailSender adapter. POSTs JSON to the
+                Synchronous WelcomeEmailRelay adapter. POSTs JSON to the
                 notification REST endpoint via Guzzle with a per-call deadline
-                and bounded retry, blocks for sent|failed. Bound when
-                WELCOME_EMAIL_TRANSPORT=rest.
+                and bounded retry, blocks for sent|failed, then dispatches
+                HandleWelcomeEmailOutcomeCommand itself on a definitive
+                outcome. Bound when WELCOME_EMAIL_TRANSPORT=rest.
             "
             technology "PHP, Guzzle"
         }
 
         grpcWelcomeRelay = component "GrpcWelcomeEmailRelay" {
             description "
-                Synchronous SyncWelcomeEmailSender adapter. Wraps the generated
+                Synchronous WelcomeEmailRelay adapter. Wraps the generated
                 WelcomeEmailServiceClient (gRPC/ext-grpc) with a call deadline
                 and bounded retry on UNAVAILABLE/DEADLINE_EXCEEDED, maps the
-                wire Outcome to sent|failed. Bound when
-                WELCOME_EMAIL_TRANSPORT=grpc.
+                wire Outcome to sent|failed, then dispatches
+                HandleWelcomeEmailOutcomeCommand itself on a definitive
+                outcome. Bound when WELCOME_EMAIL_TRANSPORT=grpc.
             "
             technology "PHP, gRPC"
         }
@@ -291,16 +391,15 @@ model {
             technology "PHP, PDO"
         }
 
-        sagaLoop -> relayUseCase "Relays pending welcome emails each tick (rabbit, default)"
-        sagaLoop -> syncRelayUseCase "Relays via the sync sender each tick (rest/grpc, opt-in)"
+        sagaLoop -> relayUseCase "Relays pending welcome emails each tick"
         sagaLoop -> outcomeConsumer "Consumes WelcomeEmailOutcome/v1"
         sagaLoop -> sweepUseCase "Sweeps timed-out sagas periodically"
         relayUseCase -> sagaRepo "Reads STARTED sagas, marks published"
-        relayUseCase -> welcomeRelay "Publishes SendWelcomeEmail/v1 (confirmed)"
-        syncRelayUseCase -> sagaRepo "Reads due sagas"
-        syncRelayUseCase -> restWelcomeRelay "send(SendWelcomeEmail) (rest)"
-        syncRelayUseCase -> grpcWelcomeRelay "send(SendWelcomeEmail) (grpc)"
-        syncRelayUseCase -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand on a definitive OK"
+        relayUseCase -> welcomeRelay "publish(SendWelcomeEmail) — transport=rabbit (default)"
+        relayUseCase -> restWelcomeRelay "publish(SendWelcomeEmail) — transport=rest (opt-in)"
+        relayUseCase -> grpcWelcomeRelay "publish(SendWelcomeEmail) — transport=grpc (opt-in)"
+        restWelcomeRelay -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand on a definitive outcome"
+        grpcWelcomeRelay -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand on a definitive outcome"
         outcomeConsumer -> sagaCommandBus "Dispatches HandleWelcomeEmailOutcomeCommand"
         sagaCommandBus -> outcomeHandler "Handles the reply command"
         outcomeHandler -> sagaRepo "complete/compensate saga (conditional)"
@@ -361,7 +460,10 @@ model {
             description "
                 Second RabbitMQ consumer (registered as a second basic_consume).
                 Validates SendWelcomeEmail/v1 and invokes the welcome handler;
-                same bounded-retry/DLQ envelope as the release consumer.
+                same bounded-retry/DLQ envelope as the release consumer, plus
+                two welcome-only arms: already-terminal rows go straight to
+                the DLQ, and an unconfirmed failed-reply publish exits the
+                worker for a restart (fail-closed).
             "
             technology "PHP, AMQP"
         }
@@ -370,8 +472,9 @@ model {
             description "
                 Welcome path: claim (keyed by subscriptionId) -> render ->
                 send -> markSent -> publish WelcomeEmailOutcome{sent}. On
-                terminal failure marks terminal_failed_at, publishes
-                WelcomeEmailOutcome{failed}, then DLQs (FR7).
+                terminal failure marks terminal_failed_at and publishes
+                WelcomeEmailOutcome{failed}; the consumer then routes the
+                message to the DLQ (FR7).
             "
             technology "PHP"
         }
@@ -395,23 +498,40 @@ model {
             description "
                 The service's first publisher: a fail-closed confirm-mode
                 channel that publishes WelcomeEmailOutcome/v1 back to the
-                monolith on subscription.welcome-email.reply.
+                monolith (rk subscription.welcome-email.reply -> queue
+                notifications.welcome-email-reply).
             "
             technology "PHP, AMQP"
+        }
+
+        metricsStore = component "PdoNotificationMetricsStore" {
+            description "
+                Records message-processing and delivery stats
+                (MessageProcessingStatsRecorder / WelcomeProcessingStatsRecorder /
+                DeliveryOutcomeRecorder ports) into notification_metrics —
+                the data behind the service's /metrics surface.
+            "
+            technology "PHP, PDO"
         }
 
         welcomeRestController = component "WelcomeEmailController" {
             description "
                 Synchronous REST baseline (POST /internal/welcome-emails) on
                 the php -S HTTP surface. Validates the JSON shape, builds the
-                WelcomeEmail VO, invokes the unchanged SendWelcomeEmailHandler,
-                and returns sent|failed (409 on in-flight contention). Error
+                WelcomeEmail VO, invokes the unchanged SendWelcomeEmailHandler
+                class — wired with a no-op outcome publisher, so the caller
+                applies the outcome in-thread and no Rabbit reply fires — and
+                returns sent|failed (409 on in-flight contention). Error
                 mapping via ExceptionStatusMap::toHttpStatus().
             "
             technology "PHP, Slim 4"
         }
 
         consumer -> sendEmailHandler "Invokes for each consumed message"
+        consumer -> metricsStore "Records processing stats"
+        welcomeConsumer -> metricsStore "Records processing stats"
+        sendEmailHandler -> metricsStore "Records delivery outcome"
+        welcomeHandler -> metricsStore "Records welcome delivery outcome"
         sendEmailHandler -> ledger "Claims + records delivery"
         sendEmailHandler -> renderer "Builds subject/body"
         sendEmailHandler -> mailer "Sends email"
@@ -430,6 +550,7 @@ model {
 
     notifier.notificationSvc.welcomeConsumer -> notifier.rabbitmq "Consumes notifications.welcome-email / DLQ" "AMQP"
     notifier.notificationSvc.welcomeLedger -> notifier.notificationDb "SQL (welcome_notifications)" "TCP"
+    notifier.notificationSvc.metricsStore -> notifier.notificationDb "SQL (notification_metrics)" "TCP"
     notifier.notificationSvc.outcomePublisher -> notifier.rabbitmq "Publishes WelcomeEmailOutcome/v1 (confirms)" "AMQP"
 
     extend notifier.notificationGrpc {
@@ -448,8 +569,10 @@ model {
         grpcWelcomeHandler = component "SendWelcomeEmailHandler" {
             description "
                 gRPC-side runtime instance of the unchanged welcome handler
-                (bin/grpc.php builds its own DI container). Same claim ->
-                render -> send -> markSent flow as the consumer-side instance.
+                (bin/grpc.php builds its own DI container), wired with a
+                no-op outcome publisher — the RPC caller applies the outcome,
+                no Rabbit reply fires. Same claim -> render -> send ->
+                markSent flow as the consumer-side instance.
             "
             technology "PHP"
         }
@@ -477,12 +600,22 @@ model {
             technology "PHP, PHPMailer"
         }
 
+        grpcMetricsStore = component "PdoNotificationMetricsStore" {
+            description "
+                gRPC-side runtime instance recording welcome processing and
+                delivery stats into notification_metrics.
+            "
+            technology "PHP, PDO"
+        }
+
         welcomeGrpcSvc -> grpcWelcomeHandler "Invokes the unchanged handler per SendWelcomeEmail RPC"
         grpcWelcomeHandler -> grpcWelcomeLedger "Claims + records welcome delivery"
         grpcWelcomeHandler -> grpcWelcomeRenderer "Builds welcome subject/body"
         grpcWelcomeHandler -> grpcWelcomeMailer "Sends welcome email"
+        grpcWelcomeHandler -> grpcMetricsStore "Records welcome delivery outcome"
     }
 
     notifier.notificationGrpc.grpcWelcomeLedger -> notifier.notificationDb "SQL (welcome_notifications)" "TCP"
+    notifier.notificationGrpc.grpcMetricsStore -> notifier.notificationDb "SQL (notification_metrics)" "TCP"
     notifier.notificationGrpc.grpcWelcomeMailer -> notifier.mailhog "Sends welcome email in local dev" "SMTP"
 }
