@@ -55,6 +55,38 @@ specification {
         }
     }
 
+    // --- Code-structure view family (layer separation, HW: architecture docs) ---
+    // These kinds model the static structure of the codebases (bounded contexts
+    // and Clean Architecture layers, mirroring deptrac.yaml), not runtime processes.
+
+    element codebase {
+        style {
+            shape rectangle
+            color muted
+        }
+    }
+
+    element boundedContext {
+        style {
+            shape rectangle
+            color indigo
+        }
+    }
+
+    element layer {
+        style {
+            shape rectangle
+            color sky
+        }
+    }
+
+    element contract {
+        style {
+            shape storage
+            color amber
+        }
+    }
+
     relationship async
     relationship sync
 }

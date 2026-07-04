@@ -1,8 +1,13 @@
 # Architecture — Quick Start
 
 The `.c4` files in this directory describe the post-cutover architecture:
-monolith HTTP/gRPC/scanner publishing `SendReleaseEmail/v1` to RabbitMQ, and
-`notification-svc` consuming it with its own Postgres.
+the monolith (HTTP / gRPC / scanner / saga-worker) integrating with the
+extracted `notification-svc` (own Postgres) through RabbitMQ by default —
+`SendReleaseEmail/v1`, `SendWelcomeEmail/v1` and the `WelcomeEmailOutcome/v1`
+reply — plus the opt-in synchronous welcome-email transports (REST `:8081`,
+gRPC `:9002`). `layers.c4` additionally models the code-level layer
+separation (bounded contexts × Domain/Application/Infrastructure) that
+deptrac enforces as architecture tests.
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the high-level explanation.
 

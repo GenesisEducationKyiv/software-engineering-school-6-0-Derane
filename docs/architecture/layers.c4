@@ -1,0 +1,392 @@
+// Code-structure model: bounded contexts and Clean Architecture layers.
+//
+// This file mirrors deptrac.yaml (monolith) and apps/notification/deptrac.yaml
+// (extracted service). Every arrow below is an ALLOWED dependency in those
+// rulesets; deptrac fails the build on any dependency not drawn here.
+// Granularity:
+//   - intra-context layer edges and cross-context port grants: exact, layer-level
+//   - shared-kernel usage: summarized as one context-level edge per context;
+//     the exact ring rule (Domain -> Shared.Domain only, Application -> + Shared.Application,
+//     Infrastructure -> + Shared.Infrastructure) is enforced by deptrac per layer
+//   - the Apps.Monolith / Apps.Notification composition-root layers are
+//     deliberately NOT drawn (they may see every layer of their deployable;
+//     see ARCHITECTURE.md)
+//   - the wireContracts element and its three edges document the contracts/
+//     directory (the decoupling seam), not deptrac rules.
+
+model {
+    monolithCode = codebase "Monolith Codebase" {
+        description "
+            src/ of the monolith. Modular Clean Architecture + pragmatic DDD:
+            bounded contexts with the dependency rule pointing inward
+            (Domain <- Application <- Infrastructure). Boundaries enforced
+            by deptrac.yaml with an EMPTY baseline.
+        "
+        technology "PHP 8.4, src/"
+
+        sharedKernel = boundedContext "Shared Kernel" {
+            description "
+                Depended on by every context; depends on no context's
+                Infrastructure, and on no context's Application except the
+                single Saga.Application grant (SagaMetricsReader read-model
+                port). Ring rule: a context layer may only use the Shared
+                layer of the same or an inner ring.
+            "
+            technology "src/Shared"
+
+            sharedDomain = layer "Domain" {
+                description "
+                    Self-validating value objects (RepositoryName, EmailAddress,
+                    ReleaseTag, SagaId), AggregateRoot (recordThat/pullDomainEvents),
+                    DomainEvent contract, CQRS bus contracts (CommandBus/QueryBus),
+                    Clock + TransactionManager ports, shared domain exceptions.
+                "
+                technology "PHP — no outward dependencies"
+                style { color green }
+            }
+            sharedApp = layer "Application" {
+                description "Cross-context application helpers (pagination)."
+                technology "PHP"
+                style { color sky }
+            }
+            sharedInfra = layer "Infrastructure" {
+                description "
+                    InMemory command/query buses, synchronous PSR-14 event plane
+                    (InMemoryEventDispatcher + ListenerProvider), PDO/HTTP/Rabbit
+                    plumbing, ExceptionStatusMap, metrics, health, clock.
+                "
+                technology "PHP, PDO, AMQP, PSR-14"
+                style { color slate }
+            }
+        }
+
+        subscription = boundedContext "Subscription (Subscriptions)" {
+            description "Subscriber sign-up and subscription lifecycle."
+            technology "src/Subscription/Subscriptions"
+
+            subDomain = layer "Domain" {
+                description "
+                    Subscription aggregate root (records SubscriptionCreated),
+                    per-consumer ISP ports (SubscriptionRepository, SubscriberFinder,
+                    SubscriptionConfirmationWriter, SubscriptionCountPort).
+                "
+                technology "PHP"
+                style { color green }
+            }
+            subApp = layer "Application" {
+                description "
+                    CQRS handlers: Subscribe / Unsubscribe commands,
+                    List/Get queries. Starts the enrollment saga atomically
+                    on subscribe.
+                "
+                technology "PHP, CQRS"
+                style { color sky }
+            }
+            subInfra = layer "Infrastructure" {
+                description "PDO subscription repository, Slim controller, listeners."
+                technology "PHP, PDO, Slim 4"
+                style { color slate }
+            }
+        }
+
+        repositoryTracking = boundedContext "RepositoryTracking (Repositories)" {
+            description "
+                Registry of GitHub repositories being watched. Ports-only
+                context with NO Application layer (deptrac still declares a
+                vacuous RepositoryTracking.Application layer over the empty
+                directory, reserved for future use-cases) — its Domain ports
+                are consumed by Subscription and Scanning use-cases.
+            "
+            technology "src/RepositoryTracking/Repositories"
+
+            rtDomain = layer "Domain" {
+                description "
+                    Ports only, no entities: TrackedRepositoryRegistrar,
+                    ScanCandidateSource, ScanProgressWriter, RepositoryStatusReader,
+                    RepositoryCountPort + the anemic RepositoryStatus DTO.
+                "
+                technology "PHP"
+                style { color green }
+            }
+            rtInfra = layer "Infrastructure" {
+                description "
+                    PdoTrackedRepositoryReader / PdoTrackedRepositoryWriter
+                    over the repositories table (+ DTO factory).
+                "
+                technology "PHP, PDO"
+                style { color slate }
+            }
+        }
+
+        releases = boundedContext "Releases (Sourcing)" {
+            description "Sourcing release facts from GitHub, with caching."
+            technology "src/Releases/Sourcing"
+
+            relDomain = layer "Domain" {
+                description "
+                    Release value-object snapshot, DetectedRelease,
+                    NewReleaseDetected domain event, ReleaseSource port
+                    (repositoryExists / getLatestRelease), RateLimitException.
+                "
+                technology "PHP"
+                style { color green }
+            }
+            relApp = layer "Application" {
+                description "
+                    Query side only: FetchLatestRelease and RepositoryExists
+                    query + handler + response triples.
+                "
+                technology "PHP, CQRS"
+                style { color sky }
+            }
+            relInfra = layer "Infrastructure" {
+                description "
+                    GitHub REST client, Redis cache decorators
+                    (cache the GitHub API responses only).
+                "
+                technology "PHP, Guzzle, Predis"
+                style { color slate }
+            }
+        }
+
+        scanning = boundedContext "Scanning (Scanner)" {
+            description "
+                Orchestration-only context: polls tracked repositories via ports,
+                detects new releases, dispatches NewReleaseDetected. Deliberately
+                has NO Domain layer — it owns no model; rate-limit and control-flow
+                exceptions are caught here, not in the unit methods.
+            "
+            technology "src/Scanning/Scanner"
+
+            scanApp = layer "Application" {
+                description "
+                    ScanReleasesHandler + ReleaseDetector: scan cycle
+                    orchestration; advances last_seen_tag only after the publish
+                    listener succeeds (outbox-free via the synchronous PSR-14 plane).
+                "
+                technology "PHP, CQRS"
+                style { color sky }
+            }
+            scanInfra = layer "Infrastructure" {
+                description "ScannerCliRunner — long-running CLI loop entrypoint."
+                technology "PHP CLI"
+                style { color slate }
+            }
+        }
+
+        saga = boundedContext "Saga (Enrollment)" {
+            description "
+                Orchestrated saga for confirmed subscriptions. Saga.Domain and
+                Subscription.Domain are mutually independent (correlation by
+                primitive subscriptionId) — the acyclicity invariant behind the
+                two opposite-direction port grants.
+            "
+            technology "src/Saga/Enrollment"
+
+            sagaDomain = layer "Domain" {
+                description "
+                    EnrollmentSaga aggregate root + SagaState enum, four saga
+                    domain events, ports (EnrollmentSagaStore/Reader/Writer/
+                    Starter/CountPort, WelcomeEmailRelay), SendWelcomeEmail
+                    integration-command model.
+                "
+                technology "PHP"
+                style { color green }
+            }
+            sagaApp = layer "Application" {
+                description "
+                    StartEnrollmentSagaService, RelayPendingWelcomeEmails (the
+                    single transport-agnostic relay use-case over the
+                    WelcomeEmailRelay port), HandleWelcomeEmailOutcome
+                    orchestrator, SweepTimedOutSagas, SagaMetricsRecorder/Reader ports.
+                "
+                technology "PHP, CQRS"
+                style { color sky }
+            }
+            sagaInfra = layer "Infrastructure" {
+                description "
+                    PDO saga repository, Rabbit relay/consumer adapters,
+                    REST/gRPC synchronous welcome-email relays, saga-worker loop.
+                "
+                technology "PHP, PDO, AMQP, gRPC"
+                style { color slate }
+            }
+        }
+
+        notificationPublishing = boundedContext "Notification (Publishing)" {
+            description "
+                Monolith publisher side. Its Domain is deliberately decoupled from
+                Releases: SendReleaseEmail/ReleaseSnapshot are wire-message models
+                that cross the queue boundary.
+            "
+            technology "src/Notification/Publishing"
+
+            pubDomain = layer "Domain" {
+                description "
+                    SendReleaseEmail integration-command model, ReleaseSnapshot,
+                    publisher port.
+                "
+                technology "PHP"
+                style { color green }
+            }
+            pubApp = layer "Application" {
+                description "
+                    PublishReleaseEmailsForRelease use-case: resolves recipients
+                    and publishes one SendReleaseEmail/v1 per subscriber as a batch.
+                "
+                technology "PHP, CQRS"
+                style { color sky }
+            }
+            pubInfra = layer "Infrastructure" {
+                description "
+                    RabbitMQ publisher adapter and the PSR-14 listener
+                    WhenNewReleaseDetectedThenPublishReleaseEmails.
+                "
+                technology "PHP, AMQP, PSR-14"
+                style { color slate }
+            }
+        }
+
+        legacy = boundedContext "Legacy (transitional)" {
+            description "
+                Strangler remainder — Infrastructure only. Drains as Epic B
+                completes; the deptrac baseline is already empty.
+            "
+            technology "src/Controller, src/Grpc, src/Migration"
+
+            legacyInfra = layer "Infrastructure" {
+                description "
+                    HealthController, MetricsController, gRPC
+                    ReleaseNotifierService, SQL Migrator.
+                "
+                technology "PHP, Slim 4, RoadRunner gRPC"
+                style { color slate }
+            }
+        }
+    }
+
+    notificationCode = codebase "Notification Service Codebase" {
+        description "
+            apps/notification/src — the extracted Notification/Sending service.
+            Own composer.json, own database, own deptrac.yaml enforcing the same
+            inward dependency rule. No composer dependency on the monolith: the
+            only shared artifacts are the versioned wire contracts (JSON schemas
+            + the welcome-email proto with its buf-generated gen/ stubs).
+        "
+        technology "PHP 8.2, apps/notification/src"
+
+        sending = boundedContext "Notification (Sending)" {
+            description "Consumes send commands, dedupes, renders, delivers email."
+            technology "apps/notification/src/Sending"
+
+            sendDomain = layer "Domain" {
+                description "
+                    Notification/WelcomeEmail models, ledger ports (claim/markSent),
+                    renderer + mailer ports, ClaimOutcome.
+                "
+                technology "PHP"
+                style { color green }
+            }
+            sendApp = layer "Application" {
+                description "
+                    SendReleaseEmailHandler and SendWelcomeEmailHandler:
+                    claim -> render -> send -> markSent (+ WelcomeEmailOutcome reply).
+                "
+                technology "PHP"
+                style { color sky }
+            }
+            sendInfra = layer "Infrastructure" {
+                description "
+                    Rabbit consumers, PDO ledgers, PHPMailer SMTP adapter,
+                    Slim REST controller, RoadRunner gRPC service.
+                "
+                technology "PHP, AMQP, PDO, SMTP, gRPC"
+                style { color slate }
+            }
+        }
+
+        svcShared = layer "Shared (service-local)" {
+            description "
+                Service-local infrastructure helpers: Rabbit connection/consumer
+                plumbing + the SQL Migrator for the service's own database.
+                Same FQCNs as the monolith shared kernel but independent code —
+                no composer dependency between the codebases.
+            "
+            technology "apps/notification/src/Shared"
+            style { color slate }
+        }
+    }
+
+    wireContracts = contract "Wire Contracts" {
+        description "
+            The ONLY artifacts shared between the monolith and the
+            notification service: the versioned JSON schemas in contracts/
+            (SendReleaseEmail/v1, SendWelcomeEmail/v1, WelcomeEmailOutcome/v1)
+            plus the welcome-email protobuf contract
+            (proto/notification/welcome/v1/welcome.proto, buf-generated
+            stubs in gen/ autoloaded by both composer.json files).
+        "
+        technology "JSON Schema + protobuf, contracts/ + proto/ + gen/"
+    }
+
+    // ---- Intra-context layer edges (deptrac: X.Application -> X.Domain, etc.) ----
+    monolithCode.sharedKernel.sharedApp -> monolithCode.sharedKernel.sharedDomain "depends inward"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.sharedKernel.sharedDomain "implements ports"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.sharedKernel.sharedApp "depends inward"
+
+    monolithCode.subscription.subApp -> monolithCode.subscription.subDomain "depends inward"
+    monolithCode.subscription.subInfra -> monolithCode.subscription.subDomain "implements ports"
+    monolithCode.subscription.subInfra -> monolithCode.subscription.subApp "invokes handlers"
+
+    monolithCode.repositoryTracking.rtInfra -> monolithCode.repositoryTracking.rtDomain "implements ports"
+
+    monolithCode.releases.relApp -> monolithCode.releases.relDomain "depends inward"
+    monolithCode.releases.relInfra -> monolithCode.releases.relDomain "implements ports"
+    monolithCode.releases.relInfra -> monolithCode.releases.relApp "invokes handlers"
+
+    monolithCode.scanning.scanInfra -> monolithCode.scanning.scanApp "dispatches ScanReleasesCommand"
+
+    monolithCode.saga.sagaApp -> monolithCode.saga.sagaDomain "depends inward"
+    monolithCode.saga.sagaInfra -> monolithCode.saga.sagaDomain "implements ports"
+    monolithCode.saga.sagaInfra -> monolithCode.saga.sagaApp "invokes handlers"
+
+    monolithCode.notificationPublishing.pubApp -> monolithCode.notificationPublishing.pubDomain "depends inward"
+    monolithCode.notificationPublishing.pubInfra -> monolithCode.notificationPublishing.pubDomain "implements ports"
+    monolithCode.notificationPublishing.pubInfra -> monolithCode.notificationPublishing.pubApp "invokes use-case"
+
+    // ---- Cross-context PORT grants (each one is an explicit deptrac grant) ----
+    monolithCode.subscription.subApp -> monolithCode.releases.relDomain "repositoryExists() via ReleaseSource port"
+    monolithCode.subscription.subApp -> monolithCode.repositoryTracking.rtDomain "ensureExists() via TrackedRepositoryRegistrar port"
+    monolithCode.subscription.subApp -> monolithCode.saga.sagaDomain "starts saga atomically via EnrollmentSagaStarter port"
+    monolithCode.saga.sagaApp -> monolithCode.subscription.subDomain "confirm/cancel via SubscriptionConfirmationWriter port"
+    monolithCode.scanning.scanApp -> monolithCode.releases.relDomain "dispatches NewReleaseDetected; catches RateLimitException"
+    monolithCode.scanning.scanApp -> monolithCode.repositoryTracking.rtDomain "ScanCandidateSource + ScanProgressWriter ports"
+    monolithCode.notificationPublishing.pubApp -> monolithCode.subscription.subDomain "resolves recipients via SubscriberFinder port"
+    monolithCode.notificationPublishing.pubInfra -> monolithCode.releases.relDomain "listener maps NewReleaseDetected into ReleaseSnapshot"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.subscription.subDomain "ExceptionStatusMap + SubscriptionCountPort"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.releases.relDomain "ExceptionStatusMap (RateLimitException)"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.repositoryTracking.rtDomain "RepositoryCountPort (metrics gauges)"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.saga.sagaDomain "ExceptionStatusMap + EnrollmentSagaCountPort"
+    monolithCode.sharedKernel.sharedInfra -> monolithCode.saga.sagaApp "SagaMetricsReader port (saga_metrics read-model)"
+    monolithCode.legacy.legacyInfra -> monolithCode.subscription.subApp "gRPC service builds Commands/Queries for the buses"
+
+    // ---- Shared-kernel usage (summarized per context; exact ring rule in deptrac) ----
+    monolithCode.subscription -> monolithCode.sharedKernel "VOs, bus contracts, base adapters (ring rule)"
+    monolithCode.repositoryTracking -> monolithCode.sharedKernel "VOs, bus contracts, base adapters (ring rule)"
+    monolithCode.releases -> monolithCode.sharedKernel "VOs, bus contracts, base adapters (ring rule)"
+    monolithCode.scanning -> monolithCode.sharedKernel "bus contracts, PSR-14 plane (ring rule)"
+    monolithCode.saga -> monolithCode.sharedKernel "VOs, bus contracts, Rabbit plumbing (ring rule)"
+    monolithCode.notificationPublishing -> monolithCode.sharedKernel "VOs, bus contracts, Rabbit plumbing (ring rule)"
+    monolithCode.legacy -> monolithCode.sharedKernel "ExceptionStatusMap, metrics, buses (ring rule)"
+
+    // ---- Notification service internal layering (apps/notification/deptrac.yaml) ----
+    notificationCode.sending.sendApp -> notificationCode.sending.sendDomain "depends inward"
+    notificationCode.sending.sendInfra -> notificationCode.sending.sendDomain "implements ports"
+    notificationCode.sending.sendInfra -> notificationCode.sending.sendApp "invokes handlers"
+    notificationCode.sending.sendInfra -> notificationCode.svcShared "Rabbit connection/consumer plumbing"
+
+    // ---- The decoupling seam: both sides conform to the versioned wire contracts ----
+    monolithCode.notificationPublishing -> wireContracts "publishes SendReleaseEmail/v1"
+    monolithCode.saga -> wireContracts "publishes SendWelcomeEmail/v1, consumes WelcomeEmailOutcome/v1"
+    notificationCode.sending -> wireContracts "consumes send commands, publishes WelcomeEmailOutcome/v1"
+}

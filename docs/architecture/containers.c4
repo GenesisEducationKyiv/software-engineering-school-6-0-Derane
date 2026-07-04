@@ -49,18 +49,21 @@ model {
                 sends via MailHog/SMTP, and publishes WelcomeEmailOutcome/v1
                 replies back to the monolith saga worker. Its php -S HTTP
                 surface also serves a synchronous welcome-email REST endpoint
-                (POST /internal/welcome-emails) alongside health/metrics.
+                (POST /internal/welcome-emails) alongside metrics and a
+                composite /health that probes BOTH its Postgres and RabbitMQ.
             "
             technology "PHP 8.2 CLI worker + php -S HTTP"
         }
 
         notificationGrpc = container "Notification gRPC Server" {
             description "
-                Second supervised process in the notification container
-                (forked by bin/start.sh). RoadRunner gRPC server on :9002
-                serving notification.welcome.v1.WelcomeEmailService
-                (unary SendWelcomeEmail). A synchronous transport twin of the
-                async welcome-email path; invokes the unchanged
+                Background RoadRunner gRPC process forked (unsupervised) by
+                bin/start.sh alongside the php -S HTTP surface and the AMQP
+                consumer — the container health probe covers :8081 only
+                (accepted risk, ADR-0004). Serves
+                notification.welcome.v1.WelcomeEmailService (unary
+                SendWelcomeEmail) on :9002; a synchronous transport twin of
+                the async welcome-email path invoking the unchanged
                 SendWelcomeEmailHandler. RoadRunner terminates gRPC, so no
                 ext-grpc is needed on this side.
             "
@@ -69,7 +72,9 @@ model {
 
         db = database "Monolith PostgreSQL" {
             description "
-                Stores subscriptions and tracked repositories.
+                Stores subscriptions (with the pending/confirmed/cancelled
+                status lifecycle), tracked repositories, enrollment_sagas saga
+                state, and the saga_metrics read-model.
                 The monolith no longer owns release_notifications.
             "
             technology "PostgreSQL 16"
@@ -77,8 +82,8 @@ model {
 
         notificationDb = database "Notification PostgreSQL" {
             description "
-                Stores release_notifications and notification_metrics
-                for the notification service.
+                Stores release_notifications, welcome_notifications and
+                notification_metrics for the notification service.
             "
             technology "PostgreSQL 16"
         }
@@ -93,8 +98,11 @@ model {
 
         rabbitmq = container "RabbitMQ" {
             description "
-                Durable notifications exchange + send-email queue
-                + dead-letter queue for failed messages.
+                Topic exchange notifications + fanout DLX notifications.dlx.
+                Two work/TTL-retry/DLQ queue triples —
+                notifications.send-email{,.retry,.dlq} and
+                notifications.welcome-email{,.retry,.dlq} — plus the plain
+                durable reply queue notifications.welcome-email-reply (no DLX).
             "
             technology "RabbitMQ 4"
         }
@@ -111,15 +119,15 @@ model {
     user -> httpApi "REST calls and HTML subscription form" "HTTPS, JSON, X-API-Key"
     user -> grpcApi "RPC calls" "gRPC"
 
-    httpApi -> db "Reads/writes subscriptions" "SQL/TCP"
+    httpApi -> db "Reads/writes subscriptions + tracked repos; starts enrollment sagas atomically" "SQL/TCP"
     httpApi -> redis "Reads/writes cached GitHub responses" "RESP"
     httpApi -> github "Validates owner/repo exists" "HTTPS"
 
-    grpcApi -> db "Reads/writes subscriptions" "SQL/TCP"
+    grpcApi -> db "Reads/writes subscriptions + tracked repos; starts enrollment sagas atomically" "SQL/TCP"
     grpcApi -> redis "Reads/writes cached GitHub responses" "RESP"
     grpcApi -> github "Validates owner/repo exists" "HTTPS"
 
-    scanner -> db "Reads subscriptions and scan progress" "SQL/TCP"
+    scanner -> db "Reads subscribers + scan candidates; advances last_seen_tag after a successful publish" "SQL/TCP"
     scanner -> redis "Reads/writes cached GitHub responses" "RESP"
     scanner -> github "Polls release metadata" "HTTPS"
     scanner -> rabbitmq "Publishes SendReleaseEmail/v1" "AMQP"

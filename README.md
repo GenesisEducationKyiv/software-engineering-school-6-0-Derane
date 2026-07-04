@@ -8,13 +8,14 @@ The runtime is now split into:
 - monolith HTTP API on Slim 4 / FrankenPHP
 - monolith gRPC API on RoadRunner
 - monolith scanner worker
-- notification microservice consuming `SendReleaseEmail/v1` from RabbitMQ
+- monolith saga worker (enrollment-saga orchestrator: outbox relay, outcome consumer, timeout sweeper)
+- notification microservice consuming `SendReleaseEmail/v1` and `SendWelcomeEmail/v1` from RabbitMQ (plus a sync REST `:8081` / gRPC `:9002` welcome-email surface)
 
 ## Stack
 
 - PHP 8.4 monolith, PHP 8.2 notification service
-- PostgreSQL for monolith data: `subscriptions`, `repositories`
-- PostgreSQL for notification data: `release_notifications`, `notification_metrics`
+- PostgreSQL for monolith data: `subscriptions`, `repositories`, `enrollment_sagas`, `saga_metrics`
+- PostgreSQL for notification data: `release_notifications`, `welcome_notifications`, `notification_metrics`
 - Redis for GitHub API caching
 - RabbitMQ for cross-service delivery
 - MailHog as the local SMTP sink
@@ -46,6 +47,7 @@ Main local endpoints:
 - `app` — monolith HTTP runtime
 - `grpc` — monolith gRPC runtime
 - `scanner` — monolith scan loop
+- `saga-worker` — monolith enrollment-saga loop (relay / outcome consumer / sweeper)
 - `postgres` — monolith database
 - `redis` — GitHub cache
 - `rabbitmq` — durable queue / DLQ transport
@@ -163,10 +165,10 @@ composer lint
 composer psalm
 ```
 
-`composer lint` runs PHPCS (PSR-12) and deptrac (architecture boundaries). Deptrac output includes
-`Uncovered 269 | Allowed 306` — "Uncovered" counts classes not matched by any layer regex (e.g.
-generated/vendor classes, test helpers outside a declared layer); this is not a violation. The gate
-passes as long as the Violations count remains 0.
+`composer lint` runs PHPCS (PSR-12) and deptrac (architecture boundaries). Deptrac's report also
+shows an `Uncovered` count — classes not matched by any layer regex (e.g. generated classes, test
+helpers outside a declared layer); this is not a violation and drifts as the Strangler migration
+progresses. The gate passes as long as the Violations count remains 0 (the baseline is empty).
 
 Notification service:
 
@@ -183,19 +185,24 @@ Public wire contracts are frozen unless explicitly changed:
 
 - REST `/api/subscriptions`
 - gRPC `proto/release_notifier.proto`
-- `SendReleaseEmail/v1` integration payload
+- `SendReleaseEmail/v1`, `SendWelcomeEmail/v1`, `WelcomeEmailOutcome/v1` integration payloads (`contracts/*.json`)
+- welcome-email gRPC `proto/notification/welcome/v1/welcome.proto` and REST `POST /internal/welcome-emails`
 
 The monolith publishes the RabbitMQ command after release detection; the
 notification service never calls back into the monolith database to send mail.
 
 ## Architecture Notes
 
-- Clean Architecture + pragmatic DDD layout under `src/<Context>/<Module>/<Layer>`
+- Clean Architecture + pragmatic DDD layout under `src/<Context>/<Module>/<Layer>`,
+  enforced by deptrac as architecture tests (`deptrac.yaml` + `apps/notification/deptrac.yaml`, empty baseline)
 - synchronous in-process PSR-14 domain events inside the monolith
 - asynchronous cross-service integration through RabbitMQ
-- no outbox: the scanner advances `last_seen_tag` only after publish succeeds
+- release flow is outbox-free: the scanner advances `last_seen_tag` only after publish succeeds;
+  the enrollment saga's welcome-email path uses an outbox-style relay over `enrollment_sagas`
+  (publisher confirms + timeout sweeper)
 - data ownership split:
-  - monolith DB: subscriptions and tracked repositories
-  - notification DB: delivery ledger and delivery metrics
+  - monolith DB: subscriptions, tracked repositories, saga state (`enrollment_sagas`, `saga_metrics`)
+  - notification DB: delivery + welcome ledgers and delivery metrics
 
-The LikeC4 model lives in [docs/architecture](docs/architecture/README.md). ADRs live in `docs/adr/`.
+The LikeC4 model lives in [docs/architecture](docs/architecture/README.md) — including the
+bounded-context map and Clean Architecture layer views (`layers.c4`). ADRs live in `docs/adr/`.
